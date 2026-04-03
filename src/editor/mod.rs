@@ -58,7 +58,11 @@ impl Editor {
     /// Returns `Err` only if the file cannot be read.
     pub fn open_tab(&mut self, path: PathBuf) -> anyhow::Result<()> {
         // Switch to an existing tab if the file is already open.
-        if let Some(idx) = self.tabs.iter().position(|t| t.path.as_deref() == Some(&path)) {
+        if let Some(idx) = self
+            .tabs
+            .iter()
+            .position(|t| t.path.as_deref() == Some(&path))
+        {
             self.active_idx = idx;
             return Ok(());
         }
@@ -104,7 +108,8 @@ impl Editor {
         if self.tabs.is_empty() {
             return;
         }
-        self.active_idx = self.active_idx
+        self.active_idx = self
+            .active_idx
             .checked_sub(1)
             .unwrap_or(self.tabs.len() - 1);
     }

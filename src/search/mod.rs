@@ -69,7 +69,8 @@ impl SearchState {
 
     pub fn prev_match(&mut self) {
         if !self.matches.is_empty() {
-            self.current_match = self.current_match
+            self.current_match = self
+                .current_match
                 .checked_sub(1)
                 .unwrap_or(self.matches.len() - 1);
         }
@@ -84,7 +85,8 @@ impl SearchState {
         if self.matches.is_empty() {
             return;
         }
-        let idx = self.matches
+        let idx = self
+            .matches
             .iter()
             .position(|r| r.end > byte_offset)
             .unwrap_or(0);
@@ -183,10 +185,14 @@ mod tests {
         s.query = "a".to_string();
         s.recompute_matches("a a a");
         assert_eq!(s.matches.len(), 3);
-        s.next_match(); assert_eq!(s.current_match, 1);
-        s.next_match(); assert_eq!(s.current_match, 2);
-        s.next_match(); assert_eq!(s.current_match, 0); // wraps
-        s.prev_match(); assert_eq!(s.current_match, 2); // wraps back
+        s.next_match();
+        assert_eq!(s.current_match, 1);
+        s.next_match();
+        assert_eq!(s.current_match, 2);
+        s.next_match();
+        assert_eq!(s.current_match, 0); // wraps
+        s.prev_match();
+        assert_eq!(s.current_match, 2); // wraps back
     }
 
     #[test]

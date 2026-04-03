@@ -56,7 +56,13 @@ pub fn render(sidebar: &SidebarState, focused: bool, area: Rect, buf: &mut TermB
         0
     };
 
-    for (screen_row, entry) in sidebar.entries.iter().skip(scroll).take(visible_rows).enumerate() {
+    for (screen_row, entry) in sidebar
+        .entries
+        .iter()
+        .skip(scroll)
+        .take(visible_rows)
+        .enumerate()
+    {
         let global_idx = scroll + screen_row;
         let y = list_area.y + screen_row as u16;
         let is_selected = global_idx == sidebar.selected;
@@ -80,7 +86,8 @@ pub fn render(sidebar: &SidebarState, focused: bool, area: Rect, buf: &mut TermB
         } else {
             "  "
         };
-        let name = entry.path
+        let name = entry
+            .path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("?");
@@ -110,10 +117,7 @@ fn path_header(root: &Path, max_cols: usize) -> String {
     }
 
     // 2. Try just the last component (directory name).
-    let name = root
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("/");
+    let name = root.file_name().and_then(|n| n.to_str()).unwrap_or("/");
     let short = format!(" {}", name);
     if short.chars().count() <= max_cols {
         return short;

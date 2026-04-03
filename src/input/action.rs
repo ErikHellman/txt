@@ -58,9 +58,15 @@ pub enum EditorAction {
 
     // ── Mouse ─────────────────────────────────────────────────────────
     /// Left-click: place cursor (absolute terminal coordinates).
-    MouseClick { col: u16, row: u16 },
+    MouseClick {
+        col: u16,
+        row: u16,
+    },
     /// Left-button drag: extend selection (absolute terminal coordinates).
-    MouseDrag { col: u16, row: u16 },
+    MouseDrag {
+        col: u16,
+        row: u16,
+    },
 
     // ── Search / replace ─────────────────────────────────────────────
     /// Open the find bar (Ctrl+F).

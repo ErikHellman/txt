@@ -12,7 +12,10 @@ use crate::{
     editor::Editor,
     editor::viewport::screen_pos_to_byte_offset,
     git::GitGutter,
-    input::{InputHandler, action::{Direction, EditorAction, ScrollDir}},
+    input::{
+        InputHandler,
+        action::{Direction, EditorAction, ScrollDir},
+    },
     search::SearchState,
     ui,
     ui::command_palette::CommandPaletteState,
@@ -218,7 +221,8 @@ impl SidebarState {
         }
         // Sort: dirs first, then files, both alphabetically.
         children.sort_by(|a, b| {
-            b.1.cmp(&a.1).then_with(|| a.0.file_name().cmp(&b.0.file_name()))
+            b.1.cmp(&a.1)
+                .then_with(|| a.0.file_name().cmp(&b.0.file_name()))
         });
         for (path, is_dir) in children {
             self.entries.push(TreeEntry {
@@ -281,7 +285,11 @@ impl SidebarState {
         let dir = self.entries[idx].path.clone();
         let depth = self.entries[idx].depth;
         self.entries[idx].expanded = true;
-        let mut tmp = Self { entries: Vec::new(), selected: 0, root: dir.clone() };
+        let mut tmp = Self {
+            entries: Vec::new(),
+            selected: 0,
+            root: dir.clone(),
+        };
         tmp.entries_from_dir(&dir, depth + 1, false);
         let insert_at = idx + 1;
         for (i, child) in tmp.entries.into_iter().enumerate() {
@@ -424,10 +432,14 @@ impl AppState {
                 EditorAction::InsertChar('y') | EditorAction::InsertChar('Y') => {
                     self.should_quit = true;
                 }
-                EditorAction::InsertChar('n') | EditorAction::InsertChar('N') | EditorAction::Quit => {
+                EditorAction::InsertChar('n')
+                | EditorAction::InsertChar('N')
+                | EditorAction::Quit => {
                     self.confirm_quit = false;
                 }
-                _ => { self.confirm_quit = false; }
+                _ => {
+                    self.confirm_quit = false;
+                }
             }
             return;
         }
@@ -455,12 +467,10 @@ impl AppState {
         }
 
         // Search / replace bar — captured input (navigation still falls through)
-        if self.search_state.is_some() {
-            if self.handle_search_input(action.clone()) {
-                return;
-            }
-            // Navigation actions fall through to normal dispatch below.
+        if self.search_state.is_some() && self.handle_search_input(action.clone()) {
+            return;
         }
+        // Navigation actions fall through to normal dispatch below.
 
         // Status-bar modal input modes
         if !self.input_mode.is_normal() {
@@ -481,12 +491,23 @@ impl AppState {
         match action {
             // ── AST-aware selection ───────────────────────────────────
             EditorAction::AstExpandSelection => {
-                let current = self.editor.active().buffer.cursors.primary().selection_bytes();
+                let current = self
+                    .editor
+                    .active()
+                    .buffer
+                    .cursors
+                    .primary()
+                    .selection_bytes();
                 let new_range = self.editor.active_mut().syntax.expand_selection(current);
                 if let Some(r) = new_range {
-                    self.editor.active_mut().buffer.move_cursor_to(r.start, false);
+                    self.editor
+                        .active_mut()
+                        .buffer
+                        .move_cursor_to(r.start, false);
                     self.editor.active_mut().buffer.move_cursor_to(r.end, true);
-                } else if self.editor.active().syntax.language == crate::syntax::language::Lang::Unknown {
+                } else if self.editor.active().syntax.language
+                    == crate::syntax::language::Lang::Unknown
+                {
                     self.close_tab();
                 }
             }
@@ -494,9 +515,15 @@ impl AppState {
                 let prev = self.editor.active_mut().syntax.contract_selection();
                 if let Some(r) = prev {
                     if r.is_empty() {
-                        self.editor.active_mut().buffer.move_cursor_to(r.start, false);
+                        self.editor
+                            .active_mut()
+                            .buffer
+                            .move_cursor_to(r.start, false);
                     } else {
-                        self.editor.active_mut().buffer.move_cursor_to(r.start, false);
+                        self.editor
+                            .active_mut()
+                            .buffer
+                            .move_cursor_to(r.start, false);
                         self.editor.active_mut().buffer.move_cursor_to(r.end, true);
                     }
                 }
@@ -510,7 +537,9 @@ impl AppState {
                     self.editor.active_mut().buffer.insert_char(c);
                 }
             }
-            EditorAction::InsertNewline => { self.editor.active_mut().buffer.insert_newline(); }
+            EditorAction::InsertNewline => {
+                self.editor.active_mut().buffer.insert_newline();
+            }
             EditorAction::InsertTab => {
                 let tab_size = self.config.tab_size;
                 if self.editor.active().buffer.cursors.is_multi() {
@@ -558,71 +587,110 @@ impl AppState {
             EditorAction::Cut => {
                 if let Some(text) = self.selected_text() {
                     self.clipboard.set(text);
-                    let range = self.editor.active().buffer.cursors.primary().selection_bytes();
-                    self.editor.active_mut().buffer.delete_range(range.start, range.end);
+                    let range = self
+                        .editor
+                        .active()
+                        .buffer
+                        .cursors
+                        .primary()
+                        .selection_bytes();
+                    self.editor
+                        .active_mut()
+                        .buffer
+                        .delete_range(range.start, range.end);
                 }
             }
             EditorAction::Paste(text) => {
-                let content = if text.is_empty() { self.clipboard.get() } else { text };
+                let content = if text.is_empty() {
+                    self.clipboard.get()
+                } else {
+                    text
+                };
                 if !content.is_empty() {
                     self.editor.active_mut().buffer.insert_str(&content);
                 }
             }
 
             // ── Cursor movement ───────────────────────────────────────
-            EditorAction::MoveCursor(dir) => {
-                match dir {
-                    Direction::Left  => self.editor.active_mut().buffer.move_cursor_left(false),
-                    Direction::Right => self.editor.active_mut().buffer.move_cursor_right(false),
-                    Direction::Up    => self.editor.active_mut().buffer.move_cursor_up(false),
-                    Direction::Down  => self.editor.active_mut().buffer.move_cursor_down(false),
-                }
+            EditorAction::MoveCursor(dir) => match dir {
+                Direction::Left => self.editor.active_mut().buffer.move_cursor_left(false),
+                Direction::Right => self.editor.active_mut().buffer.move_cursor_right(false),
+                Direction::Up => self.editor.active_mut().buffer.move_cursor_up(false),
+                Direction::Down => self.editor.active_mut().buffer.move_cursor_down(false),
+            },
+            EditorAction::MoveCursorWord(dir) => match dir {
+                Direction::Left => self.editor.active_mut().buffer.move_cursor_word_left(false),
+                Direction::Right => self
+                    .editor
+                    .active_mut()
+                    .buffer
+                    .move_cursor_word_right(false),
+                _ => {}
+            },
+            EditorAction::MoveCursorHome => self.editor.active_mut().buffer.move_cursor_home(false),
+            EditorAction::MoveCursorEnd => self.editor.active_mut().buffer.move_cursor_end(false),
+            EditorAction::MoveCursorFileStart => self
+                .editor
+                .active_mut()
+                .buffer
+                .move_cursor_file_start(false),
+            EditorAction::MoveCursorFileEnd => {
+                self.editor.active_mut().buffer.move_cursor_file_end(false)
             }
-            EditorAction::MoveCursorWord(dir) => {
-                match dir {
-                    Direction::Left  => self.editor.active_mut().buffer.move_cursor_word_left(false),
-                    Direction::Right => self.editor.active_mut().buffer.move_cursor_word_right(false),
-                    _ => {}
-                }
-            }
-            EditorAction::MoveCursorHome  => self.editor.active_mut().buffer.move_cursor_home(false),
-            EditorAction::MoveCursorEnd   => self.editor.active_mut().buffer.move_cursor_end(false),
-            EditorAction::MoveCursorFileStart => self.editor.active_mut().buffer.move_cursor_file_start(false),
-            EditorAction::MoveCursorFileEnd   => self.editor.active_mut().buffer.move_cursor_file_end(false),
             EditorAction::MoveCursorPage(dir) => {
                 let lines = text_h.max(1);
                 match dir {
-                    Direction::Up   => { for _ in 0..lines { self.editor.active_mut().buffer.move_cursor_up(false); } }
-                    Direction::Down => { for _ in 0..lines { self.editor.active_mut().buffer.move_cursor_down(false); } }
+                    Direction::Up => {
+                        for _ in 0..lines {
+                            self.editor.active_mut().buffer.move_cursor_up(false);
+                        }
+                    }
+                    Direction::Down => {
+                        for _ in 0..lines {
+                            self.editor.active_mut().buffer.move_cursor_down(false);
+                        }
+                    }
                     _ => {}
                 }
             }
 
             // ── Selection ─────────────────────────────────────────────
-            EditorAction::ExtendSelection(dir) => {
-                match dir {
-                    Direction::Left  => self.editor.active_mut().buffer.move_cursor_left(true),
-                    Direction::Right => self.editor.active_mut().buffer.move_cursor_right(true),
-                    Direction::Up    => self.editor.active_mut().buffer.move_cursor_up(true),
-                    Direction::Down  => self.editor.active_mut().buffer.move_cursor_down(true),
-                }
+            EditorAction::ExtendSelection(dir) => match dir {
+                Direction::Left => self.editor.active_mut().buffer.move_cursor_left(true),
+                Direction::Right => self.editor.active_mut().buffer.move_cursor_right(true),
+                Direction::Up => self.editor.active_mut().buffer.move_cursor_up(true),
+                Direction::Down => self.editor.active_mut().buffer.move_cursor_down(true),
+            },
+            EditorAction::ExtendSelectionWord(dir) => match dir {
+                Direction::Left => self.editor.active_mut().buffer.move_cursor_word_left(true),
+                Direction::Right => self.editor.active_mut().buffer.move_cursor_word_right(true),
+                _ => {}
+            },
+            EditorAction::ExtendSelectionHome => {
+                self.editor.active_mut().buffer.move_cursor_home(true)
             }
-            EditorAction::ExtendSelectionWord(dir) => {
-                match dir {
-                    Direction::Left  => self.editor.active_mut().buffer.move_cursor_word_left(true),
-                    Direction::Right => self.editor.active_mut().buffer.move_cursor_word_right(true),
-                    _ => {}
-                }
+            EditorAction::ExtendSelectionEnd => {
+                self.editor.active_mut().buffer.move_cursor_end(true)
             }
-            EditorAction::ExtendSelectionHome  => self.editor.active_mut().buffer.move_cursor_home(true),
-            EditorAction::ExtendSelectionEnd   => self.editor.active_mut().buffer.move_cursor_end(true),
-            EditorAction::ExtendSelectionFileStart => self.editor.active_mut().buffer.move_cursor_file_start(true),
-            EditorAction::ExtendSelectionFileEnd   => self.editor.active_mut().buffer.move_cursor_file_end(true),
+            EditorAction::ExtendSelectionFileStart => {
+                self.editor.active_mut().buffer.move_cursor_file_start(true)
+            }
+            EditorAction::ExtendSelectionFileEnd => {
+                self.editor.active_mut().buffer.move_cursor_file_end(true)
+            }
             EditorAction::ExtendSelectionPage(dir) => {
                 let lines = text_h.max(1);
                 match dir {
-                    Direction::Up   => { for _ in 0..lines { self.editor.active_mut().buffer.move_cursor_up(true); } }
-                    Direction::Down => { for _ in 0..lines { self.editor.active_mut().buffer.move_cursor_down(true); } }
+                    Direction::Up => {
+                        for _ in 0..lines {
+                            self.editor.active_mut().buffer.move_cursor_up(true);
+                        }
+                    }
+                    Direction::Down => {
+                        for _ in 0..lines {
+                            self.editor.active_mut().buffer.move_cursor_down(true);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -631,7 +699,10 @@ impl AppState {
             // ── Mouse ─────────────────────────────────────────────────
             EditorAction::MouseClick { col, row } => {
                 if let Some(offset) = self.screen_to_byte(col, row) {
-                    self.editor.active_mut().buffer.move_cursor_to(offset, false);
+                    self.editor
+                        .active_mut()
+                        .buffer
+                        .move_cursor_to(offset, false);
                 }
             }
             EditorAction::MouseDrag { col, row } => {
@@ -645,30 +716,68 @@ impl AppState {
                 let total_lines = self.editor.active().buffer.len_lines();
                 let vp = &mut self.editor.active_mut().viewport;
                 match dir {
-                    ScrollDir::Up   => { vp.scroll_row = vp.scroll_row.saturating_sub(SCROLL_LINES); }
-                    ScrollDir::Down => { vp.scroll_row = (vp.scroll_row + SCROLL_LINES).min(total_lines.saturating_sub(1)); }
-                    ScrollDir::Left  => { vp.scroll_col = vp.scroll_col.saturating_sub(4); }
-                    ScrollDir::Right => { vp.scroll_col += 4; }
-                    ScrollDir::HalfPageUp   => { vp.scroll_row = vp.scroll_row.saturating_sub(text_h / 2); }
-                    ScrollDir::HalfPageDown => { vp.scroll_row = (vp.scroll_row + text_h / 2).min(total_lines.saturating_sub(1)); }
+                    ScrollDir::Up => {
+                        vp.scroll_row = vp.scroll_row.saturating_sub(SCROLL_LINES);
+                    }
+                    ScrollDir::Down => {
+                        vp.scroll_row =
+                            (vp.scroll_row + SCROLL_LINES).min(total_lines.saturating_sub(1));
+                    }
+                    ScrollDir::Left => {
+                        vp.scroll_col = vp.scroll_col.saturating_sub(4);
+                    }
+                    ScrollDir::Right => {
+                        vp.scroll_col += 4;
+                    }
+                    ScrollDir::HalfPageUp => {
+                        vp.scroll_row = vp.scroll_row.saturating_sub(text_h / 2);
+                    }
+                    ScrollDir::HalfPageDown => {
+                        vp.scroll_row =
+                            (vp.scroll_row + text_h / 2).min(total_lines.saturating_sub(1));
+                    }
                 }
             }
 
             // ── Edit ops ──────────────────────────────────────────────
-            EditorAction::Undo  => { self.editor.active_mut().buffer.undo(); }
-            EditorAction::Redo  => { self.editor.active_mut().buffer.redo(); }
-            EditorAction::DuplicateLine => { self.editor.active_mut().buffer.duplicate_line(); }
-            EditorAction::MoveLineUp    => { self.editor.active_mut().buffer.move_line_up(); }
-            EditorAction::MoveLineDown  => { self.editor.active_mut().buffer.move_line_down(); }
+            EditorAction::Undo => {
+                self.editor.active_mut().buffer.undo();
+            }
+            EditorAction::Redo => {
+                self.editor.active_mut().buffer.redo();
+            }
+            EditorAction::DuplicateLine => {
+                self.editor.active_mut().buffer.duplicate_line();
+            }
+            EditorAction::MoveLineUp => {
+                self.editor.active_mut().buffer.move_line_up();
+            }
+            EditorAction::MoveLineDown => {
+                self.editor.active_mut().buffer.move_line_down();
+            }
 
             // ── File / tab management ─────────────────────────────────
-            EditorAction::NewFile  => { self.editor.new_tab(); }
-            EditorAction::NewTab   => { self.editor.new_tab(); }
-            EditorAction::CloseTab => { self.close_tab(); }
-            EditorAction::NextTab  => { self.editor.next_tab(); }
-            EditorAction::PrevTab  => { self.editor.prev_tab(); }
-            EditorAction::GoToTab(n) => { self.editor.go_to_tab(n); }
-            EditorAction::SaveFile => { self.save_active(); }
+            EditorAction::NewFile => {
+                self.editor.new_tab();
+            }
+            EditorAction::NewTab => {
+                self.editor.new_tab();
+            }
+            EditorAction::CloseTab => {
+                self.close_tab();
+            }
+            EditorAction::NextTab => {
+                self.editor.next_tab();
+            }
+            EditorAction::PrevTab => {
+                self.editor.prev_tab();
+            }
+            EditorAction::GoToTab(n) => {
+                self.editor.go_to_tab(n);
+            }
+            EditorAction::SaveFile => {
+                self.save_active();
+            }
             EditorAction::SaveFileAs => {
                 self.input_mode = InputMode::SaveAsPath(String::new());
             }
@@ -684,8 +793,7 @@ impl AppState {
             EditorAction::ToggleSidebar => {
                 if self.sidebar.is_none() {
                     // Restore saved state or create fresh, then expand to current file.
-                    let mut sb = self.saved_sidebar.take()
-                        .unwrap_or_else(SidebarState::new);
+                    let mut sb = self.saved_sidebar.take().unwrap_or_else(SidebarState::new);
                     if let Some(path) = self.editor.active().path.clone() {
                         sb.expand_to_path(&path);
                     }
@@ -699,7 +807,9 @@ impl AppState {
             }
             EditorAction::ToggleHelp => {
                 self.show_help = !self.show_help;
-                if self.show_help { self.help_scroll = 0; }
+                if self.show_help {
+                    self.help_scroll = 0;
+                }
             }
             EditorAction::ToggleLineComment => {
                 self.toggle_line_comment();
@@ -720,7 +830,9 @@ impl AppState {
                     (top, dcol)
                 };
                 if top_line > 0 {
-                    self.editor.active_mut().buffer
+                    self.editor
+                        .active_mut()
+                        .buffer
                         .add_cursor_at_display_col(top_line - 1, display_col);
                 }
             }
@@ -733,7 +845,9 @@ impl AppState {
                 };
                 let total_lines = self.editor.active().buffer.len_lines();
                 if bottom_line + 1 < total_lines {
-                    self.editor.active_mut().buffer
+                    self.editor
+                        .active_mut()
+                        .buffer
                         .add_cursor_at_display_col(bottom_line + 1, display_col);
                 }
             }
@@ -742,7 +856,8 @@ impl AppState {
                 self.command_palette = Some(CommandPaletteState::new());
             }
             EditorAction::OpenBufferSwitcher => {
-                self.fuzzy_picker = Some(FuzzyPickerState::from_buffers(self.editor.buffer_names()));
+                self.fuzzy_picker =
+                    Some(FuzzyPickerState::from_buffers(self.editor.buffer_names()));
             }
             EditorAction::OpenRecentFiles => {
                 let files = load_recent_files();
@@ -786,7 +901,9 @@ impl AppState {
                     self.should_quit = true;
                 }
             }
-            EditorAction::ForceQuit => { self.should_quit = true; }
+            EditorAction::ForceQuit => {
+                self.should_quit = true;
+            }
             EditorAction::Unhandled => {}
         }
 
@@ -803,8 +920,12 @@ impl AppState {
         match action {
             EditorAction::InsertChar(c) => {
                 match &mut self.input_mode {
-                    InputMode::JumpToLine(s) if c.is_ascii_digit() => { s.push(c); }
-                    InputMode::OpenFilePath(s) | InputMode::SaveAsPath(s) => { s.push(c); }
+                    InputMode::JumpToLine(s) if c.is_ascii_digit() => {
+                        s.push(c);
+                    }
+                    InputMode::OpenFilePath(s) | InputMode::SaveAsPath(s) => {
+                        s.push(c);
+                    }
                     _ => {}
                 }
                 return;
@@ -813,7 +934,9 @@ impl AppState {
                 match &mut self.input_mode {
                     InputMode::JumpToLine(s)
                     | InputMode::OpenFilePath(s)
-                    | InputMode::SaveAsPath(s) => { s.pop(); }
+                    | InputMode::SaveAsPath(s) => {
+                        s.pop();
+                    }
                     InputMode::Normal => {}
                 }
                 return;
@@ -889,7 +1012,9 @@ impl AppState {
             }
             EditorAction::InsertNewline => {
                 // Extract path before closing picker to avoid borrow conflict with self.editor.
-                let path = self.fuzzy_picker.as_ref()
+                let path = self
+                    .fuzzy_picker
+                    .as_ref()
                     .and_then(|p| p.selected_path().cloned());
                 self.fuzzy_picker = None;
                 if let Some(path) = path {
@@ -927,37 +1052,57 @@ impl AppState {
 
         match action {
             EditorAction::InsertChar(c) => {
-                let focus_replace = self.search_state.as_ref()
+                let focus_replace = self
+                    .search_state
+                    .as_ref()
                     .map(|s| s.focus_replace)
                     .unwrap_or(false);
                 if focus_replace {
-                    if let Some(ss) = &mut self.search_state { ss.replace_text.push(c); }
+                    if let Some(ss) = &mut self.search_state {
+                        ss.replace_text.push(c);
+                    }
                 } else {
-                    if let Some(ss) = &mut self.search_state { ss.query.push(c); }
+                    if let Some(ss) = &mut self.search_state {
+                        ss.query.push(c);
+                    }
                     self.recompute_search_and_jump();
                 }
             }
             EditorAction::DeleteBackward => {
-                let focus_replace = self.search_state.as_ref()
+                let focus_replace = self
+                    .search_state
+                    .as_ref()
                     .map(|s| s.focus_replace)
                     .unwrap_or(false);
                 if focus_replace {
-                    if let Some(ss) = &mut self.search_state { ss.replace_text.pop(); }
+                    if let Some(ss) = &mut self.search_state {
+                        ss.replace_text.pop();
+                    }
                 } else {
-                    if let Some(ss) = &mut self.search_state { ss.query.pop(); }
+                    if let Some(ss) = &mut self.search_state {
+                        ss.query.pop();
+                    }
                     self.recompute_search_and_jump();
                 }
             }
             EditorAction::InsertNewline => {
-                let focus_replace = self.search_state.as_ref()
+                let focus_replace = self
+                    .search_state
+                    .as_ref()
                     .map(|s| s.focus_replace && s.show_replace)
                     .unwrap_or(false);
-                if focus_replace { self.replace_current(); } else { self.search_next(); }
+                if focus_replace {
+                    self.replace_current();
+                } else {
+                    self.search_next();
+                }
             }
             EditorAction::InsertTab => {
                 // Toggle focus between query and replace fields.
-                if let Some(ss) = &mut self.search_state {
-                    if ss.show_replace { ss.focus_replace = !ss.focus_replace; }
+                if let Some(ss) = &mut self.search_state
+                    && ss.show_replace
+                {
+                    ss.focus_replace = !ss.focus_replace;
                 }
             }
             EditorAction::SearchNext => self.search_next(),
@@ -965,11 +1110,15 @@ impl AppState {
             EditorAction::SearchReplaceOne => self.replace_current(),
             EditorAction::SearchReplaceAll => self.replace_all(),
             EditorAction::SearchToggleRegex => {
-                if let Some(ss) = &mut self.search_state { ss.is_regex = !ss.is_regex; }
+                if let Some(ss) = &mut self.search_state {
+                    ss.is_regex = !ss.is_regex;
+                }
                 self.recompute_search_and_jump();
             }
             EditorAction::SearchToggleCaseSensitive => {
-                if let Some(ss) = &mut self.search_state { ss.case_sensitive = !ss.case_sensitive; }
+                if let Some(ss) = &mut self.search_state {
+                    ss.case_sensitive = !ss.case_sensitive;
+                }
                 self.recompute_search_and_jump();
             }
             EditorAction::OpenReplace => {
@@ -983,7 +1132,9 @@ impl AppState {
             }
             EditorAction::ToggleHelp => {
                 self.show_help = !self.show_help;
-                if self.show_help { self.help_scroll = 0; }
+                if self.show_help {
+                    self.help_scroll = 0;
+                }
             }
             _ => {}
         }
@@ -993,7 +1144,9 @@ impl AppState {
     // ── Search helpers ────────────────────────────────────────────────────────
 
     fn recompute_search_and_jump(&mut self) {
-        if self.search_state.is_none() { return; }
+        if self.search_state.is_none() {
+            return;
+        }
         let text = self.editor.active().buffer.to_string();
         let cursor_offset = self.editor.active().buffer.cursors.primary().byte_offset;
         if let Some(ss) = &mut self.search_state {
@@ -1004,26 +1157,35 @@ impl AppState {
     }
 
     fn search_next(&mut self) {
-        if let Some(ss) = &mut self.search_state { ss.next_match(); }
+        if let Some(ss) = &mut self.search_state {
+            ss.next_match();
+        }
         self.select_current_match();
     }
 
     fn search_prev(&mut self) {
-        if let Some(ss) = &mut self.search_state { ss.prev_match(); }
+        if let Some(ss) = &mut self.search_state {
+            ss.prev_match();
+        }
         self.select_current_match();
     }
 
     fn select_current_match(&mut self) {
         let range = self.search_state.as_ref().and_then(|s| s.current_range());
         if let Some(r) = range {
-            self.editor.active_mut().buffer.move_cursor_to(r.start, false);
+            self.editor
+                .active_mut()
+                .buffer
+                .move_cursor_to(r.start, false);
             self.editor.active_mut().buffer.move_cursor_to(r.end, true);
         }
     }
 
     fn replace_current(&mut self) {
         let range = self.search_state.as_ref().and_then(|s| s.current_range());
-        let replace_text = self.search_state.as_ref()
+        let replace_text = self
+            .search_state
+            .as_ref()
             .map(|s| s.replace_text.clone())
             .unwrap_or_default();
         if let Some(r) = range {
@@ -1038,13 +1200,19 @@ impl AppState {
     }
 
     fn replace_all(&mut self) {
-        let ranges: Vec<_> = self.search_state.as_ref()
+        let ranges: Vec<_> = self
+            .search_state
+            .as_ref()
             .map(|s| s.matches.clone())
             .unwrap_or_default();
-        let replace_text = self.search_state.as_ref()
+        let replace_text = self
+            .search_state
+            .as_ref()
             .map(|s| s.replace_text.clone())
             .unwrap_or_default();
-        if ranges.is_empty() { return; }
+        if ranges.is_empty() {
+            return;
+        }
 
         let buf = &mut self.editor.active_mut().buffer;
         buf.begin_batch();
@@ -1131,7 +1299,9 @@ impl AppState {
             }
             EditorAction::InsertNewline => {
                 // Enter: open file or expand/collapse directory.
-                let selected_path = self.sidebar.as_ref()
+                let selected_path = self
+                    .sidebar
+                    .as_ref()
                     .and_then(|sb| sb.selected_path().cloned());
                 if let Some(path) = selected_path {
                     if path.is_dir() {
@@ -1187,14 +1357,20 @@ impl AppState {
                 }
             }
             EditorAction::MoveCursor(Direction::Up) => {
-                if let Some(p) = &mut self.command_palette { p.move_up(); }
+                if let Some(p) = &mut self.command_palette {
+                    p.move_up();
+                }
             }
             EditorAction::MoveCursor(Direction::Down) => {
-                if let Some(p) = &mut self.command_palette { p.move_down(); }
+                if let Some(p) = &mut self.command_palette {
+                    p.move_down();
+                }
             }
             EditorAction::InsertNewline => {
                 // Execute the selected command.
-                let dispatched = self.command_palette.as_ref()
+                let dispatched = self
+                    .command_palette
+                    .as_ref()
                     .and_then(|p| p.execute_selected());
                 self.command_palette = None;
                 if let Some(action) = dispatched {
@@ -1226,7 +1402,9 @@ impl AppState {
         let already_commented = trimmed.starts_with(prefix);
 
         let buf = &mut self.editor.active_mut().buffer;
-        let line_start = buf.rope().char_to_byte(buf.rope().line_to_char(cursor_line));
+        let line_start = buf
+            .rope()
+            .char_to_byte(buf.rope().line_to_char(cursor_line));
 
         buf.begin_batch();
         if already_commented {
@@ -1288,10 +1466,8 @@ impl AppState {
         if self.confirm_reload {
             return; // prompt already showing — don't re-trigger
         }
-        if let Some(watcher) = &self.file_watcher {
-            if watcher.poll() {
-                self.confirm_reload = true;
-            }
+        if let Some(watcher) = &self.file_watcher && watcher.poll() {
+            self.confirm_reload = true;
         }
     }
 
@@ -1322,14 +1498,25 @@ impl AppState {
         }
         let range = cursor.selection_bytes();
         let start = self.editor.active().buffer.rope().byte_to_char(range.start);
-        let end   = self.editor.active().buffer.rope().byte_to_char(range.end);
-        Some(self.editor.active().buffer.rope().slice(start..end).to_string())
+        let end = self.editor.active().buffer.rope().byte_to_char(range.end);
+        Some(
+            self.editor
+                .active()
+                .buffer
+                .rope()
+                .slice(start..end)
+                .to_string(),
+        )
     }
 
     fn screen_to_byte(&self, col: u16, row: u16) -> Option<usize> {
         let editor_area_y: u16 = if self.editor.tab_count() > 1 { 1 } else { 0 };
         // If sidebar is open the editor area starts further right; don't click into sidebar.
-        let sidebar_offset: u16 = if self.sidebar.is_some() { SIDEBAR_WIDTH + 1 } else { 0 };
+        let sidebar_offset: u16 = if self.sidebar.is_some() {
+            SIDEBAR_WIDTH + 1
+        } else {
+            0
+        };
         if self.sidebar.is_some() && col < sidebar_offset {
             return None;
         }
@@ -1355,7 +1542,9 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        Self { input: InputHandler::new() }
+        Self {
+            input: InputHandler::new(),
+        }
     }
 
     pub fn run(
@@ -1379,11 +1568,17 @@ impl App {
 
             // Compute text area for scroll calculations.
             let tab_bar_rows: u16 = if state.editor.tab_count() > 1 { 1 } else { 0 };
-            let search_rows: u16 = state.search_state.as_ref()
+            let search_rows: u16 = state
+                .search_state
+                .as_ref()
                 .map(|s| s.bar_height())
                 .unwrap_or(0);
             let text_h = term_height.saturating_sub(1 + tab_bar_rows + search_rows) as usize;
-            let sidebar_w: u16 = if state.sidebar.is_some() { SIDEBAR_WIDTH + 1 } else { 0 };
+            let sidebar_w: u16 = if state.sidebar.is_some() {
+                SIDEBAR_WIDTH + 1
+            } else {
+                0
+            };
             let gutter = gutter_width(state.editor.active().buffer.len_lines());
             let text_w = term_width.saturating_sub(gutter + 1 + sidebar_w) as usize;
             state.editor.active_mut().scroll_to_cursor(text_h, text_w);

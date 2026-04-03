@@ -34,7 +34,11 @@ pub fn render(editor: &Editor, area: Rect, buf: &mut TermBuffer) {
             break;
         }
         let is_active = i == editor.active_idx;
-        let style = if is_active { active_style } else { inactive_style };
+        let style = if is_active {
+            active_style
+        } else {
+            inactive_style
+        };
         let dot = if tab.buffer.modified { "•" } else { " " };
         let name = tab.display_name();
         let label = format!(" {}{} ", dot, name);

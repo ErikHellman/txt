@@ -48,9 +48,7 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
 
     let handle = state.editor.active();
 
-    let bar_style = Style::default()
-        .bg(Color::Rgb(40, 40, 60))
-        .fg(Color::White);
+    let bar_style = Style::default().bg(Color::Rgb(40, 40, 60)).fg(Color::White);
     let name_style = Style::default()
         .bg(Color::Rgb(40, 40, 60))
         .fg(Color::White)
@@ -83,7 +81,17 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
     let wrap_flag = if handle.viewport.word_wrap { " WW" } else { "" };
 
     // Right side: word-wrap flag + language + position + encoding
-    let right = format!("{}{}  {}{}", wrap_flag, if !lang.is_empty() { format!(" {}", lang) } else { String::new() }, pos, enc);
+    let right = format!(
+        "{}{}  {}{}",
+        wrap_flag,
+        if !lang.is_empty() {
+            format!(" {}", lang)
+        } else {
+            String::new()
+        },
+        pos,
+        enc
+    );
     let width = area.width as usize;
 
     // Render right side first (rightmost block)

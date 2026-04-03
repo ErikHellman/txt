@@ -18,18 +18,21 @@ impl FileWatcher {
     pub fn new(path: &Path) -> Option<Self> {
         let (tx, rx) = channel::<bool>();
         let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
-            if let Ok(event) = res {
-                if matches!(
+            if let Ok(event) = res
+                && matches!(
                     event.kind,
                     EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
-                ) {
-                    let _ = tx.send(true);
-                }
+                )
+            {
+                let _ = tx.send(true);
             }
         })
         .ok()?;
         watcher.watch(path, RecursiveMode::NonRecursive).ok()?;
-        Some(Self { _watcher: watcher, rx })
+        Some(Self {
+            _watcher: watcher,
+            rx,
+        })
     }
 
     /// Non-blocking check: returns `true` if at least one modification event has

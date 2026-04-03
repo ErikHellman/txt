@@ -1,8 +1,8 @@
-/// Undo/redo history for the text buffer.
-///
-/// Uses the Command pattern: every edit is recorded as an `EditCommand` that
-/// knows how to undo itself. A `BatchGuard` groups multiple commands into one
-/// logical undo step (e.g., Replace All).
+//! Undo/redo history for the text buffer.
+//!
+//! Uses the Command pattern: every edit is recorded as an `EditCommand` that
+//! knows how to undo itself. A `BatchGuard` groups multiple commands into one
+//! logical undo step (e.g., Replace All).
 
 /// A single undoable/redoable text edit.
 #[derive(Debug, Clone)]
@@ -10,9 +10,18 @@ pub enum EditCommand {
     /// Inserted `text` at byte offset `at`.
     Insert { at: usize, text: String },
     /// Deleted the text in `[start, end)`. `deleted` is the removed content.
-    Delete { start: usize, end: usize, deleted: String },
+    Delete {
+        start: usize,
+        end: usize,
+        deleted: String,
+    },
     /// Replaced `[start, end)` with `new_text`. `old_text` is what was there before.
-    Replace { start: usize, end: usize, old_text: String, new_text: String },
+    Replace {
+        start: usize,
+        end: usize,
+        old_text: String,
+        new_text: String,
+    },
 }
 
 impl EditCommand {
@@ -22,7 +31,9 @@ impl EditCommand {
         match self {
             EditCommand::Insert { at, text } => at + text.len(),
             EditCommand::Delete { start, .. } => *start,
-            EditCommand::Replace { start, new_text, .. } => start + new_text.len(),
+            EditCommand::Replace {
+                start, new_text, ..
+            } => start + new_text.len(),
         }
     }
 
@@ -32,7 +43,9 @@ impl EditCommand {
         match self {
             EditCommand::Insert { at, .. } => *at,
             EditCommand::Delete { start, deleted, .. } => start + deleted.len(),
-            EditCommand::Replace { start, old_text, .. } => start + old_text.len(),
+            EditCommand::Replace {
+                start, old_text, ..
+            } => start + old_text.len(),
         }
     }
 }
@@ -86,10 +99,10 @@ impl UndoStack {
     /// Close the current batch and push it as a single undo entry.
     /// If the batch is empty, nothing is pushed.
     pub fn commit_batch(&mut self) {
-        if let Some(batch) = self.current_batch.take() {
-            if !batch.is_empty() {
-                self.undo_stack.push(UndoEntry::Batch(batch));
-            }
+        if let Some(batch) = self.current_batch.take()
+            && !batch.is_empty()
+        {
+            self.undo_stack.push(UndoEntry::Batch(batch));
         }
     }
 
@@ -190,11 +203,18 @@ mod tests {
     use super::*;
 
     fn insert(at: usize, text: &str) -> EditCommand {
-        EditCommand::Insert { at, text: text.to_string() }
+        EditCommand::Insert {
+            at,
+            text: text.to_string(),
+        }
     }
 
     fn delete(start: usize, end: usize, deleted: &str) -> EditCommand {
-        EditCommand::Delete { start, end, deleted: deleted.to_string() }
+        EditCommand::Delete {
+            start,
+            end,
+            deleted: deleted.to_string(),
+        }
     }
 
     #[test]

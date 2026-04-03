@@ -108,10 +108,7 @@ fn save_recent_files(files: &[PathBuf]) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let strings: Vec<&str> = files
-        .iter()
-        .filter_map(|p| p.to_str())
-        .collect();
+    let strings: Vec<&str> = files.iter().filter_map(|p| p.to_str()).collect();
     if let Ok(json) = serde_json::to_string(&strings) {
         let _ = std::fs::write(&path, json);
     }

@@ -66,10 +66,6 @@ impl Buffer {
         self.rope.len_bytes() == 0
     }
 
-    pub fn to_string(&self) -> String {
-        self.rope.to_string()
-    }
-
     /// Retrieve a single line as a `String` (without trailing newline).
     pub fn line_str(&self, line: usize) -> String {
         if line >= self.rope.len_lines() {
@@ -77,7 +73,7 @@ impl Buffer {
         }
         let slice = self.rope.line(line);
         let s: String = slice.chars().collect();
-        s.trim_end_matches(|c| c == '\r' || c == '\n').to_string()
+        s.trim_end_matches(['\r', '\n']).to_string()
     }
 
     // ------------------------------------------------------------------ //
@@ -131,7 +127,12 @@ impl Buffer {
                 rope_edit::insert(&mut self.rope, *start, deleted);
                 start + deleted.len()
             }
-            EditCommand::Replace { start, end: _, old_text, new_text } => {
+            EditCommand::Replace {
+                start,
+                end: _,
+                old_text,
+                new_text,
+            } => {
                 rope_edit::delete(&mut self.rope, *start, start + new_text.len());
                 rope_edit::insert(&mut self.rope, *start, old_text);
                 start + old_text.len()
@@ -150,7 +151,12 @@ impl Buffer {
                 rope_edit::delete(&mut self.rope, *start, *end);
                 *start
             }
-            EditCommand::Replace { start, end, new_text, .. } => {
+            EditCommand::Replace {
+                start,
+                end,
+                new_text,
+                ..
+            } => {
                 rope_edit::delete(&mut self.rope, *start, *end);
                 rope_edit::insert(&mut self.rope, *start, new_text);
                 start + new_text.len()
@@ -189,7 +195,10 @@ impl Buffer {
         };
 
         rope_edit::insert(&mut self.rope, at, text);
-        self.history.record(EditCommand::Insert { at, text: text.to_string() });
+        self.history.record(EditCommand::Insert {
+            at,
+            text: text.to_string(),
+        });
 
         // Move cursor to after the inserted text
         let new_offset = at + text.len();
@@ -237,7 +246,11 @@ impl Buffer {
             return;
         }
         let deleted = rope_edit::delete(&mut self.rope, start, end);
-        self.history.record(EditCommand::Delete { start, end, deleted });
+        self.history.record(EditCommand::Delete {
+            start,
+            end,
+            deleted,
+        });
         *self.cursors.primary_mut() = Cursor::from_byte_offset(&self.rope, start);
         self.cursors.primary_mut().selection = None;
         self.modified = true;
@@ -270,11 +283,14 @@ impl Buffer {
         let line = cursor.line;
         let line_start = self.line_start_byte(line);
         let line_end = self.line_end_byte_inclusive(line);
-        let text: String = self.rope.slice(
-            self.rope.byte_to_char(line_start)..self.rope.byte_to_char(line_end),
-        ).chars().collect();
+        let text: String = self
+            .rope
+            .slice(self.rope.byte_to_char(line_start)..self.rope.byte_to_char(line_end))
+            .chars()
+            .collect();
         rope_edit::insert(&mut self.rope, line_end, &text);
-        self.history.record(EditCommand::Insert { at: line_end, text });
+        self.history
+            .record(EditCommand::Insert { at: line_end, text });
         self.modified = true;
     }
 
@@ -313,7 +329,9 @@ impl Buffer {
 
     /// Move the primary cursor, optionally extending the selection.
     pub fn move_cursor_to(&mut self, byte_offset: usize, extend: bool) {
-        self.cursors.primary_mut().move_to(&self.rope, byte_offset, extend);
+        self.cursors
+            .primary_mut()
+            .move_to(&self.rope, byte_offset, extend);
     }
 
     pub fn move_cursor_left(&mut self, extend: bool) {
@@ -339,7 +357,9 @@ impl Buffer {
         let line_len = line_byte_len_no_newline(&self.rope, target_line);
         let col = preferred.min(line_len);
         let new_offset = self.rope.char_to_byte(self.rope.line_to_char(target_line)) + col;
-        self.cursors.primary_mut().move_to(&self.rope, new_offset, extend);
+        self.cursors
+            .primary_mut()
+            .move_to(&self.rope, new_offset, extend);
         // Restore preferred col after move (move_to recalculates it from display)
         self.cursors.primary_mut().preferred_col = preferred;
     }
@@ -356,7 +376,9 @@ impl Buffer {
         let line_len = line_byte_len_no_newline(&self.rope, target_line);
         let col = preferred.min(line_len);
         let new_offset = self.rope.char_to_byte(self.rope.line_to_char(target_line)) + col;
-        self.cursors.primary_mut().move_to(&self.rope, new_offset, extend);
+        self.cursors
+            .primary_mut()
+            .move_to(&self.rope, new_offset, extend);
         self.cursors.primary_mut().preferred_col = preferred;
     }
 
@@ -464,22 +486,36 @@ impl Buffer {
     fn multi_insert_str_impl(&mut self, text: &str) {
         struct Op {
             cursor_idx: usize,
-            ins_pt: usize,   // byte offset where the insert will happen
-            del_end: usize,  // == ins_pt unless there's a selection to delete first
+            ins_pt: usize,  // byte offset where the insert will happen
+            del_end: usize, // == ins_pt unless there's a selection to delete first
         }
 
         let primary_cursor_idx = self.cursors.primary_idx();
         let n = self.cursors.len();
 
         // Collect all op data while `self.cursors` is immutably borrowed.
-        let mut ops: Vec<Op> = self.cursors.cursors().iter().enumerate().map(|(i, c)| {
-            if c.has_selection() {
-                let r = c.selection_bytes();
-                Op { cursor_idx: i, ins_pt: r.start, del_end: r.end }
-            } else {
-                Op { cursor_idx: i, ins_pt: c.byte_offset, del_end: c.byte_offset }
-            }
-        }).collect();
+        let mut ops: Vec<Op> = self
+            .cursors
+            .cursors()
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                if c.has_selection() {
+                    let r = c.selection_bytes();
+                    Op {
+                        cursor_idx: i,
+                        ins_pt: r.start,
+                        del_end: r.end,
+                    }
+                } else {
+                    Op {
+                        cursor_idx: i,
+                        ins_pt: c.byte_offset,
+                        del_end: c.byte_offset,
+                    }
+                }
+            })
+            .collect();
 
         // Process descending so higher-offset inserts don't shift lower positions.
         ops.sort_by(|a, b| b.ins_pt.cmp(&a.ins_pt));
@@ -507,10 +543,12 @@ impl Buffer {
         self.history.commit_batch();
 
         let primary_new = new_positions[primary_cursor_idx];
-        let new_cursors: Vec<Cursor> = new_positions.iter()
+        let new_cursors: Vec<Cursor> = new_positions
+            .iter()
             .map(|&off| Cursor::from_byte_offset(&self.rope, off))
             .collect();
-        let primary_idx = new_cursors.iter()
+        let primary_idx = new_cursors
+            .iter()
             .position(|c| c.byte_offset == primary_new)
             .unwrap_or(0);
         self.cursors = MultiCursor::from_cursors_with_primary(new_cursors, primary_idx);
@@ -535,19 +573,31 @@ impl Buffer {
 
         let primary_cursor_idx = self.cursors.primary_idx();
 
-        let mut ops: Vec<DelOp> = self.cursors.cursors().iter().enumerate()
+        let mut ops: Vec<DelOp> = self
+            .cursors
+            .cursors()
+            .iter()
+            .enumerate()
             .filter_map(|(i, c)| {
                 if c.has_selection() {
                     let r = c.selection_bytes();
                     if r.start < r.end {
-                        Some(DelOp { cursor_idx: i, del_start: r.start, del_end: r.end })
+                        Some(DelOp {
+                            cursor_idx: i,
+                            del_start: r.start,
+                            del_end: r.end,
+                        })
                     } else {
                         None
                     }
                 } else {
                     let prev = rope_edit::prev_grapheme_boundary(&self.rope, c.byte_offset);
                     if prev < c.byte_offset {
-                        Some(DelOp { cursor_idx: i, del_start: prev, del_end: c.byte_offset })
+                        Some(DelOp {
+                            cursor_idx: i,
+                            del_start: prev,
+                            del_end: c.byte_offset,
+                        })
                     } else {
                         None
                     }
@@ -563,7 +613,10 @@ impl Buffer {
         ops.sort_by(|a, b| b.del_start.cmp(&a.del_start));
 
         // Start with current positions (unchanged for cursors with no op).
-        let mut new_positions: Vec<usize> = self.cursors.cursors().iter()
+        let mut new_positions: Vec<usize> = self
+            .cursors
+            .cursors()
+            .iter()
             .map(|c| c.byte_offset)
             .collect();
 
@@ -580,10 +633,12 @@ impl Buffer {
         self.history.commit_batch();
 
         let primary_new = new_positions[primary_cursor_idx];
-        let new_cursors: Vec<Cursor> = new_positions.iter()
+        let new_cursors: Vec<Cursor> = new_positions
+            .iter()
             .map(|&off| Cursor::from_byte_offset(&self.rope, off))
             .collect();
-        let primary_idx = new_cursors.iter()
+        let primary_idx = new_cursors
+            .iter()
             .position(|c| c.byte_offset == primary_new)
             .unwrap_or(0);
         self.cursors = MultiCursor::from_cursors_with_primary(new_cursors, primary_idx);
@@ -608,19 +663,31 @@ impl Buffer {
 
         let primary_cursor_idx = self.cursors.primary_idx();
 
-        let mut ops: Vec<DelOp> = self.cursors.cursors().iter().enumerate()
+        let mut ops: Vec<DelOp> = self
+            .cursors
+            .cursors()
+            .iter()
+            .enumerate()
             .filter_map(|(i, c)| {
                 if c.has_selection() {
                     let r = c.selection_bytes();
                     if r.start < r.end {
-                        Some(DelOp { cursor_idx: i, del_start: r.start, del_end: r.end })
+                        Some(DelOp {
+                            cursor_idx: i,
+                            del_start: r.start,
+                            del_end: r.end,
+                        })
                     } else {
                         None
                     }
                 } else {
                     let next = rope_edit::next_grapheme_boundary(&self.rope, c.byte_offset);
                     if next > c.byte_offset {
-                        Some(DelOp { cursor_idx: i, del_start: c.byte_offset, del_end: next })
+                        Some(DelOp {
+                            cursor_idx: i,
+                            del_start: c.byte_offset,
+                            del_end: next,
+                        })
                     } else {
                         None
                     }
@@ -634,7 +701,10 @@ impl Buffer {
 
         ops.sort_by(|a, b| b.del_start.cmp(&a.del_start));
 
-        let mut new_positions: Vec<usize> = self.cursors.cursors().iter()
+        let mut new_positions: Vec<usize> = self
+            .cursors
+            .cursors()
+            .iter()
             .map(|c| c.byte_offset)
             .collect();
 
@@ -651,10 +721,12 @@ impl Buffer {
         self.history.commit_batch();
 
         let primary_new = new_positions[primary_cursor_idx];
-        let new_cursors: Vec<Cursor> = new_positions.iter()
+        let new_cursors: Vec<Cursor> = new_positions
+            .iter()
             .map(|&off| Cursor::from_byte_offset(&self.rope, off))
             .collect();
-        let primary_idx = new_cursors.iter()
+        let primary_idx = new_cursors
+            .iter()
             .position(|c| c.byte_offset == primary_new)
             .unwrap_or(0);
         self.cursors = MultiCursor::from_cursors_with_primary(new_cursors, primary_idx);
@@ -736,6 +808,12 @@ impl Buffer {
             old_text: old_a,
             new_text: line_b,
         });
+    }
+}
+
+impl std::fmt::Display for Buffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.rope)
     }
 }
 

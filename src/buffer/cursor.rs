@@ -15,7 +15,10 @@ impl ByteRange {
         if start <= end {
             Self { start, end }
         } else {
-            Self { start: end, end: start }
+            Self {
+                start: end,
+                end: start,
+            }
         }
     }
 
@@ -181,7 +184,7 @@ pub fn byte_col_at_display_col(rope: &Rope, line: usize, target_display_col: usi
     }
     let line_slice = rope.line(line.min(rope.len_lines() - 1));
     let line_str: String = line_slice.chars().collect();
-    let stripped = line_str.trim_end_matches(|c| c == '\r' || c == '\n');
+    let stripped = line_str.trim_end_matches(['\r', '\n']);
     let mut dcol = 0usize;
     let mut byte_off = 0usize;
     for g in stripped.graphemes(true) {
@@ -202,7 +205,10 @@ pub fn display_col_at(rope: &Rope, line: usize, byte_col: usize) -> usize {
     let line_slice = rope.line(line.min(rope.len_lines() - 1));
     let line_str: String = line_slice.chars().collect();
     let prefix = &line_str[..byte_col.min(line_str.len())];
-    prefix.graphemes(true).map(|g| UnicodeWidthStr::width(g)).sum()
+    prefix
+        .graphemes(true)
+        .map(UnicodeWidthStr::width)
+        .sum()
 }
 
 /// Returns the byte length of a line excluding any trailing newline characters.
@@ -215,7 +221,7 @@ pub fn line_byte_len_no_newline(rope: &Rope, line: usize) -> usize {
     let line_slice = rope.line(line);
     let line_str: String = line_slice.chars().collect();
     // Strip trailing \r\n or \n
-    let stripped = line_str.trim_end_matches(|c| c == '\n' || c == '\r');
+    let stripped = line_str.trim_end_matches(['\n', '\r']);
     stripped.len()
 }
 
@@ -295,7 +301,7 @@ impl MultiCursor {
 
     /// Collapse all cursors to just the primary, clearing all others.
     pub fn collapse_to_primary(&mut self) {
-        let primary = self.cursors[self.primary].clone();
+        let primary = self.cursors[self.primary];
         self.cursors = vec![primary];
         self.primary = 0;
     }

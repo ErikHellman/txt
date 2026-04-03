@@ -17,9 +17,7 @@ pub fn render(picker: &FuzzyPickerState, area: Rect, buf: &mut TermBuffer) {
     let overlay = Rect::new(overlay_x, overlay_y, overlay_w, overlay_h);
 
     // ── Styles ────────────────────────────────────────────────────────────────
-    let bg_style = Style::default()
-        .bg(Color::Rgb(25, 25, 40))
-        .fg(Color::White);
+    let bg_style = Style::default().bg(Color::Rgb(25, 25, 40)).fg(Color::White);
     let border_style = Style::default()
         .bg(Color::Rgb(25, 25, 40))
         .fg(Color::Rgb(80, 80, 140));
@@ -27,9 +25,7 @@ pub fn render(picker: &FuzzyPickerState, area: Rect, buf: &mut TermBuffer) {
         .bg(Color::Rgb(35, 35, 55))
         .fg(Color::Rgb(180, 180, 220))
         .add_modifier(Modifier::BOLD);
-    let query_style = Style::default()
-        .bg(Color::Rgb(35, 35, 55))
-        .fg(Color::White);
+    let query_style = Style::default().bg(Color::Rgb(35, 35, 55)).fg(Color::White);
     let selected_style = Style::default()
         .bg(Color::Rgb(60, 80, 140))
         .fg(Color::White);
@@ -110,13 +106,25 @@ pub fn render(picker: &FuzzyPickerState, area: Rect, buf: &mut TermBuffer) {
         0
     };
 
-    for (screen_row, (_, file_idx)) in picker.filtered.iter().skip(scroll).take(list_rows).enumerate() {
+    for (screen_row, (_, file_idx)) in picker
+        .filtered
+        .iter()
+        .skip(scroll)
+        .take(list_rows)
+        .enumerate()
+    {
         let y = current_y + screen_row as u16;
         let global_idx = scroll + screen_row;
         let is_selected = global_idx == picker.selected;
-        let style = if is_selected { selected_style } else { item_style };
+        let style = if is_selected {
+            selected_style
+        } else {
+            item_style
+        };
 
-        let path = picker.all_files.get(*file_idx)
+        let path = picker
+            .all_files
+            .get(*file_idx)
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default();
 
@@ -134,7 +142,13 @@ pub fn render(picker: &FuzzyPickerState, area: Rect, buf: &mut TermBuffer) {
     // Empty state
     if picker.filtered.is_empty() && list_rows > 0 {
         let msg = " No files found";
-        buf.set_string(inner_x, current_y, &format!("{:<width$}", msg, width = inner_w as usize),
-            Style::default().bg(Color::Rgb(25, 25, 40)).fg(Color::DarkGray));
+        buf.set_string(
+            inner_x,
+            current_y,
+            format!("{:<width$}", msg, width = inner_w as usize),
+            Style::default()
+                .bg(Color::Rgb(25, 25, 40))
+                .fg(Color::DarkGray),
+        );
     }
 }

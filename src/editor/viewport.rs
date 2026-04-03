@@ -165,8 +165,7 @@ pub fn screen_pos_to_byte_offset(
 ) -> usize {
     // Row → line index
     let row_in_area = (screen_row as usize).saturating_sub(editor_area_y as usize);
-    let line_idx = (viewport.scroll_row + row_in_area)
-        .min(buffer.len_lines().saturating_sub(1));
+    let line_idx = (viewport.scroll_row + row_in_area).min(buffer.len_lines().saturating_sub(1));
 
     // Column → byte within line, accounting for gutter and horizontal scroll
     let col_in_area = screen_col as usize;
@@ -182,7 +181,9 @@ pub fn screen_pos_to_byte_offset(
     let line_str = buffer.line_str(line_idx);
     let byte_in_line = display_col_to_byte(&line_str, display_col_in_text);
 
-    let line_start = buffer.rope().char_to_byte(buffer.rope().line_to_char(line_idx));
+    let line_start = buffer
+        .rope()
+        .char_to_byte(buffer.rope().line_to_char(line_idx));
     line_start + byte_in_line
 }
 
@@ -218,7 +219,11 @@ mod tests {
     #[test]
     fn visible_lines_simple() {
         let b = buf("a\nb\nc\nd\ne");
-        let vp = Viewport { scroll_row: 0, scroll_col: 0, word_wrap: false };
+        let vp = Viewport {
+            scroll_row: 0,
+            scroll_col: 0,
+            word_wrap: false,
+        };
         let lines: Vec<_> = vp.visible_lines(&b, 3).collect();
         assert_eq!(lines.len(), 3);
         assert_eq!(lines[0], (0, "a".to_string()));
@@ -229,7 +234,11 @@ mod tests {
     #[test]
     fn visible_lines_with_scroll() {
         let b = buf("a\nb\nc\nd\ne");
-        let vp = Viewport { scroll_row: 2, scroll_col: 0, word_wrap: false };
+        let vp = Viewport {
+            scroll_row: 2,
+            scroll_col: 0,
+            word_wrap: false,
+        };
         let lines: Vec<_> = vp.visible_lines(&b, 3).collect();
         assert_eq!(lines[0], (2, "c".to_string()));
         assert_eq!(lines[1], (3, "d".to_string()));
@@ -239,7 +248,11 @@ mod tests {
     #[test]
     fn visible_lines_at_end_of_file() {
         let b = buf("a\nb");
-        let vp = Viewport { scroll_row: 0, scroll_col: 0, word_wrap: false };
+        let vp = Viewport {
+            scroll_row: 0,
+            scroll_col: 0,
+            word_wrap: false,
+        };
         let lines: Vec<_> = vp.visible_lines(&b, 10).collect();
         assert_eq!(lines.len(), 2);
     }
@@ -261,7 +274,11 @@ mod tests {
     fn scroll_to_cursor_up() {
         let content = (0..20).map(|i| format!("line{i}\n")).collect::<String>();
         let b = Buffer::from_str(&content);
-        let mut vp = Viewport { scroll_row: 15, scroll_col: 0, word_wrap: false };
+        let mut vp = Viewport {
+            scroll_row: 15,
+            scroll_col: 0,
+            word_wrap: false,
+        };
         // Cursor is at line 0 (default)
         vp.scroll_to_cursor(&b, 10, 80);
         assert_eq!(vp.scroll_row, 0);
@@ -337,7 +354,11 @@ mod tests {
     fn screen_pos_respects_scroll() {
         let content = (0..20).map(|i| format!("line{i}\n")).collect::<String>();
         let b = Buffer::from_str(&content);
-        let vp = Viewport { scroll_row: 10, scroll_col: 0, word_wrap: false };
+        let vp = Viewport {
+            scroll_row: 10,
+            scroll_col: 0,
+            word_wrap: false,
+        };
         // click on row=0 of the editor area → should map to buffer line 10
         let offset = screen_pos_to_byte_offset(2, 0, 0, 2, &b, &vp);
         let expected_line_start = b.rope().char_to_byte(b.rope().line_to_char(10));
@@ -430,7 +451,11 @@ mod tests {
     fn visible_lines_wrapped_respects_scroll_row() {
         // Skip first logical line via scroll_row.
         let b = buf("skip\nshow");
-        let vp = Viewport { scroll_row: 1, scroll_col: 0, word_wrap: true };
+        let vp = Viewport {
+            scroll_row: 1,
+            scroll_col: 0,
+            word_wrap: true,
+        };
         let rows = vp.visible_lines_wrapped(&b, 10, 80);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].0, 1); // line_idx = 1

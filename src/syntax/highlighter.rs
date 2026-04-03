@@ -42,7 +42,14 @@ pub fn highlight(
         return Vec::new();
     }
     let mut spans = Vec::new();
-    visit(tree.root_node(), lang, source, start_byte, end_byte, &mut spans);
+    visit(
+        tree.root_node(),
+        lang,
+        source,
+        start_byte,
+        end_byte,
+        &mut spans,
+    );
     spans
 }
 
@@ -64,6 +71,7 @@ pub fn style_for_kind(kind: HighlightKind) -> Style {
 
 // ── Tree walker ───────────────────────────────────────────────────────────────
 
+#[allow(clippy::only_used_in_recursion)]
 fn visit(
     node: Node<'_>,
     lang: Lang,
@@ -84,7 +92,11 @@ fn visit(
         let s = node.start_byte().max(start_byte);
         let e = node.end_byte().min(end_byte);
         if s < e {
-            spans.push(HighlightSpan { start: s, end: e, kind: hk });
+            spans.push(HighlightSpan {
+                start: s,
+                end: e,
+                kind: hk,
+            });
         }
         return;
     }
@@ -96,7 +108,11 @@ fn visit(
             let s = node.start_byte().max(start_byte);
             let e = node.end_byte().min(end_byte);
             if s < e {
-                spans.push(HighlightSpan { start: s, end: e, kind: hk });
+                spans.push(HighlightSpan {
+                    start: s,
+                    end: e,
+                    kind: hk,
+                });
             }
         }
         return;
@@ -117,7 +133,11 @@ fn visit(
                     let s = child.start_byte().max(start_byte);
                     let e = child.end_byte().min(end_byte);
                     if s < e && child.end_byte() > start_byte && child.start_byte() < end_byte {
-                        spans.push(HighlightSpan { start: s, end: e, kind: HighlightKind::Function });
+                        spans.push(HighlightSpan {
+                            start: s,
+                            end: e,
+                            kind: HighlightKind::Function,
+                        });
                     }
                     continue;
                 }
@@ -132,17 +152,13 @@ fn visit(
 fn atomic_kind(node_kind: &str, lang: Lang) -> Option<HighlightKind> {
     match lang {
         Lang::Rust => match node_kind {
-            "string_literal" | "raw_string_literal" | "char_literal" => {
-                Some(HighlightKind::String)
-            }
+            "string_literal" | "raw_string_literal" | "char_literal" => Some(HighlightKind::String),
             "line_comment" | "block_comment" => Some(HighlightKind::Comment),
             "attribute_item" | "inner_attribute_item" => Some(HighlightKind::Attribute),
             _ => None,
         },
         Lang::Python => match node_kind {
-            "string" | "concatenated_string" | "interpolated_string" => {
-                Some(HighlightKind::String)
-            }
+            "string" | "concatenated_string" | "interpolated_string" => Some(HighlightKind::String),
             "comment" => Some(HighlightKind::Comment),
             "decorator" => Some(HighlightKind::Attribute),
             _ => None,
@@ -175,10 +191,10 @@ fn leaf_kind(node_kind: &str, parent_kind: &str, lang: Lang) -> Option<Highlight
 fn rust_leaf(kind: &str, parent: &str) -> Option<HighlightKind> {
     match kind {
         // Keywords
-        "fn" | "let" | "pub" | "use" | "mod" | "struct" | "enum" | "impl" | "trait"
-        | "type" | "const" | "static" | "where" | "for" | "if" | "else" | "match" | "loop"
-        | "while" | "return" | "self" | "Self" | "super" | "crate" | "in" | "as" | "ref"
-        | "dyn" | "unsafe" | "extern" | "async" | "await" | "move" | "continue" | "break" => {
+        "fn" | "let" | "pub" | "use" | "mod" | "struct" | "enum" | "impl" | "trait" | "type"
+        | "const" | "static" | "where" | "for" | "if" | "else" | "match" | "loop" | "while"
+        | "return" | "self" | "Self" | "super" | "crate" | "in" | "as" | "ref" | "dyn"
+        | "unsafe" | "extern" | "async" | "await" | "move" | "continue" | "break" => {
             Some(HighlightKind::Keyword)
         }
         // `mut` appears as a `mutable_specifier` node in tree-sitter-rust
@@ -207,11 +223,9 @@ fn rust_leaf(kind: &str, parent: &str) -> Option<HighlightKind> {
 fn python_leaf(kind: &str, parent: &str) -> Option<HighlightKind> {
     match kind {
         "def" | "class" | "if" | "elif" | "else" | "for" | "while" | "import" | "from"
-        | "return" | "pass" | "lambda" | "with" | "as" | "in" | "not" | "and" | "or"
-        | "is" | "try" | "except" | "finally" | "raise" | "yield" | "del" | "global"
-        | "nonlocal" | "assert" | "async" | "await" | "break" | "continue" => {
-            Some(HighlightKind::Keyword)
-        }
+        | "return" | "pass" | "lambda" | "with" | "as" | "in" | "not" | "and" | "or" | "is"
+        | "try" | "except" | "finally" | "raise" | "yield" | "del" | "global" | "nonlocal"
+        | "assert" | "async" | "await" | "break" | "continue" => Some(HighlightKind::Keyword),
         // tree-sitter-python uses lowercase node kinds for these literals
         "none" | "true" | "false" => Some(HighlightKind::Keyword),
         "integer" | "float" => Some(HighlightKind::Number),
@@ -227,9 +241,7 @@ fn js_leaf(kind: &str, parent: &str) -> Option<HighlightKind> {
         | "return" | "new" | "this" | "class" | "extends" | "import" | "export" | "from"
         | "default" | "switch" | "case" | "break" | "continue" | "throw" | "try" | "catch"
         | "finally" | "in" | "of" | "typeof" | "instanceof" | "void" | "delete" | "async"
-        | "await" | "yield" | "static" | "get" | "set" | "debugger" => {
-            Some(HighlightKind::Keyword)
-        }
+        | "await" | "yield" | "static" | "get" | "set" | "debugger" => Some(HighlightKind::Keyword),
         "true" | "false" | "null" | "undefined" => Some(HighlightKind::Keyword),
         "number" => Some(HighlightKind::Number),
         "identifier" if matches!(parent, "call_expression" | "new_expression") => {
@@ -298,8 +310,15 @@ mod tests {
         highlight(tree, source.as_bytes(), lang, 0, source.len())
     }
 
-    fn has_span_of_kind(spans: &[HighlightSpan], start: usize, end: usize, kind: HighlightKind) -> bool {
-        spans.iter().any(|s| s.start == start && s.end == end && s.kind == kind)
+    fn has_span_of_kind(
+        spans: &[HighlightSpan],
+        start: usize,
+        end: usize,
+        kind: HighlightKind,
+    ) -> bool {
+        spans
+            .iter()
+            .any(|s| s.start == start && s.end == end && s.kind == kind)
     }
 
     // ── Rust ──────────────────────────────────────────────────────────────────
@@ -310,8 +329,11 @@ mod tests {
         let tree = parse_rust(src);
         let spans = spans_for(src, &tree, Lang::Rust);
         // "fn" is at bytes 0..2
-        assert!(has_span_of_kind(&spans, 0, 2, HighlightKind::Keyword),
-            "expected Keyword span at 0..2, got: {:?}", spans);
+        assert!(
+            has_span_of_kind(&spans, 0, 2, HighlightKind::Keyword),
+            "expected Keyword span at 0..2, got: {:?}",
+            spans
+        );
     }
 
     #[test]
@@ -320,8 +342,11 @@ mod tests {
         let tree = parse_rust(src);
         let spans = spans_for(src, &tree, Lang::Rust);
         // "hello" (with quotes) is at bytes 8..15
-        assert!(has_span_of_kind(&spans, 8, 15, HighlightKind::String),
-            "expected String span, got: {:?}", spans);
+        assert!(
+            has_span_of_kind(&spans, 8, 15, HighlightKind::String),
+            "expected String span, got: {:?}",
+            spans
+        );
     }
 
     #[test]
@@ -329,8 +354,11 @@ mod tests {
         let src = "// a comment\nfn foo() {}";
         let tree = parse_rust(src);
         let spans = spans_for(src, &tree, Lang::Rust);
-        assert!(has_span_of_kind(&spans, 0, 12, HighlightKind::Comment),
-            "expected Comment span, got: {:?}", spans);
+        assert!(
+            has_span_of_kind(&spans, 0, 12, HighlightKind::Comment),
+            "expected Comment span, got: {:?}",
+            spans
+        );
     }
 
     #[test]
@@ -339,8 +367,11 @@ mod tests {
         let tree = parse_rust(src);
         let spans = spans_for(src, &tree, Lang::Rust);
         // "42" at bytes 8..10
-        assert!(has_span_of_kind(&spans, 8, 10, HighlightKind::Number),
-            "expected Number span, got: {:?}", spans);
+        assert!(
+            has_span_of_kind(&spans, 8, 10, HighlightKind::Number),
+            "expected Number span, got: {:?}",
+            spans
+        );
     }
 
     #[test]
@@ -349,8 +380,13 @@ mod tests {
         let tree = parse_rust(src);
         let spans = spans_for(src, &tree, Lang::Rust);
         // "String" appears as type_identifier
-        assert!(spans.iter().any(|s| s.kind == HighlightKind::Type && &src[s.start..s.end] == "String"),
-            "expected Type span for 'String', got: {:?}", spans);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Type && &src[s.start..s.end] == "String"),
+            "expected Type span for 'String', got: {:?}",
+            spans
+        );
     }
 
     #[test]
@@ -359,8 +395,13 @@ mod tests {
         let tree = parse_rust(src);
         let spans = spans_for(src, &tree, Lang::Rust);
         // "greet" should be highlighted as Function
-        assert!(spans.iter().any(|s| s.kind == HighlightKind::Function && &src[s.start..s.end] == "greet"),
-            "expected Function span for 'greet', got: {:?}", spans);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Function && &src[s.start..s.end] == "greet"),
+            "expected Function span for 'greet', got: {:?}",
+            spans
+        );
     }
 
     #[test]
@@ -368,8 +409,16 @@ mod tests {
         let src = "let mut x = 0;";
         let tree = parse_rust(src);
         let spans = spans_for(src, &tree, Lang::Rust);
-        assert!(spans.iter().any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "let"));
-        assert!(spans.iter().any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "mut"));
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "let")
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "mut")
+        );
     }
 
     #[test]
@@ -378,8 +427,13 @@ mod tests {
         let tree = parse_rust(src);
         let spans = spans_for(src, &tree, Lang::Rust);
         // attribute_item starts at 0
-        assert!(spans.iter().any(|s| s.kind == HighlightKind::Attribute && s.start == 0),
-            "expected Attribute span, got: {:?}", spans);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Attribute && s.start == 0),
+            "expected Attribute span, got: {:?}",
+            spans
+        );
     }
 
     #[test]
@@ -388,8 +442,13 @@ mod tests {
         let tree = parse_rust(src);
         let spans = spans_for(src, &tree, Lang::Rust);
         // 'a' at bytes 8..11 (including single quotes)
-        assert!(spans.iter().any(|s| s.kind == HighlightKind::String && &src[s.start..s.end] == "'a'"),
-            "expected String span for char literal, got: {:?}", spans);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::String && &src[s.start..s.end] == "'a'"),
+            "expected String span for char literal, got: {:?}",
+            spans
+        );
     }
 
     // ── Python ────────────────────────────────────────────────────────────────
@@ -399,8 +458,11 @@ mod tests {
         let src = "def foo():\n    pass\n";
         let tree = parse_python(src);
         let spans = spans_for(src, &tree, Lang::Python);
-        assert!(has_span_of_kind(&spans, 0, 3, HighlightKind::Keyword),
-            "expected 'def' as Keyword, got: {:?}", spans);
+        assert!(
+            has_span_of_kind(&spans, 0, 3, HighlightKind::Keyword),
+            "expected 'def' as Keyword, got: {:?}",
+            spans
+        );
     }
 
     #[test]
@@ -408,8 +470,11 @@ mod tests {
         let src = "# this is a comment\nx = 1\n";
         let tree = parse_python(src);
         let spans = spans_for(src, &tree, Lang::Python);
-        assert!(has_span_of_kind(&spans, 0, 19, HighlightKind::Comment),
-            "expected Comment span, got: {:?}", spans);
+        assert!(
+            has_span_of_kind(&spans, 0, 19, HighlightKind::Comment),
+            "expected Comment span, got: {:?}",
+            spans
+        );
     }
 
     #[test]
@@ -417,8 +482,13 @@ mod tests {
         let src = "x = None\n";
         let tree = parse_python(src);
         let spans = spans_for(src, &tree, Lang::Python);
-        assert!(spans.iter().any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "None"),
-            "expected 'None' as Keyword, got: {:?}", spans);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "None"),
+            "expected 'None' as Keyword, got: {:?}",
+            spans
+        );
     }
 
     // ── JSON ──────────────────────────────────────────────────────────────────
@@ -429,8 +499,11 @@ mod tests {
         let tree = parse_json(src);
         let spans = spans_for(src, &tree, Lang::Json);
         // "key" (with quotes) at bytes 1..6
-        assert!(has_span_of_kind(&spans, 1, 6, HighlightKind::String),
-            "expected String span for JSON key, got: {:?}", spans);
+        assert!(
+            has_span_of_kind(&spans, 1, 6, HighlightKind::String),
+            "expected String span for JSON key, got: {:?}",
+            spans
+        );
     }
 
     #[test]
@@ -438,8 +511,13 @@ mod tests {
         let src = r#"{"x": 42}"#;
         let tree = parse_json(src);
         let spans = spans_for(src, &tree, Lang::Json);
-        assert!(spans.iter().any(|s| s.kind == HighlightKind::Number && &src[s.start..s.end] == "42"),
-            "expected Number span for 42, got: {:?}", spans);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Number && &src[s.start..s.end] == "42"),
+            "expected Number span for 42, got: {:?}",
+            spans
+        );
     }
 
     #[test]
@@ -447,9 +525,21 @@ mod tests {
         let src = r#"{"a":true,"b":false,"c":null}"#;
         let tree = parse_json(src);
         let spans = spans_for(src, &tree, Lang::Json);
-        assert!(spans.iter().any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "true"));
-        assert!(spans.iter().any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "false"));
-        assert!(spans.iter().any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "null"));
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "true")
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "false")
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "null")
+        );
     }
 
     // ── Filtering ─────────────────────────────────────────────────────────────
@@ -462,11 +552,17 @@ mod tests {
         let tree = parse_rust(src);
         let spans = highlight(&tree, src.as_bytes(), Lang::Rust, 6, 11);
         // Only spans within bytes 6..11 should be present
-        assert!(spans.iter().all(|s| s.start >= 6 && s.end <= 11),
-            "spans outside visible range returned: {:?}", spans);
+        assert!(
+            spans.iter().all(|s| s.start >= 6 && s.end <= 11),
+            "spans outside visible range returned: {:?}",
+            spans
+        );
         // The 'fn' at byte 6 should be present
-        assert!(has_span_of_kind(&spans, 6, 8, HighlightKind::Keyword),
-            "expected 'fn' at 6..8, got: {:?}", spans);
+        assert!(
+            has_span_of_kind(&spans, 6, 8, HighlightKind::Keyword),
+            "expected 'fn' at 6..8, got: {:?}",
+            spans
+        );
     }
 
     #[test]
@@ -496,8 +592,11 @@ mod tests {
         let default_style = Style::default().fg(Color::White);
         for kind in kinds {
             let style = style_for_kind(kind);
-            assert_ne!(style, default_style, "{:?} should not map to default White style", kind);
+            assert_ne!(
+                style, default_style,
+                "{:?} should not map to default White style",
+                kind
+            );
         }
     }
-
 }

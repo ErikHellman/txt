@@ -15,31 +15,131 @@ pub struct CommandEntry {
 
 /// The full list of available commands, shown in the command palette.
 pub static COMMANDS: &[CommandEntry] = &[
-    CommandEntry { name: "Save File",             key_hint: "Ctrl+S",       action: || EditorAction::SaveFile },
-    CommandEntry { name: "Save File As…",         key_hint: "Ctrl+Shift+S", action: || EditorAction::SaveFileAs },
-    CommandEntry { name: "New File",              key_hint: "Ctrl+N",       action: || EditorAction::NewFile },
-    CommandEntry { name: "Open File…",            key_hint: "Ctrl+O",       action: || EditorAction::OpenFile },
-    CommandEntry { name: "New Tab",               key_hint: "Ctrl+T",       action: || EditorAction::NewTab },
-    CommandEntry { name: "Close Tab",             key_hint: "Ctrl+W",       action: || EditorAction::CloseTab },
-    CommandEntry { name: "Next Tab",              key_hint: "Ctrl+Tab",     action: || EditorAction::NextTab },
-    CommandEntry { name: "Previous Tab",          key_hint: "Ctrl+Shift+Tab", action: || EditorAction::PrevTab },
-    CommandEntry { name: "Fuzzy File Picker",     key_hint: "Ctrl+P",       action: || EditorAction::OpenFuzzyPicker },
-    CommandEntry { name: "Buffer Switcher",       key_hint: "Ctrl+Shift+E", action: || EditorAction::OpenBufferSwitcher },
-    CommandEntry { name: "Toggle Sidebar",        key_hint: "Ctrl+B",       action: || EditorAction::ToggleSidebar },
-    CommandEntry { name: "Jump to Line…",         key_hint: "Ctrl+G",       action: || EditorAction::JumpToLine },
-    CommandEntry { name: "Find…",                 key_hint: "Ctrl+F",       action: || EditorAction::OpenSearch },
-    CommandEntry { name: "Find & Replace…",       key_hint: "Ctrl+H",       action: || EditorAction::OpenReplace },
-    CommandEntry { name: "Select All",            key_hint: "Ctrl+A",       action: || EditorAction::SelectAll },
-    CommandEntry { name: "Select All Occurrences", key_hint: "Ctrl+Shift+L", action: || EditorAction::SelectAllOccurrences },
-    CommandEntry { name: "Undo",                  key_hint: "Ctrl+Z",       action: || EditorAction::Undo },
-    CommandEntry { name: "Redo",                  key_hint: "Ctrl+Y",       action: || EditorAction::Redo },
-    CommandEntry { name: "Duplicate Line",        key_hint: "Ctrl+D",       action: || EditorAction::DuplicateLine },
-    CommandEntry { name: "Toggle Line Comment",   key_hint: "Ctrl+/",       action: || EditorAction::ToggleLineComment },
-    CommandEntry { name: "Toggle Word Wrap",      key_hint: "Alt+Z",        action: || EditorAction::ToggleWordWrap },
-    CommandEntry { name: "Toggle Help",           key_hint: "F1",           action: || EditorAction::ToggleHelp },
-    CommandEntry { name: "Open Recent Files",     key_hint: "Ctrl+R",       action: || EditorAction::OpenRecentFiles },
-    CommandEntry { name: "Reload Config",         key_hint: "palette",      action: || EditorAction::ReloadConfig },
-    CommandEntry { name: "Quit",                  key_hint: "Ctrl+Q",       action: || EditorAction::Quit },
+    CommandEntry {
+        name: "Save File",
+        key_hint: "Ctrl+S",
+        action: || EditorAction::SaveFile,
+    },
+    CommandEntry {
+        name: "Save File As…",
+        key_hint: "Ctrl+Shift+S",
+        action: || EditorAction::SaveFileAs,
+    },
+    CommandEntry {
+        name: "New File",
+        key_hint: "Ctrl+N",
+        action: || EditorAction::NewFile,
+    },
+    CommandEntry {
+        name: "Open File…",
+        key_hint: "Ctrl+O",
+        action: || EditorAction::OpenFile,
+    },
+    CommandEntry {
+        name: "New Tab",
+        key_hint: "Ctrl+T",
+        action: || EditorAction::NewTab,
+    },
+    CommandEntry {
+        name: "Close Tab",
+        key_hint: "Ctrl+W",
+        action: || EditorAction::CloseTab,
+    },
+    CommandEntry {
+        name: "Next Tab",
+        key_hint: "Ctrl+Tab",
+        action: || EditorAction::NextTab,
+    },
+    CommandEntry {
+        name: "Previous Tab",
+        key_hint: "Ctrl+Shift+Tab",
+        action: || EditorAction::PrevTab,
+    },
+    CommandEntry {
+        name: "Fuzzy File Picker",
+        key_hint: "Ctrl+P",
+        action: || EditorAction::OpenFuzzyPicker,
+    },
+    CommandEntry {
+        name: "Buffer Switcher",
+        key_hint: "Ctrl+Shift+E",
+        action: || EditorAction::OpenBufferSwitcher,
+    },
+    CommandEntry {
+        name: "Toggle Sidebar",
+        key_hint: "Ctrl+B",
+        action: || EditorAction::ToggleSidebar,
+    },
+    CommandEntry {
+        name: "Jump to Line…",
+        key_hint: "Ctrl+G",
+        action: || EditorAction::JumpToLine,
+    },
+    CommandEntry {
+        name: "Find…",
+        key_hint: "Ctrl+F",
+        action: || EditorAction::OpenSearch,
+    },
+    CommandEntry {
+        name: "Find & Replace…",
+        key_hint: "Ctrl+H",
+        action: || EditorAction::OpenReplace,
+    },
+    CommandEntry {
+        name: "Select All",
+        key_hint: "Ctrl+A",
+        action: || EditorAction::SelectAll,
+    },
+    CommandEntry {
+        name: "Select All Occurrences",
+        key_hint: "Ctrl+Shift+L",
+        action: || EditorAction::SelectAllOccurrences,
+    },
+    CommandEntry {
+        name: "Undo",
+        key_hint: "Ctrl+Z",
+        action: || EditorAction::Undo,
+    },
+    CommandEntry {
+        name: "Redo",
+        key_hint: "Ctrl+Y",
+        action: || EditorAction::Redo,
+    },
+    CommandEntry {
+        name: "Duplicate Line",
+        key_hint: "Ctrl+D",
+        action: || EditorAction::DuplicateLine,
+    },
+    CommandEntry {
+        name: "Toggle Line Comment",
+        key_hint: "Ctrl+/",
+        action: || EditorAction::ToggleLineComment,
+    },
+    CommandEntry {
+        name: "Toggle Word Wrap",
+        key_hint: "Alt+Z",
+        action: || EditorAction::ToggleWordWrap,
+    },
+    CommandEntry {
+        name: "Toggle Help",
+        key_hint: "F1",
+        action: || EditorAction::ToggleHelp,
+    },
+    CommandEntry {
+        name: "Open Recent Files",
+        key_hint: "Ctrl+R",
+        action: || EditorAction::OpenRecentFiles,
+    },
+    CommandEntry {
+        name: "Reload Config",
+        key_hint: "palette",
+        action: || EditorAction::ReloadConfig,
+    },
+    CommandEntry {
+        name: "Quit",
+        key_hint: "Ctrl+Q",
+        action: || EditorAction::Quit,
+    },
 ];
 
 /// Mutable state for the command palette overlay.
@@ -111,7 +211,9 @@ pub fn render(palette: &CommandPaletteState, area: Rect, buf: &mut TermBuffer) {
 
     let overlay_w = 60u16.min(area.width);
     let max_rows: u16 = 15;
-    let overlay_h = (palette.filtered.len() as u16 + 4).min(max_rows).min(area.height);
+    let overlay_h = (palette.filtered.len() as u16 + 4)
+        .min(max_rows)
+        .min(area.height);
     let ox = area.x + area.width.saturating_sub(overlay_w) / 2;
     let oy = area.y + area.height.saturating_sub(overlay_h) / 3; // upper-third
     let overlay = Rect::new(ox, oy, overlay_w, overlay_h);
@@ -256,7 +358,8 @@ mod tests {
         for &idx in &state.filtered {
             assert!(
                 COMMANDS[idx].name.to_lowercase().contains("save"),
-                "unexpected command: {}", COMMANDS[idx].name
+                "unexpected command: {}",
+                COMMANDS[idx].name
             );
         }
     }
@@ -319,7 +422,11 @@ mod tests {
     fn all_commands_have_non_empty_names() {
         for cmd in COMMANDS {
             assert!(!cmd.name.is_empty(), "command has empty name");
-            assert!(!cmd.key_hint.is_empty(), "command has empty key hint: {}", cmd.name);
+            assert!(
+                !cmd.key_hint.is_empty(),
+                "command has empty key hint: {}",
+                cmd.name
+            );
         }
     }
 

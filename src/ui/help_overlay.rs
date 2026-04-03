@@ -9,68 +9,68 @@ use ratatui::{
 const ENTRIES: &[(&str, &str)] = &[
     // ── Navigation ────────────────────────────────────────────────────
     ("", "Navigation"),
-    ("Arrows",                "Move cursor"),
-    ("Ctrl+Left/Right",       "Word jump"),
-    ("Shift+Arrows",          "Extend selection"),
+    ("Arrows", "Move cursor"),
+    ("Ctrl+Left/Right", "Word jump"),
+    ("Shift+Arrows", "Extend selection"),
     ("Ctrl+Shift+Left/Right", "Extend by word"),
-    ("Home / End",            "Line start / end"),
-    ("Ctrl+Home/End",         "File start / end"),
-    ("PgUp / PgDn",           "Page up / down"),
+    ("Home / End", "Line start / end"),
+    ("Ctrl+Home/End", "File start / end"),
+    ("PgUp / PgDn", "Page up / down"),
     // ── Selection ────────────────────────────────────────────────────
     ("", "Selection"),
-    ("Ctrl+A",                "Select all"),
-    ("Ctrl+W",                "Expand selection (AST)"),
-    ("Ctrl+Shift+W",          "Contract selection (AST)"),
-    ("Ctrl+Shift+L",          "Select all occurrences"),
+    ("Ctrl+A", "Select all"),
+    ("Ctrl+W", "Expand selection (AST)"),
+    ("Ctrl+Shift+W", "Contract selection (AST)"),
+    ("Ctrl+Shift+L", "Select all occurrences"),
     // ── Multi-cursor ─────────────────────────────────────────────────
     ("", "Multi-cursor"),
-    ("Alt+Shift+Up",          "Add cursor above"),
-    ("Alt+Shift+Down",        "Add cursor below"),
+    ("Alt+Shift+Up", "Add cursor above"),
+    ("Alt+Shift+Down", "Add cursor below"),
     // ── Editing ──────────────────────────────────────────────────────
     ("", "Editing"),
-    ("Backspace / Delete",    "Delete backward / forward"),
-    ("Ctrl+Backspace",        "Delete word backward"),
-    ("Ctrl+Delete",           "Delete word forward"),
-    ("Ctrl+Z / Ctrl+Y",       "Undo / Redo"),
-    ("Ctrl+Shift+Z",          "Redo (alternate)"),
-    ("Ctrl+D",                "Duplicate line"),
-    ("Alt+Up/Down",           "Move line up / down"),
-    ("Ctrl+/",                "Toggle line comment"),
+    ("Backspace / Delete", "Delete backward / forward"),
+    ("Ctrl+Backspace", "Delete word backward"),
+    ("Ctrl+Delete", "Delete word forward"),
+    ("Ctrl+Z / Ctrl+Y", "Undo / Redo"),
+    ("Ctrl+Shift+Z", "Redo (alternate)"),
+    ("Ctrl+D", "Duplicate line"),
+    ("Alt+Up/Down", "Move line up / down"),
+    ("Ctrl+/", "Toggle line comment"),
     // ── Clipboard ────────────────────────────────────────────────────
     ("", "Clipboard"),
-    ("Ctrl+C",                "Copy"),
-    ("Ctrl+X",                "Cut"),
-    ("Ctrl+V",                "Paste"),
+    ("Ctrl+C", "Copy"),
+    ("Ctrl+X", "Cut"),
+    ("Ctrl+V", "Paste"),
     // ── File & Tabs ──────────────────────────────────────────────────
     ("", "File & Tabs"),
-    ("Ctrl+S",                "Save"),
-    ("Ctrl+Shift+S",          "Save As"),
-    ("Ctrl+N",                "New file / tab"),
-    ("Ctrl+O",                "Open file"),
-    ("Ctrl+G",                "Jump to line"),
-    ("Ctrl+T",                "New tab"),
-    ("Ctrl+Tab / Ctrl+PgDn",  "Next tab"),
-    ("Ctrl+PgUp",             "Prev tab"),
-    ("Ctrl+1..9",             "Go to tab N"),
+    ("Ctrl+S", "Save"),
+    ("Ctrl+Shift+S", "Save As"),
+    ("Ctrl+N", "New file / tab"),
+    ("Ctrl+O", "Open file"),
+    ("Ctrl+G", "Jump to line"),
+    ("Ctrl+T", "New tab"),
+    ("Ctrl+Tab / Ctrl+PgDn", "Next tab"),
+    ("Ctrl+PgUp", "Prev tab"),
+    ("Ctrl+1..9", "Go to tab N"),
     // ── Panels & Pickers ─────────────────────────────────────────────
     ("", "Panels & Pickers"),
-    ("Ctrl+B",                "Toggle sidebar"),
-    ("Ctrl+P",                "Fuzzy file picker"),
-    ("Ctrl+R",                "Recent files"),
-    ("Ctrl+Shift+P",          "Command palette"),
-    ("Ctrl+Shift+E",          "Buffer switcher"),
+    ("Ctrl+B", "Toggle sidebar"),
+    ("Ctrl+P", "Fuzzy file picker"),
+    ("Ctrl+R", "Recent files"),
+    ("Ctrl+Shift+P", "Command palette"),
+    ("Ctrl+Shift+E", "Buffer switcher"),
     // ── Search ───────────────────────────────────────────────────────
     ("", "Search"),
-    ("Ctrl+F",                "Find"),
-    ("Ctrl+H",                "Find & Replace"),
-    ("F3 / Shift+F3",         "Next / Prev match"),
-    ("Alt+R",                 "Toggle regex"),
-    ("Alt+C",                 "Toggle case-sensitive"),
+    ("Ctrl+F", "Find"),
+    ("Ctrl+H", "Find & Replace"),
+    ("F3 / Shift+F3", "Next / Prev match"),
+    ("Alt+R", "Toggle regex"),
+    ("Alt+C", "Toggle case-sensitive"),
     // ── View & App ───────────────────────────────────────────────────
     ("", "View & App"),
-    ("Alt+Z",                 "Toggle word wrap"),
-    ("F1",                    "Toggle this help  (↑↓ to scroll)"),
-    ("Ctrl+Q",                "Quit"),
+    ("Alt+Z", "Toggle word wrap"),
+    ("F1", "Toggle this help  (↑↓ to scroll)"),
+    ("Ctrl+Q", "Quit"),
 ];
 
 /// Render a scrollable keybinding cheat-sheet as a centered floating overlay.
@@ -177,9 +177,8 @@ pub fn render(area: Rect, buf: &mut TermBuffer, scroll: usize) {
             buf.set_string(content_x, cy, key_display, key_style);
 
             let desc_x = content_x + KEY_W.min(avail_w) as u16 + 1;
-            let desc_avail =
-                (overlay_area.x + overlay_area.width.saturating_sub(1)).saturating_sub(desc_x)
-                    as usize;
+            let desc_avail = (overlay_area.x + overlay_area.width.saturating_sub(1))
+                .saturating_sub(desc_x) as usize;
             if desc_avail > 0 {
                 let desc_display = &desc[..desc.len().min(desc_avail)];
                 buf.set_string(desc_x, cy, desc_display, desc_style);
@@ -251,7 +250,10 @@ mod tests {
                     .unwrap_or(' ')
             })
             .collect();
-        assert!(!content.trim().is_empty() || area.width >= 20, "render should produce output");
+        assert!(
+            !content.trim().is_empty() || area.width >= 20,
+            "render should produce output"
+        );
     }
 
     #[test]

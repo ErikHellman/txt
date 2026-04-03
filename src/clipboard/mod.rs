@@ -32,12 +32,12 @@ impl ClipboardManager {
 
     /// Read from the system clipboard. Falls back to internal storage on error.
     pub fn get(&mut self) -> String {
-        if let Ok(mut clip) = arboard::Clipboard::new() {
-            if let Ok(text) = clip.get_text() {
-                // Keep internal in sync so a future get() after arboard fails still works.
-                self.internal = text.clone();
-                return text;
-            }
+        if let Ok(mut clip) = arboard::Clipboard::new()
+            && let Ok(text) = clip.get_text()
+        {
+            // Keep internal in sync so a future get() after arboard fails still works.
+            self.internal = text.clone();
+            return text;
         }
         self.internal.clone()
     }

@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    path::Path,
-    process::Command,
-};
+use std::{collections::HashMap, path::Path, process::Command};
 
 /// Status of a single line in the git gutter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,11 +99,7 @@ fn lcs_length<'a>(a: &[&'a str], b: &[&'a str]) -> Vec<Vec<usize>> {
 }
 
 /// Back-track through the LCS table to produce a list of diff operations.
-fn diff_ops<'a>(
-    original: &[&'a str],
-    current: &[&'a str],
-    dp: &[Vec<usize>],
-) -> Vec<DiffOp> {
+fn diff_ops<'a>(original: &[&'a str], current: &[&'a str], dp: &[Vec<usize>]) -> Vec<DiffOp> {
     let mut ops = Vec::new();
     let mut i = original.len();
     let mut j = current.len();

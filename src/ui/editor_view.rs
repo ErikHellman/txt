@@ -7,7 +7,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::buffer::cursor::ByteRange;
 use crate::editor::tab::BufferHandle;
-use crate::git::{GutterMark, GitGutter};
+use crate::git::{GitGutter, GutterMark};
 use crate::search::SearchState;
 use crate::syntax::highlighter::{HighlightSpan, style_for_kind};
 
@@ -55,12 +55,16 @@ pub fn render(
     let line_num_style = Style::default().fg(Color::DarkGray);
     let line_num_current_style = Style::default().fg(Color::Yellow);
     let text_style = Style::default().fg(Color::White);
-    let selection_style = Style::default().bg(Color::Rgb(60, 80, 120)).fg(Color::White);
+    let selection_style = Style::default()
+        .bg(Color::Rgb(60, 80, 120))
+        .fg(Color::White);
     let cursor_style = Style::default()
         .bg(Color::White)
         .fg(Color::Black)
         .add_modifier(Modifier::BOLD);
-    let match_style = Style::default().bg(Color::Rgb(80, 70, 20)).fg(Color::Rgb(255, 230, 100));
+    let match_style = Style::default()
+        .bg(Color::Rgb(80, 70, 20))
+        .fg(Color::Rgb(255, 230, 100));
     let current_match_style = Style::default()
         .bg(Color::Rgb(180, 140, 0))
         .fg(Color::Black)
@@ -87,23 +91,39 @@ pub fn render(
 
     let height = area.height as usize;
     let visual_lines: Vec<VisualLine> = if handle.viewport.word_wrap && text_area.width > 0 {
-        let wrapped = handle.viewport.visible_lines_wrapped(
-            &handle.buffer, height, text_area.width as usize,
-        );
+        let wrapped =
+            handle
+                .viewport
+                .visible_lines_wrapped(&handle.buffer, height, text_area.width as usize);
         let mut last_line = usize::MAX;
-        wrapped.into_iter().map(|(line_idx, seg_byte, display)| {
-            let is_first_seg = line_idx != last_line;
-            last_line = line_idx;
-            VisualLine { line_idx, seg_byte, display, is_first_seg }
-        }).collect()
+        wrapped
+            .into_iter()
+            .map(|(line_idx, seg_byte, display)| {
+                let is_first_seg = line_idx != last_line;
+                last_line = line_idx;
+                VisualLine {
+                    line_idx,
+                    seg_byte,
+                    display,
+                    is_first_seg,
+                }
+            })
+            .collect()
     } else {
-        handle.viewport.visible_lines(&handle.buffer, height)
+        handle
+            .viewport
+            .visible_lines(&handle.buffer, height)
             .map(|(line_idx, display)| {
                 let seg_byte = scroll_col_byte_offset(
                     &handle.buffer.line_str(line_idx),
                     handle.viewport.scroll_col,
                 );
-                VisualLine { line_idx, seg_byte, display, is_first_seg: true }
+                VisualLine {
+                    line_idx,
+                    seg_byte,
+                    display,
+                    is_first_seg: true,
+                }
             })
             .collect()
     };
@@ -115,10 +135,10 @@ pub fn render(
         // ── Git gutter ───────────────────────────────────────────────────────
         if has_git && vl.is_first_seg {
             let (git_sym, git_sty) = match git_gutter.and_then(|g| g.get(line_idx)) {
-                Some(GutterMark::Added)    => ("▌", git_added_style),
+                Some(GutterMark::Added) => ("▌", git_added_style),
                 Some(GutterMark::Modified) => ("▌", git_modified_style),
-                Some(GutterMark::Deleted)  => ("▾", git_deleted_style),
-                None                       => (" ", Style::default()),
+                Some(GutterMark::Deleted) => ("▾", git_deleted_style),
+                None => (" ", Style::default()),
             };
             buf.set_string(area.x, y, git_sym, git_sty);
         }
@@ -126,7 +146,11 @@ pub fn render(
         // ── Gutter (line number) ─────────────────────────────────────────────
         let gutter_x = area.x + git_col_w;
         let is_current_line = line_idx == cursor.line;
-        let num_style = if is_current_line { line_num_current_style } else { line_num_style };
+        let num_style = if is_current_line {
+            line_num_current_style
+        } else {
+            line_num_style
+        };
         if vl.is_first_seg {
             let num_str = format!("{:>width$}", line_idx + 1, width = gw as usize);
             buf.set_string(gutter_x, y, &num_str, num_style);
@@ -142,9 +166,10 @@ pub fn render(
             continue;
         }
 
-        let line_start_byte = handle.buffer.rope().char_to_byte(
-            handle.buffer.rope().line_to_char(line_idx),
-        );
+        let line_start_byte = handle
+            .buffer
+            .rope()
+            .char_to_byte(handle.buffer.rope().line_to_char(line_idx));
 
         let mut screen_x = text_area.x;
         let max_x = text_area.x + text_area.width;
@@ -191,10 +216,9 @@ pub fn render(
         if cursor.line == line_idx
             && cursor.col >= line_str_byte_len(&vl.display)
             && (is_last_seg || !handle.viewport.word_wrap)
+            && screen_x < max_x
         {
-            if screen_x < max_x {
-                buf.set_string(screen_x, y, " ", cursor_style);
-            }
+            buf.set_string(screen_x, y, " ", cursor_style);
         }
     }
 
@@ -237,10 +261,11 @@ fn style_for_byte(
     }
     // 3. Current search match
     if let Some(ss) = search {
-        if let Some(cur) = ss.current_range() {
-            if byte_offset >= cur.start && byte_offset < cur.end {
-                return current_match_style;
-            }
+        if let Some(cur) = ss.current_range()
+            && byte_offset >= cur.start
+            && byte_offset < cur.end
+        {
+            return current_match_style;
         }
         // 4. Other search matches
         for m in &ss.matches {
@@ -250,10 +275,10 @@ fn style_for_byte(
         }
     }
     // 5. Bracket pair
-    if let Some((open, close)) = bracket_pair {
-        if byte_offset == open || byte_offset == close {
-            return bracket_style;
-        }
+    if let Some((open, close)) = bracket_pair
+        && (byte_offset == open || byte_offset == close)
+    {
+        return bracket_style;
     }
     // 6. Syntax highlight
     if let Some(span) = find_highlight(highlights, byte_offset) {
@@ -473,16 +498,30 @@ mod tests {
     #[test]
     fn find_highlight_returns_matching_span() {
         let spans = vec![
-            HighlightSpan { start: 0, end: 2, kind: crate::syntax::highlighter::HighlightKind::Keyword },
-            HighlightSpan { start: 5, end: 10, kind: crate::syntax::highlighter::HighlightKind::String },
+            HighlightSpan {
+                start: 0,
+                end: 2,
+                kind: crate::syntax::highlighter::HighlightKind::Keyword,
+            },
+            HighlightSpan {
+                start: 5,
+                end: 10,
+                kind: crate::syntax::highlighter::HighlightKind::String,
+            },
         ];
         assert!(find_highlight(&spans, 0).is_some());
-        assert_eq!(find_highlight(&spans, 0).unwrap().kind, crate::syntax::highlighter::HighlightKind::Keyword);
+        assert_eq!(
+            find_highlight(&spans, 0).unwrap().kind,
+            crate::syntax::highlighter::HighlightKind::Keyword
+        );
         assert!(find_highlight(&spans, 1).is_some());
         assert!(find_highlight(&spans, 2).is_none()); // end is exclusive
         assert!(find_highlight(&spans, 3).is_none());
         assert!(find_highlight(&spans, 5).is_some());
-        assert_eq!(find_highlight(&spans, 7).unwrap().kind, crate::syntax::highlighter::HighlightKind::String);
+        assert_eq!(
+            find_highlight(&spans, 7).unwrap().kind,
+            crate::syntax::highlighter::HighlightKind::String
+        );
         assert!(find_highlight(&spans, 10).is_none());
     }
 

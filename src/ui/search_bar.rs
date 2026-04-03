@@ -18,9 +18,7 @@ pub fn render(search: &SearchState, area: Rect, buf: &mut TermBuffer) {
     let bg = Color::Rgb(25, 30, 50);
     let bar_style = Style::default().bg(bg).fg(Color::White);
     let label_style = Style::default().bg(bg).fg(Color::Rgb(140, 160, 200));
-    let active_input_style = Style::default()
-        .bg(Color::Rgb(35, 40, 65))
-        .fg(Color::White);
+    let active_input_style = Style::default().bg(Color::Rgb(35, 40, 65)).fg(Color::White);
     let inactive_input_style = Style::default().bg(bg).fg(Color::Rgb(190, 190, 210));
     let flag_on_style = Style::default()
         .bg(Color::Rgb(40, 80, 40))
@@ -41,7 +39,11 @@ pub fn render(search: &SearchState, area: Rect, buf: &mut TermBuffer) {
     x += label.len() as u16;
 
     // Query input
-    let query_style = if !search.focus_replace { active_input_style } else { inactive_input_style };
+    let query_style = if !search.focus_replace {
+        active_input_style
+    } else {
+        inactive_input_style
+    };
     let query_display = format!("{}_", search.query);
     let query_w = ((area.width as usize).saturating_sub(x as usize + 30)).max(10);
     let query_str = pad_or_clip(&query_display, query_w);
@@ -52,10 +54,22 @@ pub fn render(search: &SearchState, area: Rect, buf: &mut TermBuffer) {
     x += 1;
 
     // Flags: [Rx] [Cc]
-    let rx_style = if search.is_regex { flag_on_style } else { flag_off_style };
-    let cc_style = if search.case_sensitive { flag_on_style } else { flag_off_style };
+    let rx_style = if search.is_regex {
+        flag_on_style
+    } else {
+        flag_off_style
+    };
+    let cc_style = if search.case_sensitive {
+        flag_on_style
+    } else {
+        flag_off_style
+    };
     let rx_label = if search.is_regex { " Rx " } else { " rx " };
-    let cc_label = if search.case_sensitive { " Cc " } else { " cc " };
+    let cc_label = if search.case_sensitive {
+        " Cc "
+    } else {
+        " cc "
+    };
 
     if x + 4 < area.x + area.width {
         buf.set_string(x, search_y, rx_label, rx_style);
@@ -68,11 +82,15 @@ pub fn render(search: &SearchState, area: Rect, buf: &mut TermBuffer) {
 
     // Match count
     let count_str = if search.matches.is_empty() {
-        if search.query.is_empty() { String::new() } else { " No matches".to_string() }
+        if search.query.is_empty() {
+            String::new()
+        } else {
+            " No matches".to_string()
+        }
     } else {
         format!(" {}/{}", search.current_match + 1, search.matches.len())
     };
-    if !count_str.is_empty() && x + count_str.len() as u16 + 1 <= area.x + area.width {
+    if !count_str.is_empty() && x + (count_str.len() as u16) < area.x + area.width {
         buf.set_string(x + 1, search_y, &count_str, count_style);
     }
 
@@ -86,7 +104,11 @@ pub fn render(search: &SearchState, area: Rect, buf: &mut TermBuffer) {
         buf.set_string(rx, replace_y, rlabel, label_style);
         rx += rlabel.len() as u16;
 
-        let repl_style = if search.focus_replace { active_input_style } else { inactive_input_style };
+        let repl_style = if search.focus_replace {
+            active_input_style
+        } else {
+            inactive_input_style
+        };
         let repl_display = format!("{}_", search.replace_text);
         let repl_w = ((area.width as usize).saturating_sub(rx as usize + 22)).max(10);
         let repl_str = pad_or_clip(&repl_display, repl_w);

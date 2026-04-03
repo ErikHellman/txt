@@ -27,12 +27,20 @@ pub fn render(state: &AppState, frame: &mut Frame) {
     let above_status = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
 
     // ── Reserve search bar (above status bar, when active) ────────────────────
-    let search_h = state.search_state.as_ref().map(|s| s.bar_height()).unwrap_or(0);
+    let search_h = state
+        .search_state
+        .as_ref()
+        .map(|s| s.bar_height())
+        .unwrap_or(0);
     let (search_area_opt, content_area) = if search_h > 0 && above_status.height > search_h {
         let search_y = above_status.y + above_status.height.saturating_sub(search_h);
         let sa = Rect::new(above_status.x, search_y, above_status.width, search_h);
-        let ca = Rect::new(above_status.x, above_status.y, above_status.width,
-                           above_status.height.saturating_sub(search_h));
+        let ca = Rect::new(
+            above_status.x,
+            above_status.y,
+            above_status.width,
+            above_status.height.saturating_sub(search_h),
+        );
         (Some(sa), ca)
     } else {
         (None, above_status)
@@ -55,43 +63,49 @@ pub fn render(state: &AppState, frame: &mut Frame) {
 
     // ── Optional sidebar (left panel) ─────────────────────────────────────────
     let sidebar_total_w = SIDEBAR_WIDTH + 1; // +1 for separator
-    let (sidebar_area, editor_area) = if state.sidebar.is_some()
-        && editor_content_area.width > sidebar_total_w
-    {
-        let side = Rect::new(
-            editor_content_area.x,
-            editor_content_area.y,
-            sidebar_total_w,
-            editor_content_area.height,
-        );
-        let ed = Rect::new(
-            editor_content_area.x + sidebar_total_w,
-            editor_content_area.y,
-            editor_content_area.width.saturating_sub(sidebar_total_w),
-            editor_content_area.height,
-        );
-        (Some(side), ed)
-    } else {
-        (None, editor_content_area)
-    };
+    let (sidebar_area, editor_area) =
+        if state.sidebar.is_some() && editor_content_area.width > sidebar_total_w {
+            let side = Rect::new(
+                editor_content_area.x,
+                editor_content_area.y,
+                sidebar_total_w,
+                editor_content_area.height,
+            );
+            let ed = Rect::new(
+                editor_content_area.x + sidebar_total_w,
+                editor_content_area.y,
+                editor_content_area.width.saturating_sub(sidebar_total_w),
+                editor_content_area.height,
+            );
+            (Some(side), ed)
+        } else {
+            (None, editor_content_area)
+        };
 
     // ── Compute syntax highlights for visible range ───────────────────────────
     let handle = state.editor.active();
     let highlight_spans = if editor_area.height > 0 {
         let visible_start = handle.viewport.scroll_row;
-        let visible_end = (visible_start + editor_area.height as usize).min(handle.buffer.len_lines());
+        let visible_end =
+            (visible_start + editor_area.height as usize).min(handle.buffer.len_lines());
         if visible_start < visible_end {
-            let start_byte = handle.buffer.rope()
+            let start_byte = handle
+                .buffer
+                .rope()
                 .char_to_byte(handle.buffer.rope().line_to_char(visible_start));
             let end_line = visible_end.min(handle.buffer.len_lines());
             let end_byte = if end_line >= handle.buffer.len_lines() {
                 handle.buffer.rope().len_bytes()
             } else {
-                handle.buffer.rope()
+                handle
+                    .buffer
+                    .rope()
                     .char_to_byte(handle.buffer.rope().line_to_char(end_line))
             };
             let source = handle.buffer.to_string();
-            handle.syntax.highlight_spans(source.as_bytes(), start_byte, end_byte)
+            handle
+                .syntax
+                .highlight_spans(source.as_bytes(), start_byte, end_byte)
         } else {
             Vec::new()
         }
@@ -106,12 +120,19 @@ pub fn render(state: &AppState, frame: &mut Frame) {
     }
 
     if let Some(side_a) = sidebar_area {
-        let sb_inner = Rect::new(side_a.x, side_a.y, side_a.width.saturating_sub(1), side_a.height);
+        let sb_inner = Rect::new(
+            side_a.x,
+            side_a.y,
+            side_a.width.saturating_sub(1),
+            side_a.height,
+        );
         if let Some(sidebar) = &state.sidebar {
             sidebar::render(sidebar, state.sidebar_focused, sb_inner, buf);
         }
         let sep_x = side_a.x + side_a.width.saturating_sub(1);
-        let sep_style = Style::default().bg(Color::Rgb(20, 20, 35)).fg(Color::Rgb(60, 60, 80));
+        let sep_style = Style::default()
+            .bg(Color::Rgb(20, 20, 35))
+            .fg(Color::Rgb(60, 60, 80));
         for y in side_a.y..side_a.y + side_a.height {
             buf.set_string(sep_x, y, "│", sep_style);
         }
@@ -126,17 +147,19 @@ pub fn render(state: &AppState, frame: &mut Frame) {
         buf,
     );
 
-    if let Some(sa) = search_area_opt {
-        if let Some(ss) = &state.search_state {
-            search_bar::render(ss, sa, buf);
-        }
+    if let Some(sa) = search_area_opt
+        && let Some(ss) = &state.search_state
+    {
+        search_bar::render(ss, sa, buf);
     }
 
     status_bar::render(state, status_area, buf);
 
     // ── Confirm-quit overlay (replaces status bar) ────────────────────────────
     if state.confirm_quit {
-        let prompt_style = Style::default().bg(Color::Rgb(180, 40, 40)).fg(Color::White);
+        let prompt_style = Style::default()
+            .bg(Color::Rgb(180, 40, 40))
+            .fg(Color::White);
         let msg = " Unsaved changes. Quit anyway? (y/n) ";
         for x in status_area.x..status_area.x + status_area.width {
             buf.set_string(x, status_area.y, " ", prompt_style);

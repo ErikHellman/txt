@@ -1,9 +1,9 @@
-use ropey::Rope;
+//! Low-level rope editing operations. These functions mutate the rope directly
+//! and return the information needed to record an undo command.
+//!
+//! All byte offsets must be valid char boundaries in the rope.
 
-/// Low-level rope editing operations. These functions mutate the rope directly
-/// and return the information needed to record an undo command.
-///
-/// All byte offsets must be valid char boundaries in the rope.
+use ropey::Rope;
 
 /// Insert a string at a byte offset.
 ///
@@ -73,11 +73,17 @@ pub fn prev_word_boundary(rope: &Rope, byte_offset: usize) -> usize {
     let mut idx = prefix.len();
     // Skip any trailing whitespace
     while idx > 0 && prefix[..idx].ends_with(|c: char| c.is_whitespace()) {
-        idx -= prefix[..idx].chars().next_back().map_or(1, |c| c.len_utf8());
+        idx -= prefix[..idx]
+            .chars()
+            .next_back()
+            .map_or(1, |c| c.len_utf8());
     }
     // Skip word chars
     while idx > 0 && prefix[..idx].ends_with(|c: char| !c.is_whitespace()) {
-        idx -= prefix[..idx].chars().next_back().map_or(1, |c| c.len_utf8());
+        idx -= prefix[..idx]
+            .chars()
+            .next_back()
+            .map_or(1, |c| c.len_utf8());
     }
     idx
 }
@@ -197,7 +203,7 @@ mod tests {
     fn word_boundary_backward() {
         let r = rope("hello world foo");
         assert_eq!(prev_word_boundary(&r, 11), 6); // back to "world"
-        assert_eq!(prev_word_boundary(&r, 6), 0);  // back to "hello"
+        assert_eq!(prev_word_boundary(&r, 6), 0); // back to "hello"
     }
 
     #[test]
