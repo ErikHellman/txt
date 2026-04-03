@@ -38,9 +38,7 @@ impl InputHandler {
 
             // ── Whitespace ────────────────────────────────────────────
             KeyCode::Enter => EditorAction::InsertNewline,
-            KeyCode::Tab if ctrl => EditorAction::NextTab,
             KeyCode::Tab => EditorAction::InsertTab,
-            KeyCode::BackTab if ctrl => EditorAction::PrevTab,
             KeyCode::BackTab => EditorAction::Unhandled, // Shift+Tab — future dedent
 
             // ── Deletion ──────────────────────────────────────────────
@@ -119,6 +117,9 @@ impl InputHandler {
             'h' | 'H' => EditorAction::OpenReplace,
             'r' | 'R' => EditorAction::OpenRecentFiles,
             '/' => EditorAction::ToggleLineComment,
+            ',' => EditorAction::OpenSettings,
+            '[' => EditorAction::PrevTab,
+            ']' => EditorAction::NextTab,
             // Ctrl+1..9: switch to tab by index
             '1' => EditorAction::GoToTab(0),
             '2' => EditorAction::GoToTab(1),

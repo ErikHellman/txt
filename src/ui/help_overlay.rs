@@ -49,8 +49,8 @@ const ENTRIES: &[(&str, &str)] = &[
     ("Ctrl+O", "Open file"),
     ("Ctrl+G", "Jump to line"),
     ("Ctrl+T", "New tab"),
-    ("Ctrl+Tab / Ctrl+PgDn", "Next tab"),
-    ("Ctrl+PgUp", "Prev tab"),
+    ("Ctrl+] / Ctrl+PgDn", "Next tab"),
+    ("Ctrl+[ / Ctrl+PgUp", "Prev tab"),
     ("Ctrl+1..9", "Go to tab N"),
     // ── Panels & Pickers ─────────────────────────────────────────────
     ("", "Panels & Pickers"),
@@ -70,6 +70,7 @@ const ENTRIES: &[(&str, &str)] = &[
     ("", "View & App"),
     ("Alt+Z", "Toggle word wrap"),
     ("F1", "Toggle this help  (↑↓ to scroll)"),
+    ("Ctrl+,", "Settings"),
     ("Ctrl+Q", "Quit"),
 ];
 

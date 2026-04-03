@@ -8,7 +8,7 @@ use ratatui::backend::CrosstermBackend;
 
 use crate::{
     clipboard::ClipboardManager,
-    config::{Config, add_to_recent_files, load_recent_files},
+    config::{Config, Theme, add_to_recent_files, load_recent_files},
     editor::Editor,
     editor::viewport::screen_pos_to_byte_offset,
     git::GitGutter,
@@ -277,6 +277,42 @@ impl SidebarState {
         }
     }
 
+    /// Collapse the directory entry at `idx` (if expanded), removing its children.
+    fn collapse_at(&mut self, idx: usize) {
+        if idx >= self.entries.len() || !self.entries[idx].is_dir || !self.entries[idx].expanded {
+            return;
+        }
+        let depth = self.entries[idx].depth;
+        self.entries[idx].expanded = false;
+        let start = idx + 1;
+        let end = self.entries[start..]
+            .iter()
+            .position(|e| e.depth <= depth)
+            .map(|p| start + p)
+            .unwrap_or(self.entries.len());
+        self.entries.drain(start..end);
+    }
+
+    /// Move selection to the nearest ancestor directory and collapse it.
+    /// Does nothing if the selected entry is already at depth 0.
+    pub fn move_to_parent_and_collapse(&mut self) {
+        let idx = self.selected;
+        let depth = match self.entries.get(idx) {
+            Some(e) => e.depth,
+            None => return,
+        };
+        if depth == 0 {
+            return;
+        }
+        if let Some(parent_idx) = self.entries[..idx]
+            .iter()
+            .rposition(|e| e.depth == depth - 1)
+        {
+            self.selected = parent_idx;
+            self.collapse_at(parent_idx);
+        }
+    }
+
     /// Expand the directory entry at `idx` without affecting `self.selected`.
     fn expand_dir_at(&mut self, idx: usize) {
         if self.entries[idx].expanded || !self.entries[idx].is_dir {
@@ -361,8 +397,11 @@ pub struct AppState {
     pub command_palette: Option<CommandPaletteState>,
     pub show_help: bool,
     pub help_scroll: usize,
+    pub show_settings: bool,
+    pub settings_cursor: usize,
     pub git_gutter: Option<GitGutter>,
     pub config: Config,
+    pub workspace: PathBuf,
     pub should_quit: bool,
     pub confirm_quit: bool,
     /// Active file watcher for the current buffer (replaced on each file open/save).
@@ -372,7 +411,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(editor: Editor) -> Self {
+    pub fn new(editor: Editor, workspace: PathBuf) -> Self {
         let config = Config::load();
         let mut state = Self {
             editor,
@@ -386,8 +425,11 @@ impl AppState {
             command_palette: None,
             show_help: false,
             help_scroll: 0,
+            show_settings: false,
+            settings_cursor: 0,
             git_gutter: None,
             config,
+            workspace,
             should_quit: false,
             confirm_quit: false,
             file_watcher: None,
@@ -428,6 +470,11 @@ impl AppState {
 
         // Help overlay — intercept navigation keys for scrolling
         if self.show_help && self.handle_help(&action) {
+            return;
+        }
+
+        // Settings overlay — intercept navigation and edits
+        if self.show_settings && self.handle_settings(&action) {
             return;
         }
 
@@ -793,6 +840,12 @@ impl AppState {
                     self.help_scroll = 0;
                 }
             }
+            EditorAction::OpenSettings => {
+                self.show_settings = !self.show_settings;
+                if self.show_settings {
+                    self.settings_cursor = 0;
+                }
+            }
             EditorAction::ToggleLineComment => {
                 self.toggle_line_comment();
             }
@@ -842,7 +895,7 @@ impl AppState {
                     Some(FuzzyPickerState::from_buffers(self.editor.buffer_names()));
             }
             EditorAction::OpenRecentFiles => {
-                let files = load_recent_files();
+                let files = load_recent_files(&self.workspace);
                 self.fuzzy_picker = Some(FuzzyPickerState::from_paths(files));
             }
             EditorAction::ReloadConfig => {
@@ -1004,7 +1057,7 @@ impl AppState {
                     self.after_file_open_or_save();
                 }
             }
-            EditorAction::Quit | EditorAction::Unhandled => {
+            EditorAction::Quit | EditorAction::CloseSearch | EditorAction::Unhandled => {
                 self.fuzzy_picker = None;
             }
             _ => {}
@@ -1261,6 +1314,68 @@ impl AppState {
         }
     }
 
+    // ── Settings overlay input handling ──────────────────────────────────────
+
+    /// Handle input while the settings overlay is open.
+    /// Returns `true` if the action was consumed, `false` to let it fall through.
+    fn handle_settings(&mut self, action: &EditorAction) -> bool {
+        const NUM_ROWS: usize = 4;
+        match action {
+            EditorAction::MoveCursor(Direction::Up) => {
+                self.settings_cursor = self.settings_cursor.saturating_sub(1);
+                true
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                self.settings_cursor = (self.settings_cursor + 1).min(NUM_ROWS - 1);
+                true
+            }
+            EditorAction::InsertChar(' ') | EditorAction::InsertNewline => {
+                self.toggle_setting(true);
+                true
+            }
+            EditorAction::MoveCursor(Direction::Right) => {
+                self.toggle_setting(true);
+                true
+            }
+            EditorAction::MoveCursor(Direction::Left) => {
+                self.toggle_setting(false);
+                true
+            }
+            // Let Quit / Escape close the overlay but fall through so Quit still quits.
+            EditorAction::OpenSettings | EditorAction::CloseSearch => {
+                self.show_settings = false;
+                true
+            }
+            EditorAction::Quit | EditorAction::ForceQuit => {
+                self.show_settings = false;
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// Toggle or cycle the setting at `settings_cursor`. `forward` controls
+    /// direction for enum settings; booleans always flip.
+    fn toggle_setting(&mut self, forward: bool) {
+        match self.settings_cursor {
+            0 => self.config.confirm_exit = !self.config.confirm_exit,
+            1 => self.config.auto_save = !self.config.auto_save,
+            2 => self.config.show_whitespace = !self.config.show_whitespace,
+            3 => {
+                let all = Theme::ALL;
+                let idx = all.iter().position(|t| t == &self.config.theme).unwrap_or(0);
+                let next = if forward {
+                    (idx + 1) % all.len()
+                } else {
+                    (idx + all.len() - 1) % all.len()
+                };
+                self.config.theme = all[next].clone();
+            }
+            _ => {}
+        }
+        self.config.save();
+    }
+
     // ── Sidebar input handling ────────────────────────────────────────────────
 
     /// Handle input while the sidebar is focused.
@@ -1298,10 +1413,30 @@ impl AppState {
                 }
                 true
             }
-            EditorAction::InsertChar(' ') => {
-                // Space: expand/collapse directory without leaving sidebar.
+            EditorAction::InsertChar(' ') | EditorAction::MoveCursor(Direction::Right) => {
+                // Space / Right: open file (stay in sidebar) or expand/collapse directory.
+                let entry = self
+                    .sidebar
+                    .as_ref()
+                    .and_then(|sb| sb.entries.get(sb.selected))
+                    .map(|e| (e.path.clone(), e.is_dir));
+                if let Some((path, is_dir)) = entry {
+                    if is_dir {
+                        if let Some(sb) = &mut self.sidebar {
+                            sb.toggle_selected();
+                        }
+                    } else {
+                        let _ = self.editor.open_tab(path);
+                        self.after_file_open_or_save();
+                        // intentionally keep sidebar_focused = true
+                    }
+                }
+                true
+            }
+            EditorAction::MoveCursor(Direction::Left) => {
+                // Left: move to parent directory and collapse it.
                 if let Some(sb) = &mut self.sidebar {
-                    sb.toggle_selected();
+                    sb.move_to_parent_and_collapse();
                 }
                 true
             }
@@ -1436,7 +1571,7 @@ impl AppState {
     /// and installs a file watcher for the new path.
     fn after_file_open_or_save(&mut self) {
         if let Some(path) = self.editor.active().path.clone() {
-            add_to_recent_files(&path);
+            add_to_recent_files(&path, &self.workspace.clone());
             self.file_watcher = FileWatcher::new(&path);
         }
         self.refresh_git_gutter();
@@ -1537,8 +1672,9 @@ impl App {
         mut terminal: Terminal<CrosstermBackend<std::io::Stdout>>,
         editor: Editor,
         open_sidebar: bool,
+        workspace: PathBuf,
     ) -> Result<()> {
-        let mut state = AppState::new(editor);
+        let mut state = AppState::new(editor, workspace);
         if open_sidebar {
             state.sidebar = Some(SidebarState::new());
             state.sidebar_focused = true;

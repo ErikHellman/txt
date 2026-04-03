@@ -54,6 +54,15 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
         buf.set_string(x, area.y, " ", bar_style);
     }
 
+    // Mode badge — leftmost element, shows the active pane/overlay.
+    let (mode_label, mode_bg) = active_mode(state);
+    let mode_style = Style::default()
+        .bg(mode_bg)
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD);
+    buf.set_string(area.x, area.y, mode_label, mode_style);
+    let mode_width = mode_label.len() as u16;
+
     let cursor = handle.buffer.cursors.primary();
     let line = cursor.line + 1; // 1-based for display
     let col = cursor.col + 1;
@@ -83,16 +92,17 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
     let right_x = area.x + (width.saturating_sub(right.len())) as u16;
     buf.set_string(right_x, area.y, &right, info_style);
 
-    // Left side: " filename"
-    let left_available = (right_x as usize).saturating_sub(area.x as usize);
+    // Left side: " filename" — starts after the mode badge
+    let left_start = area.x + mode_width;
+    let left_available = (right_x as usize).saturating_sub(left_start as usize);
     let name_part = format!(" {}", name);
     let name_end = name_part.len().min(left_available);
     if name_end > 0 {
-        buf.set_string(area.x, area.y, &name_part[..name_end], name_style);
+        buf.set_string(left_start, area.y, &name_part[..name_end], name_style);
     }
 
     // Modified flag after name
-    let modified_x = area.x + name_end as u16;
+    let modified_x = left_start + name_end as u16;
     let modified_available = (right_x as usize).saturating_sub(modified_x as usize);
     if !modified_str.is_empty() && modified_available > 0 {
         let m = truncate_str(modified_str, modified_available);
@@ -116,6 +126,22 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
             let l = truncate_str(&lang_label, lang_available);
             buf.set_string(lang_x, area.y, &l, lang_style);
         }
+    }
+}
+
+fn active_mode(state: &AppState) -> (&'static str, Color) {
+    if state.sidebar_focused {
+        (" SIDEBAR ", Color::Rgb(30, 100, 120))
+    } else if state.show_help {
+        (" HELP ", Color::Rgb(70, 50, 130))
+    } else if state.show_settings {
+        (" SETTINGS ", Color::Rgb(120, 85, 30))
+    } else if state.fuzzy_picker.is_some() {
+        (" PICKER ", Color::Rgb(30, 90, 130))
+    } else if state.command_palette.is_some() {
+        (" PALETTE ", Color::Rgb(90, 50, 130))
+    } else {
+        (" EDITOR ", Color::Rgb(40, 110, 60))
     }
 }
 

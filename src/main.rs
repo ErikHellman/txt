@@ -37,6 +37,7 @@ fn main() -> Result<()> {
         Some(p) => (Editor::open(p)?, false),
         None => (Editor::new(), false),
     };
+    let workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     // Install a panic hook that restores the terminal before printing the panic.
     let original_hook = std::panic::take_hook();
@@ -46,7 +47,7 @@ fn main() -> Result<()> {
     }));
 
     let terminal = init_terminal()?;
-    let result = App::new().run(terminal, editor, open_sidebar);
+    let result = App::new().run(terminal, editor, open_sidebar, workspace);
     restore_terminal()?;
 
     if let Err(e) = result {

@@ -3,6 +3,7 @@ pub mod editor_view;
 pub mod fuzzy_picker;
 pub mod help_overlay;
 pub mod search_bar;
+pub mod settings_overlay;
 pub mod sidebar;
 pub mod status_bar;
 pub mod tab_bar;
@@ -138,11 +139,18 @@ pub fn render(state: &AppState, frame: &mut Frame) {
         }
     }
 
+    let editor_focused = !state.sidebar_focused
+        && state.fuzzy_picker.is_none()
+        && state.command_palette.is_none()
+        && !state.show_help
+        && !state.show_settings;
+
     editor_view::render(
         handle,
         state.search_state.as_ref(),
         &highlight_spans,
         state.git_gutter.as_ref(),
+        editor_focused,
         editor_area,
         buf,
     );
@@ -181,5 +189,10 @@ pub fn render(state: &AppState, frame: &mut Frame) {
     // ── Help overlay ─────────────────────────────────────────────────────────
     if state.show_help {
         help_overlay::render(area, buf, state.help_scroll);
+    }
+
+    // ── Settings overlay ──────────────────────────────────────────────────────
+    if state.show_settings {
+        settings_overlay::render(state, area, buf);
     }
 }

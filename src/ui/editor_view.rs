@@ -31,6 +31,7 @@ pub fn render(
     search: Option<&SearchState>,
     highlights: &[HighlightSpan],
     git_gutter: Option<&GitGutter>,
+    focused: bool,
     area: Rect,
     buf: &mut TermBuffer,
 ) {
@@ -58,10 +59,16 @@ pub fn render(
     let selection_style = Style::default()
         .bg(Color::Rgb(60, 80, 120))
         .fg(Color::White);
-    let cursor_style = Style::default()
-        .bg(Color::White)
-        .fg(Color::Black)
-        .add_modifier(Modifier::BOLD);
+    let cursor_style = if focused {
+        Style::default()
+            .bg(Color::White)
+            .fg(Color::Black)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .bg(Color::Rgb(70, 70, 95))
+            .fg(Color::Rgb(160, 160, 180))
+    };
     let match_style = Style::default()
         .bg(Color::Rgb(80, 70, 20))
         .fg(Color::Rgb(255, 230, 100));

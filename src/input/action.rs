@@ -125,6 +125,8 @@ pub enum EditorAction {
     ReloadConfig,
     /// Toggle the help overlay (F1).
     ToggleHelp,
+    /// Open the settings overlay (Ctrl+,).
+    OpenSettings,
     /// Toggle line comment for the current line(s) (Ctrl+/).
     ToggleLineComment,
     /// Toggle word wrap (Alt+Z).

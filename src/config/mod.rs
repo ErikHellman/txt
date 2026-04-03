@@ -1,8 +1,33 @@
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 const MAX_RECENT: usize = 50;
+
+/// Predefined colour themes. Serialises as snake_case strings in TOML.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Theme {
+    #[default]
+    Default,
+    Monokai,
+    Gruvbox,
+    Nord,
+}
+
+impl Theme {
+    pub const ALL: &'static [Self] = &[Self::Default, Self::Monokai, Self::Gruvbox, Self::Nord];
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Theme::Default => "Default",
+            Theme::Monokai => "Monokai",
+            Theme::Gruvbox => "Gruvbox",
+            Theme::Nord => "Nord",
+        }
+    }
+}
 
 /// Editor configuration. All fields have defaults so partial TOML is fine.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -10,28 +35,36 @@ pub struct Config {
     /// Number of spaces per indent / tab.
     #[serde(default = "default_tab_size")]
     pub tab_size: usize,
-    /// Theme name (currently only "default" is built-in; reserved for Phase future).
-    #[serde(default = "default_theme")]
-    pub theme: String,
     /// Enable viewport word-wrap by default for all new buffers.
     #[serde(default)]
     pub word_wrap: bool,
+    /// Ask for confirmation before quitting with unsaved changes.
+    #[serde(default)]
+    pub confirm_exit: bool,
+    /// Automatically save after edits (debounced).
+    #[serde(default)]
+    pub auto_save: bool,
+    /// Render whitespace characters with visible glyphs.
+    #[serde(default)]
+    pub show_whitespace: bool,
+    /// Active colour theme.
+    #[serde(default)]
+    pub theme: Theme,
 }
 
 fn default_tab_size() -> usize {
     4
 }
 
-fn default_theme() -> String {
-    "default".to_string()
-}
-
 impl Default for Config {
     fn default() -> Self {
         Self {
             tab_size: default_tab_size(),
-            theme: default_theme(),
             word_wrap: false,
+            confirm_exit: false,
+            auto_save: false,
+            show_whitespace: false,
+            theme: Theme::Default,
         }
     }
 }
@@ -56,60 +89,85 @@ impl Config {
         toml::from_str(&text).unwrap_or_default()
     }
 
-    /// Path to the config file, or `None` if the platform config dir is unknown.
+    /// Persist config to `~/.config/txt/config.toml`. Silently ignores errors.
+    pub fn save(&self) {
+        let Some(path) = Self::config_path() else { return };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(text) = toml::to_string(self) {
+            let _ = std::fs::write(&path, text);
+        }
+    }
+
+    /// Path to the config file (`~/.config/txt/config.toml`).
     pub fn config_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|d| d.join("txt").join("config.toml"))
+        dirs::home_dir().map(|h| h.join(".config").join("txt").join("config.toml"))
     }
 
-    /// Path to the recent-files list, or `None` if the platform config dir is unknown.
+    /// Path to the recent-files list (`~/.config/txt/recent.json`).
     pub fn recent_files_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|d| d.join("txt").join("recent.json"))
+        dirs::home_dir().map(|h| h.join(".config").join("txt").join("recent.json"))
     }
 }
 
-/// Load the list of recently opened files (up to `MAX_RECENT`).
+/// Load the recent-files list for `workspace`.
 ///
-/// Returns an empty list on any error (missing file, parse error, etc.).
-pub fn load_recent_files() -> Vec<PathBuf> {
-    let path = match Config::recent_files_path() {
-        Some(p) => p,
-        None => return Vec::new(),
-    };
-    let text = match std::fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(_) => return Vec::new(),
-    };
-    let strings: Vec<String> = serde_json::from_str(&text).unwrap_or_default();
-    strings.into_iter().map(PathBuf::from).collect()
+/// Returns an empty list on any error (missing file, parse error, unknown workspace).
+pub fn load_recent_files(workspace: &Path) -> Vec<PathBuf> {
+    let map = read_recent_map();
+    let key = canonical_str(workspace);
+    map.get(&key)
+        .map(|files| files.iter().map(PathBuf::from).collect())
+        .unwrap_or_default()
 }
 
-/// Prepend `path` to the recent-files list and persist it.
+/// Prepend `path` to the recent-files list for `workspace` and persist it.
 ///
-/// Deduplicates (removes any existing entry for `path`) and truncates to
-/// `MAX_RECENT`. Silently ignores I/O errors.
-pub fn add_to_recent_files(path: &std::path::Path) {
+/// Deduplicates and truncates to `MAX_RECENT`. Silently ignores I/O errors.
+pub fn add_to_recent_files(path: &Path, workspace: &Path) {
+    let mut map = read_recent_map();
+    let workspace_key = canonical_str(workspace);
     let canonical = match path.canonicalize() {
         Ok(p) => p,
         Err(_) => path.to_path_buf(),
     };
-    let mut recent = load_recent_files();
-    recent.retain(|p| p != &canonical);
-    recent.insert(0, canonical);
-    recent.truncate(MAX_RECENT);
-    save_recent_files(&recent);
+    let entry = map.entry(workspace_key).or_default();
+    let canonical_str = canonical.to_string_lossy().into_owned();
+    entry.retain(|p| p != &canonical_str);
+    entry.insert(0, canonical_str);
+    entry.truncate(MAX_RECENT);
+    write_recent_map(&map);
 }
 
-fn save_recent_files(files: &[PathBuf]) {
+fn canonical_str(path: &Path) -> String {
+    path.canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn read_recent_map() -> HashMap<String, Vec<String>> {
+    let path = match Config::recent_files_path() {
+        Some(p) => p,
+        None => return HashMap::new(),
+    };
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(_) => return HashMap::new(),
+    };
+    serde_json::from_str(&text).unwrap_or_default()
+}
+
+fn write_recent_map(map: &HashMap<String, Vec<String>>) {
     let path = match Config::recent_files_path() {
         Some(p) => p,
         None => return,
     };
-    // Ensure the directory exists.
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let strings: Vec<&str> = files.iter().filter_map(|p| p.to_str()).collect();
-    if let Ok(json) = serde_json::to_string(&strings) {
+    if let Ok(json) = serde_json::to_string(map) {
         let _ = std::fs::write(&path, json);
     }
 }
@@ -124,8 +182,11 @@ mod tests {
     fn default_config_values() {
         let c = Config::default();
         assert_eq!(c.tab_size, 4);
-        assert_eq!(c.theme, "default");
+        assert_eq!(c.theme, Theme::Default);
         assert!(!c.word_wrap);
+        assert!(!c.confirm_exit);
+        assert!(!c.auto_save);
+        assert!(!c.show_whitespace);
     }
 
     #[test]
@@ -146,7 +207,7 @@ mod tests {
         let toml_str = "tab_size = 2\n";
         let c: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(c.tab_size, 2);
-        assert_eq!(c.theme, "default"); // default filled in
+        assert_eq!(c.theme, Theme::Default); // default filled in
         assert!(!c.word_wrap);
     }
 
@@ -154,8 +215,11 @@ mod tests {
     fn full_config_round_trips() {
         let original = Config {
             tab_size: 2,
-            theme: "dark".to_string(),
+            theme: Theme::Monokai,
             word_wrap: true,
+            confirm_exit: true,
+            auto_save: false,
+            show_whitespace: true,
         };
         let serialized = toml::to_string(&original).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();
@@ -190,6 +254,19 @@ mod tests {
     fn load_recent_files_missing_returns_empty() {
         // The real file may not exist; this should not panic.
         // We just verify it returns a Vec (possibly empty) without panicking.
-        let _ = super::load_recent_files();
+        let _ = super::load_recent_files(std::path::Path::new("/tmp"));
+    }
+
+    #[test]
+    fn theme_display_names() {
+        assert_eq!(Theme::Default.display_name(), "Default");
+        assert_eq!(Theme::Monokai.display_name(), "Monokai");
+        assert_eq!(Theme::Gruvbox.display_name(), "Gruvbox");
+        assert_eq!(Theme::Nord.display_name(), "Nord");
+    }
+
+    #[test]
+    fn theme_all_covers_all_variants() {
+        assert_eq!(Theme::ALL.len(), 4);
     }
 }
