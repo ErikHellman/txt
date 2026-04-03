@@ -205,10 +205,7 @@ pub fn display_col_at(rope: &Rope, line: usize, byte_col: usize) -> usize {
     let line_slice = rope.line(line.min(rope.len_lines() - 1));
     let line_str: String = line_slice.chars().collect();
     let prefix = &line_str[..byte_col.min(line_str.len())];
-    prefix
-        .graphemes(true)
-        .map(UnicodeWidthStr::width)
-        .sum()
+    prefix.graphemes(true).map(UnicodeWidthStr::width).sum()
 }
 
 /// Returns the byte length of a line excluding any trailing newline characters.

@@ -1466,7 +1466,9 @@ impl AppState {
         if self.confirm_reload {
             return; // prompt already showing — don't re-trigger
         }
-        if let Some(watcher) = &self.file_watcher && watcher.poll() {
+        if let Some(watcher) = &self.file_watcher
+            && watcher.poll()
+        {
             self.confirm_reload = true;
         }
     }
