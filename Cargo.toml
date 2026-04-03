@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 description = "A fast, intuitive terminal text editor"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/<owner>/txt"
 
 [[bin]]
 name = "txt"
@@ -45,3 +47,6 @@ tempfile = "3"
 [[bench]]
 name = "buffer"
 harness = false
+
+[profile.release]
+strip = "symbols"
