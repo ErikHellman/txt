@@ -1,0 +1,47 @@
+[package]
+name = "txt"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "A fast, intuitive terminal text editor"
+
+[[bin]]
+name = "txt"
+path = "src/main.rs"
+
+[dependencies]
+# Text buffer
+ropey = "1.6.1"
+
+# Unicode handling — unicode-width MUST be pinned; version changes break rendering
+# Pin to match ratatui's version so cursor display-col matches rendering width
+unicode-width = "=0.2.2"
+unicode-segmentation = "1.13"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+ratatui = "0.30.0"
+crossterm = "0.29.0"
+arboard = "3.6.1"
+tree-sitter = "0.26.8"
+tree-sitter-rust = "0.24.2"
+tree-sitter-python = "0.25.0"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-json = "0.24.8"
+ignore = "0.4.25"
+nucleo = "0.5.0"
+dirs = "6.0.0"
+toml = "1.1.2"
+serde = { version = "1.0.228", features = ["derive"] }
+regex = "1"
+serde_json = "1"
+notify = "6"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3"
+
+[[bench]]
+name = "buffer"
+harness = false
