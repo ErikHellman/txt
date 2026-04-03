@@ -18,21 +18,6 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
         return;
     }
 
-    // File-changed-on-disk reload prompt takes priority over everything.
-    if state.confirm_reload {
-        let warn_style = Style::default()
-            .bg(Color::Rgb(100, 50, 0))
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD);
-        for x in area.x..area.x + area.width {
-            buf.set_string(x, area.y, " ", warn_style);
-        }
-        let msg = " File changed on disk. Reload? [y/n] ";
-        let truncated = truncate_str(msg, area.width as usize);
-        buf.set_string(area.x, area.y, &truncated, warn_style);
-        return;
-    }
-
     // Show prompt when a modal input is active.
     if let Some(prompt) = modal_prompt(&state.input_mode) {
         let prompt_style = Style::default()

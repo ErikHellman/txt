@@ -367,8 +367,6 @@ pub struct AppState {
     pub confirm_quit: bool,
     /// Active file watcher for the current buffer (replaced on each file open/save).
     file_watcher: Option<FileWatcher>,
-    /// Set to true when the watcher detects an external modification.
-    pub confirm_reload: bool,
     pub term_width: u16,
     pub term_height: u16,
 }
@@ -393,7 +391,6 @@ impl AppState {
             should_quit: false,
             confirm_quit: false,
             file_watcher: None,
-            confirm_reload: false,
             term_width: 80,
             term_height: 24,
         };
@@ -410,21 +407,6 @@ impl AppState {
 
     pub fn update(&mut self, action: EditorAction, terminal_height: u16) {
         self.term_height = terminal_height;
-
-        // File-changed-on-disk confirmation
-        if self.confirm_reload {
-            match action {
-                EditorAction::InsertChar('y') | EditorAction::InsertChar('Y') => {
-                    self.confirm_reload = false;
-                    self.reload_active_file();
-                }
-                _ => {
-                    // Any other key dismisses the prompt without reloading.
-                    self.confirm_reload = false;
-                }
-            }
-            return;
-        }
 
         // Quit confirmation mode
         if self.confirm_quit {
@@ -1456,20 +1438,16 @@ impl AppState {
         if let Some(path) = self.editor.active().path.clone() {
             add_to_recent_files(&path);
             self.file_watcher = FileWatcher::new(&path);
-            self.confirm_reload = false;
         }
         self.refresh_git_gutter();
     }
 
-    /// Poll the file watcher; if the file changed externally, set `confirm_reload`.
+    /// Poll the file watcher; if the file changed externally, reload automatically.
     pub fn poll_file_watcher(&mut self) {
-        if self.confirm_reload {
-            return; // prompt already showing — don't re-trigger
-        }
         if let Some(watcher) = &self.file_watcher
             && watcher.poll()
         {
-            self.confirm_reload = true;
+            self.reload_active_file();
         }
     }
 
@@ -1481,8 +1459,13 @@ impl AppState {
         };
         if let Ok(text) = std::fs::read_to_string(&path) {
             let handle = self.editor.active_mut();
+            let saved_line = handle.buffer.cursors.primary().line;
+            let saved_col = handle.buffer.cursors.primary().col;
             handle.buffer = crate::buffer::Buffer::from_str(&text);
             handle.buffer.modified = false;
+            let rope = handle.buffer.rope().clone();
+            *handle.buffer.cursors.primary_mut() =
+                crate::buffer::cursor::Cursor::from_line_col(&rope, saved_line, saved_col);
         }
         self.refresh_git_gutter();
         // Re-install watcher after reload so we don't miss the next change.
