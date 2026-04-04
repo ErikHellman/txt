@@ -73,6 +73,7 @@ const ENTRIES: &[(&str, &str)] = &[
     ("Ctrl+V", "Paste (sidebar)"),
     ("F2", "Rename file/dir (sidebar)"),
     ("Delete", "Delete file/dir (sidebar)"),
+    ("Ctrl+Shift+N", "New folder (sidebar)"),
     // ── View & App ───────────────────────────────────────────────────
     ("", "View & App"),
     ("Alt+Z", "Toggle word wrap"),

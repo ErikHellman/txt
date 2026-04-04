@@ -153,6 +153,8 @@ pub enum EditorAction {
     // ── Sidebar file operations ───────────────────────────────────────
     /// Rename the selected file/directory in the sidebar (F2).
     SidebarRename,
+    /// Create a new folder in the sidebar (Ctrl+Shift+N).
+    SidebarNewFolder,
 
     // ── Placeholder for unrecognised / unimplemented keys ─────────────
     Unhandled,

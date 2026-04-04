@@ -144,6 +144,7 @@ impl InputHandler {
             'l' => EditorAction::SelectAllOccurrences,
             'p' => EditorAction::OpenCommandPalette,
             'e' => EditorAction::OpenBufferSwitcher,
+            'n' => EditorAction::SidebarNewFolder,
             _ => EditorAction::Unhandled,
         }
     }

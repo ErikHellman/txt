@@ -43,6 +43,8 @@ pub enum InputMode {
     SaveAsPath(String),
     /// F2 (sidebar): "Rename: {input}" — carries (original_path, current_input).
     RenamePath(PathBuf, String),
+    /// Ctrl+Shift+N (sidebar): "New folder: {input}" — carries (parent_dir, current_input).
+    NewFolderName(PathBuf, String),
 }
 
 impl InputMode {
@@ -1021,7 +1023,9 @@ impl AppState {
             EditorAction::ForceQuit => {
                 self.should_quit = true;
             }
-            EditorAction::SidebarRename | EditorAction::Unhandled => {}
+            EditorAction::SidebarRename
+            | EditorAction::SidebarNewFolder
+            | EditorAction::Unhandled => {}
         }
 
         // Re-parse the active buffer if it was modified this action.
@@ -1042,7 +1046,8 @@ impl AppState {
                     }
                     InputMode::OpenFilePath(s)
                     | InputMode::SaveAsPath(s)
-                    | InputMode::RenamePath(_, s) => {
+                    | InputMode::RenamePath(_, s)
+                    | InputMode::NewFolderName(_, s) => {
                         s.push(c);
                     }
                     _ => {}
@@ -1054,7 +1059,8 @@ impl AppState {
                     InputMode::JumpToLine(s)
                     | InputMode::OpenFilePath(s)
                     | InputMode::SaveAsPath(s)
-                    | InputMode::RenamePath(_, s) => {
+                    | InputMode::RenamePath(_, s)
+                    | InputMode::NewFolderName(_, s) => {
                         s.pop();
                     }
                     InputMode::Normal => {}
@@ -1126,6 +1132,20 @@ impl AppState {
                         if is_plain_name && let Some(parent) = original.parent() {
                             let new_path = parent.join(new_name);
                             if !new_path.exists() && std::fs::rename(&original, &new_path).is_ok() {
+                                self.refresh_sidebar();
+                            }
+                        }
+                    }
+                    InputMode::NewFolderName(parent, input) => {
+                        let name = input.trim();
+                        let mut components = std::path::Path::new(name).components();
+                        let is_plain_name = matches!(
+                            (components.next(), components.next()),
+                            (Some(std::path::Component::Normal(_)), None)
+                        );
+                        if is_plain_name {
+                            let new_dir = parent.join(name);
+                            if !new_dir.exists() && std::fs::create_dir(&new_dir).is_ok() {
                                 self.refresh_sidebar();
                             }
                         }
@@ -1638,6 +1658,22 @@ impl AppState {
                         .unwrap_or("")
                         .to_string();
                     self.input_mode = InputMode::RenamePath(path, name);
+                }
+                true
+            }
+            EditorAction::SidebarNewFolder => {
+                // Ctrl+Shift+N: create a new folder in the selected location.
+                let parent = self.sidebar.as_ref().and_then(|sb| {
+                    sb.entries.get(sb.selected).map(|e| {
+                        if e.is_dir {
+                            e.path.clone()
+                        } else {
+                            e.path.parent().unwrap_or(&sb.root).to_path_buf()
+                        }
+                    })
+                });
+                if let Some(parent) = parent {
+                    self.input_mode = InputMode::NewFolderName(parent, String::new());
                 }
                 true
             }
