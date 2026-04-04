@@ -47,7 +47,7 @@ const ENTRIES: &[(&str, &str)] = &[
     ("Ctrl+Shift+S", "Save As"),
     ("Ctrl+N", "New file / tab"),
     ("Ctrl+O", "Open file"),
-    ("Ctrl+G", "Jump to line"),
+    ("Ctrl+G", "Jump to line[:col]"),
     ("Ctrl+T", "New tab"),
     ("Ctrl+] / Ctrl+PgDn", "Next tab"),
     ("Ctrl+[ / Ctrl+PgUp", "Prev tab"),

@@ -955,7 +955,7 @@ impl AppState {
         match action {
             EditorAction::InsertChar(c) => {
                 match &mut self.input_mode {
-                    InputMode::JumpToLine(s) if c.is_ascii_digit() => {
+                    InputMode::JumpToLine(s) if c.is_ascii_digit() || c == ':' => {
                         s.push(c);
                     }
                     InputMode::OpenFilePath(s) | InputMode::SaveAsPath(s) => {
@@ -986,11 +986,37 @@ impl AppState {
                 let mode = std::mem::replace(&mut self.input_mode, InputMode::Normal);
                 match mode {
                     InputMode::JumpToLine(input) => {
-                        if let Ok(n) = input.parse::<usize>() {
+                        let (line_str, col_str) = match input.split_once(':') {
+                            Some((l, c)) => (l, Some(c)),
+                            None => (input.as_str(), None),
+                        };
+                        if let Ok(n) = line_str.parse::<usize>() {
                             let line = n.saturating_sub(1); // 1-based input
                             let buf = &mut self.editor.active_mut().buffer;
-                            let clamped = line.min(buf.len_lines().saturating_sub(1));
-                            let target = buf.rope().char_to_byte(buf.rope().line_to_char(clamped));
+                            let target = {
+                                let rope = buf.rope();
+                                let clamped_line = line.min(rope.len_lines().saturating_sub(1));
+                                let line_start_char = rope.line_to_char(clamped_line);
+                                let target_char =
+                                    match col_str.and_then(|s| s.parse::<usize>().ok()) {
+                                        Some(col_n) => {
+                                            let col = col_n.saturating_sub(1); // 1-based → 0-based
+                                            let line_char_len = rope.line(clamped_line).len_chars();
+                                            // Exclude trailing newline when clamping the column.
+                                            let line_content = if line_char_len > 0
+                                                && rope.char(line_start_char + line_char_len - 1)
+                                                    == '\n'
+                                            {
+                                                line_char_len - 1
+                                            } else {
+                                                line_char_len
+                                            };
+                                            line_start_char + col.min(line_content)
+                                        }
+                                        None => line_start_char,
+                                    };
+                                rope.char_to_byte(target_char)
+                            };
                             buf.move_cursor_to(target, false);
                         }
                     }

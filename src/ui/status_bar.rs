@@ -148,7 +148,7 @@ fn active_mode(state: &AppState) -> (&'static str, Color) {
 fn modal_prompt(mode: &InputMode) -> Option<String> {
     match mode {
         InputMode::Normal => None,
-        InputMode::JumpToLine(s) => Some(format!(" Go to line: {}_", s)),
+        InputMode::JumpToLine(s) => Some(format!(" Go to [line:col]: {}_", s)),
         InputMode::OpenFilePath(s) => Some(format!(" Open: {}_", s)),
         InputMode::SaveAsPath(s) => Some(format!(" Save as: {}_", s)),
     }
