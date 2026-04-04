@@ -27,33 +27,45 @@ Releases are tagged `vMAJOR.MINOR.PATCH` (e.g. `v1.2.0`). Pre-releases use `-alp
 ## Prerequisites
 
 - Push access to the `main` branch and permission to create tags on GitHub.
-- `cargo` installed locally (used to verify the build before tagging).
+- `cargo` installed locally.
 
 ## Step-by-step release procedure
 
-### 1. Prepare the release commit
+### 1. Prepare and publish the release
 
 1. Confirm all intended changes are merged to `main` and CI is green.
-2. Update the version in `Cargo.toml`:
+2. Run the test suite:
+   ```sh
+   cargo test
+   ```
+3. Run the release script:
+   ```sh
+   scripts/release.sh X.Y.Z
+   ```
+   The script: validates the version, bumps `Cargo.toml`, rebuilds, commits
+   `"Release vX.Y.Z"`, creates the tag, and pushes both to `origin`.
+
+<details>
+<summary>Manual alternative (if the script is unavailable)</summary>
+
+1. Update the version in `Cargo.toml`:
    ```toml
    version = "X.Y.Z"
    ```
-3. Update `Cargo.lock` (runs automatically):
+2. Regenerate `Cargo.lock`:
    ```sh
    cargo build
    ```
-4. Commit:
+3. Commit and tag:
    ```sh
    git commit -am "Release vX.Y.Z"
+   git tag vX.Y.Z
+   git push origin main
+   git push origin vX.Y.Z
    ```
+</details>
 
-### 2. Tag and push
-
-```sh
-git tag vX.Y.Z
-git push origin main
-git push origin vX.Y.Z
-```
+### 2. Monitor the build
 
 Pushing the tag triggers `.github/workflows/release.yml`, which:
 - Builds binaries for all five targets in parallel
@@ -61,19 +73,23 @@ Pushing the tag triggers `.github/workflows/release.yml`, which:
 - Attaches all binary archives and `checksums.txt`
 - Auto-generates release notes from commit messages
 
-Monitor progress at: `https://github.com/<owner>/txt/actions`
+Monitor progress at: https://github.com/ErikHellman/txt/actions
 
 ### 3. Verify the release
 
 Once the workflow finishes:
-- Open the release page on GitHub and confirm all five archives are attached.
-- Download the binary for your platform, run `txt --version`, and spot-check it.
+- Open the [Releases page](https://github.com/ErikHellman/txt/releases) and confirm all five archives are attached.
+- Download the binary for your platform, run `txt --help`, and open a file to confirm the editor starts correctly.
 
 ### 4. Post-release: update distribution channels
 
+> **Note:** The Homebrew tap and AUR package are not yet active. The instructions
+> below are kept for reference when these channels are set up.
+>
+
 #### Homebrew tap
 
-The Homebrew formula lives in a separate repository (`<owner>/homebrew-tap`).
+The Homebrew formula lives in a separate repository (`ErikHellman/homebrew-tap`).
 
 1. Compute the SHA256 for each archive:
    ```sh
@@ -86,7 +102,7 @@ The Homebrew formula lives in a separate repository (`<owner>/homebrew-tap`).
 
 3. Commit and push to the tap repository.
 
-Users who added the tap (`brew tap <owner>/tap`) will receive the update on their next `brew upgrade`.
+Users who added the tap (`brew tap ErikHellman/tap`) will receive the update on their next `brew upgrade`.
 
 #### AUR (Arch Linux)
 
@@ -112,7 +128,7 @@ The AUR package (`txt-bin`) needs its `PKGBUILD` updated.
 ### macOS and Linux — install script
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/<owner>/txt/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ErikHellman/txt/main/install.sh | sh
 ```
 
 Installs the latest release binary to `~/.local/bin/txt`.
@@ -122,7 +138,7 @@ To uninstall: `rm ~/.local/bin/txt`
 ### Windows — install script (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/<owner>/txt/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/ErikHellman/txt/main/install.ps1 | iex
 ```
 
 Installs the latest release to `%LOCALAPPDATA%\txt\txt.exe` and adds it to your user `PATH`.
@@ -131,14 +147,16 @@ To uninstall: delete `%LOCALAPPDATA%\txt` and remove it from your `PATH`.
 
 ### Homebrew (macOS and Linux)
 
+> Not yet available.
+
 ```sh
-brew tap <owner>/tap
+brew tap ErikHellman/tap
 brew install txt
 ```
 
-To update: `brew upgrade txt`
-
 ### AUR (Arch Linux)
+
+> Not yet available.
 
 Using an AUR helper such as `paru` or `yay`:
 
@@ -148,7 +166,7 @@ paru -S txt-bin
 
 ### Manual download
 
-Download the archive for your platform from the [Releases page](https://github.com/<owner>/txt/releases), extract the binary, and place it anywhere on your `PATH`.
+Download the archive for your platform from the [Releases page](https://github.com/ErikHellman/txt/releases), extract the binary, and place it anywhere on your `PATH`.
 
 Verify integrity using the provided `checksums.txt`:
 ```sh

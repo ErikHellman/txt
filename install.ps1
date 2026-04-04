@@ -1,9 +1,9 @@
 # Install the latest release of txt to $env:LOCALAPPDATA\txt
-# Usage: irm https://raw.githubusercontent.com/<owner>/txt/main/install.ps1 | iex
+# Usage: irm https://raw.githubusercontent.com/ErikHellman/txt/main/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
-$Repo        = "<owner>/txt"
+$Repo        = "ErikHellman/txt"
 $BinName     = "txt"
 $Target      = "x86_64-pc-windows-msvc"
 $InstallDir  = Join-Path $env:LOCALAPPDATA $BinName

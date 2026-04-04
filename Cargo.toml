@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.88"
 description = "A fast, intuitive terminal text editor"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/<owner>/txt"
+repository = "https://github.com/ErikHellman/txt"
 
 [[bin]]
 name = "txt"

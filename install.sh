@@ -1,10 +1,10 @@
 #!/bin/sh
 # Install the latest release of txt to ~/.local/bin
-# Usage: curl -fsSL https://raw.githubusercontent.com/<owner>/txt/main/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/ErikHellman/txt/main/install.sh | sh
 
 set -e
 
-REPO="<owner>/txt"
+REPO="ErikHellman/txt"
 BIN_NAME="txt"
 INSTALL_DIR="${HOME}/.local/bin"
 
