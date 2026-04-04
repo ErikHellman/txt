@@ -406,6 +406,11 @@ pub struct AppState {
     pub confirm_quit: bool,
     /// Active file watcher for the current buffer (replaced on each file open/save).
     file_watcher: Option<FileWatcher>,
+    /// Per-workspace LSP configuration (loaded from `<workspace>/.txt/lsp.toml`).
+    /// Per-workspace LSP configuration (loaded from `<workspace>/.txt/lsp.toml`).
+    pub lsp_config: crate::lsp::config::WorkspaceLspConfig,
+    /// Active LSP server connection (None when LSP is disabled or unavailable).
+    pub lsp: Option<crate::lsp::LspRegistry>,
     pub term_width: u16,
     pub term_height: u16,
 }
@@ -413,6 +418,12 @@ pub struct AppState {
 impl AppState {
     pub fn new(editor: Editor, workspace: PathBuf) -> Self {
         let config = Config::load();
+        let lsp_config = crate::lsp::config::WorkspaceLspConfig::load(&workspace);
+        let lsp = if lsp_config.is_active() {
+            crate::lsp::LspRegistry::start(&lsp_config, &workspace).ok()
+        } else {
+            None
+        };
         let mut state = Self {
             editor,
             clipboard: ClipboardManager::new(),
@@ -433,6 +444,8 @@ impl AppState {
             should_quit: false,
             confirm_quit: false,
             file_watcher: None,
+            lsp_config,
+            lsp,
             term_width: 80,
             term_height: 24,
         };
@@ -1638,6 +1651,70 @@ impl AppState {
         }
     }
 
+    // ── LSP polling ──────────────────────────────────────────────────────────
+
+    /// Non-blocking drain of pending LSP updates. Called once per frame.
+    pub fn poll_lsp_updates(&mut self) {
+        let Some(registry) = &mut self.lsp else {
+            return;
+        };
+        let updates = registry.poll();
+        for update in updates {
+            self.apply_lsp_update(update);
+        }
+    }
+
+    fn apply_lsp_update(&mut self, update: crate::lsp::client::LspUpdate) {
+        use crate::lsp::client::LspUpdate;
+        match update {
+            LspUpdate::Initialized(caps) => {
+                if let Some(registry) = &mut self.lsp {
+                    registry.client_mut().capabilities = caps;
+                    registry.client_mut().initialized = true;
+                    let _ = registry
+                        .client()
+                        .send_notification("initialized", Some(serde_json::json!({})));
+                }
+                // Send didOpen for all currently open buffers.
+                self.notify_lsp_did_open_all();
+            }
+            LspUpdate::Diagnostics { uri, diagnostics } => {
+                // Store raw diagnostic JSON for now; Phase 2 will convert to LspDiagnostic.
+                let _ = (uri, diagnostics);
+            }
+            LspUpdate::ServerExited => {
+                // Try to restart the server.
+                if let Some(registry) = &mut self.lsp
+                    && !registry.restart_exhausted()
+                {
+                    let config = self.lsp_config.clone();
+                    let workspace = self.workspace.clone();
+                    let _ = registry.try_restart(&config, &workspace);
+                }
+            }
+            LspUpdate::Error(msg) => {
+                let _ = msg; // TODO: show in status bar or log
+            }
+            // Other updates will be handled in later phases.
+            _ => {}
+        }
+    }
+
+    fn notify_lsp_did_open_all(&self) {
+        let Some(registry) = &self.lsp else { return };
+        if !registry.is_ready() {
+            return;
+        }
+        for tab in &self.editor.tabs {
+            if let Some(path) = &tab.path {
+                let uri = crate::lsp::types::path_to_uri(path);
+                let lang_id = tab.syntax.language.name().to_lowercase();
+                let text = tab.buffer.rope().to_string();
+                let _ = registry.client().did_open(&uri, &lang_id, 0, &text);
+            }
+        }
+    }
+
     // ── Coordinate helpers ───────────────────────────────────────────────────
 
     fn selected_text(&self) -> Option<String> {
@@ -1735,6 +1812,9 @@ impl App {
 
             // Check for external file changes (non-blocking).
             state.poll_file_watcher();
+
+            // Drain pending LSP server updates (non-blocking).
+            state.poll_lsp_updates();
 
             terminal.draw(|frame| ui::render(&state, frame))?;
 

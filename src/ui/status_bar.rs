@@ -73,11 +73,17 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
     let pos = format!(" {}:{} ", line, col);
     let enc = " UTF-8  F1:Help ";
     let wrap_flag = if handle.viewport.word_wrap { " WW" } else { "" };
+    let lsp_flag = if state.lsp_config.is_active() {
+        " LSP"
+    } else {
+        " TS"
+    };
 
-    // Right side: word-wrap flag + language + position + encoding
+    // Right side: word-wrap flag + LSP/TS mode + language + position + encoding
     let right = format!(
-        "{}{}  {}{}",
+        "{}{}{}  {}{}",
         wrap_flag,
+        lsp_flag,
         if !lang.is_empty() {
             format!(" {}", lang)
         } else {

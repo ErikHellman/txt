@@ -6,6 +6,7 @@ mod editor;
 mod error;
 mod git;
 mod input;
+mod lsp;
 mod search;
 mod syntax;
 mod ui;
