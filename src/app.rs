@@ -615,13 +615,18 @@ impl AppState {
             }
             EditorAction::CopyFileReference => {
                 if let Some(path) = self.editor.active().path.as_ref() {
-                    let cursor = self.editor.active().buffer.cursors.primary();
+                    let buf = &self.editor.active().buffer;
+                    let cursor = buf.cursors.primary();
+                    let rope = buf.rope();
+                    let line_start_byte = rope.char_to_byte(rope.line_to_char(cursor.line));
+                    let char_col = rope.byte_to_char(line_start_byte + cursor.col)
+                        - rope.line_to_char(cursor.line);
                     let relative = path
                         .strip_prefix(&self.workspace)
                         .unwrap_or(path)
                         .display()
                         .to_string();
-                    let reference = format!("{}:{},{}", relative, cursor.line + 1, cursor.col + 1,);
+                    let reference = format!("{}:{},{}", relative, cursor.line + 1, char_col + 1);
                     self.clipboard.set(reference);
                 }
             }

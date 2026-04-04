@@ -451,6 +451,10 @@ mod tests {
             IH.handle_key(ctrl(KeyCode::Char('v'))),
             EditorAction::Paste(String::new())
         );
+        assert_eq!(
+            IH.handle_key(ctrl_shift(KeyCode::Char('C'))),
+            EditorAction::CopyFileReference
+        );
     }
 
     #[test]
