@@ -14,7 +14,7 @@ use ratatui::{
     style::{Color, Style},
 };
 
-use crate::app::{AppState, SIDEBAR_WIDTH};
+use crate::app::{AppState, ConfirmDelete, SIDEBAR_WIDTH};
 
 /// Top-level render function. Called once per frame with an immutable reference
 /// to the application state. Builds the layout and delegates to sub-renderers.
@@ -175,6 +175,32 @@ pub fn render(state: &AppState, frame: &mut Frame) {
             .bg(Color::Rgb(180, 40, 40))
             .fg(Color::White);
         let msg = " Unsaved changes. Quit anyway? (y/n) ";
+        for x in status_area.x..status_area.x + status_area.width {
+            buf.set_string(x, status_area.y, " ", prompt_style);
+        }
+        let msg_len = msg.len().min(status_area.width as usize);
+        buf.set_string(status_area.x, status_area.y, &msg[..msg_len], prompt_style);
+    }
+
+    // ── Confirm-delete overlay (replaces status bar) ─────────────────────────
+    if let Some(cd) = &state.confirm_delete {
+        let prompt_style = Style::default()
+            .bg(Color::Rgb(180, 40, 40))
+            .fg(Color::White);
+        let msg = match cd {
+            ConfirmDelete::File(p) => {
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                format!(" Delete \"{}\"? (y/n) ", name)
+            }
+            ConfirmDelete::Dir(p) => {
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                format!(" Delete directory \"{}\" and all contents? (y/n) ", name)
+            }
+            ConfirmDelete::DirConfirmed(p) => {
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                format!(" Are you sure? Press Enter to delete \"{}\" ", name)
+            }
+        };
         for x in status_area.x..status_area.x + status_area.width {
             buf.set_string(x, status_area.y, " ", prompt_style);
         }

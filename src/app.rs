@@ -174,6 +174,16 @@ impl FuzzyPickerState {
 // ── Sidebar / file tree ────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
+/// Tracks the state of a sidebar delete confirmation.
+pub enum ConfirmDelete {
+    /// Deleting a file — waiting for Y/N.
+    File(PathBuf),
+    /// Deleting a directory — first step, waiting for Y/N.
+    Dir(PathBuf),
+    /// Deleting a directory — user pressed Y, now waiting for Enter to confirm.
+    DirConfirmed(PathBuf),
+}
+
 /// Tracks a file that has been cut or copied in the sidebar.
 pub struct SidebarClipboard {
     pub path: PathBuf,
@@ -460,6 +470,7 @@ pub struct AppState {
     pub workspace: PathBuf,
     pub should_quit: bool,
     pub confirm_quit: bool,
+    pub confirm_delete: Option<ConfirmDelete>,
     /// Active file watcher for the current buffer (replaced on each file open/save).
     file_watcher: Option<FileWatcher>,
     pub term_width: u16,
@@ -489,6 +500,7 @@ impl AppState {
             workspace,
             should_quit: false,
             confirm_quit: false,
+            confirm_delete: None,
             file_watcher: None,
             term_width: 80,
             term_height: 24,
@@ -522,6 +534,12 @@ impl AppState {
                     self.confirm_quit = false;
                 }
             }
+            return;
+        }
+
+        // Delete confirmation mode
+        if self.confirm_delete.is_some() {
+            self.handle_confirm_delete(action);
             return;
         }
 
@@ -1580,6 +1598,21 @@ impl AppState {
                 self.sidebar_paste();
                 true
             }
+            EditorAction::DeleteForward => {
+                // Delete key: delete the selected file/directory.
+                if let Some(path) = self
+                    .sidebar
+                    .as_ref()
+                    .and_then(|sb| sb.selected_path().cloned())
+                {
+                    if path.is_dir() {
+                        self.confirm_delete = Some(ConfirmDelete::Dir(path));
+                    } else {
+                        self.confirm_delete = Some(ConfirmDelete::File(path));
+                    }
+                }
+                true
+            }
             EditorAction::SidebarRename => {
                 // F2: rename the selected file/directory.
                 if let Some(path) = self
@@ -1638,6 +1671,34 @@ impl AppState {
     fn refresh_sidebar(&mut self) {
         if let Some(sb) = &mut self.sidebar {
             sb.refresh();
+        }
+    }
+
+    /// Handle input while a delete confirmation is active.
+    fn handle_confirm_delete(&mut self, action: EditorAction) {
+        let state = self.confirm_delete.take();
+        match state {
+            Some(ConfirmDelete::File(path)) => match action {
+                EditorAction::InsertChar('y') | EditorAction::InsertChar('Y') => {
+                    let _ = std::fs::remove_file(&path);
+                    self.refresh_sidebar();
+                }
+                _ => {} // Any other key cancels.
+            },
+            Some(ConfirmDelete::Dir(path)) => match action {
+                EditorAction::InsertChar('y') | EditorAction::InsertChar('Y') => {
+                    // Move to second confirmation step.
+                    self.confirm_delete = Some(ConfirmDelete::DirConfirmed(path));
+                }
+                _ => {} // Any other key cancels.
+            },
+            Some(ConfirmDelete::DirConfirmed(path)) => {
+                if action == EditorAction::InsertNewline {
+                    let _ = std::fs::remove_dir_all(&path);
+                    self.refresh_sidebar();
+                }
+            }
+            None => {}
         }
     }
 
