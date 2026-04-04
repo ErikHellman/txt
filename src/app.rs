@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyEventKind};
@@ -552,6 +552,12 @@ pub struct AppState {
     pub lsp: Option<crate::lsp::LspRegistry>,
     /// Transient error message shown in the status bar (cleared on next user action).
     pub status_error: Option<String>,
+    /// When the buffer was last edited — used to debounce `didChange` notifications
+    /// and semantic token re-requests so we don't send the full buffer on every keystroke.
+    lsp_dirty_since: Option<Instant>,
+    /// Whether `didChange` has been sent for the current dirty period (but semantic
+    /// tokens haven't been re-requested yet).
+    lsp_change_sent: bool,
     pub term_width: u16,
     pub term_height: u16,
 }
@@ -592,6 +598,8 @@ impl AppState {
             lsp_config,
             lsp,
             status_error: None,
+            lsp_dirty_since: None,
+            lsp_change_sent: false,
             term_width: 80,
             term_height: 24,
         };
@@ -1161,8 +1169,12 @@ impl AppState {
         // Re-parse the active buffer if it was modified this action.
         if self.editor.active().buffer.modified {
             self.editor.active_mut().reparse();
-            self.notify_lsp_did_change();
-            // Invalidate semantic tokens (will be refreshed after debounce in Phase 8).
+            // Bump the version immediately but defer the actual didChange send
+            // until the debounce timer fires (avoids full-buffer copy per keystroke).
+            self.editor.active_mut().lsp_state.version += 1;
+            self.lsp_dirty_since = Some(Instant::now());
+            self.lsp_change_sent = false;
+            // Invalidate semantic tokens (re-requested after debounce).
             self.editor.active_mut().lsp_state.semantic_tokens = None;
 
             // Re-filter completion popup if open.
@@ -1902,6 +1914,12 @@ impl AppState {
         if self.editor.active().path.is_some() {
             let _ = self.editor.active_mut().save();
             self.after_file_open_or_save();
+            // Flush any pending didChange before sending didSave.
+            if self.lsp_dirty_since.is_some() && !self.lsp_change_sent {
+                self.send_lsp_did_change();
+            }
+            self.lsp_dirty_since = None;
+            self.lsp_change_sent = false;
             self.notify_lsp_did_save();
         } else {
             self.input_mode = InputMode::SaveAsPath(String::new());
@@ -1976,6 +1994,33 @@ impl AppState {
     }
 
     // ── LSP polling ──────────────────────────────────────────────────────────
+
+    /// How long to wait after the last edit before sending `didChange`.
+    const LSP_DEBOUNCE: Duration = Duration::from_millis(100);
+    /// How long to wait after the last edit before re-requesting semantic tokens.
+    const SEMANTIC_TOKEN_DEBOUNCE: Duration = Duration::from_millis(300);
+
+    /// Flush debounced LSP notifications if enough idle time has passed.
+    /// Called once per frame in the event loop.
+    pub fn flush_lsp_debounce(&mut self) {
+        let Some(dirty_since) = self.lsp_dirty_since else {
+            return;
+        };
+        let elapsed = dirty_since.elapsed();
+
+        // After 100ms idle, send the buffered didChange (one full-buffer copy).
+        if elapsed >= Self::LSP_DEBOUNCE && !self.lsp_change_sent {
+            self.send_lsp_did_change();
+            self.lsp_change_sent = true;
+        }
+
+        // After 300ms idle, re-request semantic tokens and clear the timer.
+        if elapsed >= Self::SEMANTIC_TOKEN_DEBOUNCE {
+            self.request_semantic_tokens_for_active();
+            self.lsp_dirty_since = None;
+            self.lsp_change_sent = false;
+        }
+    }
 
     /// Non-blocking drain of pending LSP updates. Called once per frame.
     pub fn poll_lsp_updates(&mut self) {
@@ -2091,11 +2136,8 @@ impl AppState {
     }
 
     /// Send `textDocument/didChange` for the active buffer (full sync).
-    fn notify_lsp_did_change(&mut self) {
-        let handle = self.editor.active_mut();
-        handle.lsp_state.version += 1;
-        let version = handle.lsp_state.version;
-
+    /// Version must already be bumped before calling this.
+    fn send_lsp_did_change(&self) {
         let Some(registry) = &self.lsp else { return };
         if !registry.is_ready() {
             return;
@@ -2103,6 +2145,7 @@ impl AppState {
         let handle = self.editor.active();
         if let Some(path) = &handle.path {
             let uri = crate::lsp::types::path_to_uri(path);
+            let version = handle.lsp_state.version;
             let text = handle.buffer.rope().to_string();
             let _ = registry.client().did_change(&uri, version, &text);
         }
@@ -2828,6 +2871,9 @@ impl App {
 
             // Drain pending LSP server updates (non-blocking).
             state.poll_lsp_updates();
+
+            // Flush debounced LSP notifications (didChange, semantic tokens).
+            state.flush_lsp_debounce();
 
             terminal.draw(|frame| ui::render(&state, frame))?;
 
