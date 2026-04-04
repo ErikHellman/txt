@@ -1020,6 +1020,7 @@ impl AppState {
         // Re-parse the active buffer if it was modified this action.
         if self.editor.active().buffer.modified {
             self.editor.active_mut().reparse();
+            self.notify_lsp_did_change();
         }
     }
 
@@ -1733,6 +1734,10 @@ impl AppState {
         if self.editor.active().buffer.modified {
             self.confirm_quit = true; // reuse confirm for "discard changes?"
         } else {
+            // Notify LSP before closing.
+            if let Some(path) = self.editor.active().path.clone() {
+                self.notify_lsp_did_close(&path);
+            }
             self.editor.close_active_tab();
         }
     }
@@ -1741,6 +1746,7 @@ impl AppState {
         if self.editor.active().path.is_some() {
             let _ = self.editor.active_mut().save();
             self.after_file_open_or_save();
+            self.notify_lsp_did_save();
         } else {
             self.input_mode = InputMode::SaveAsPath(String::new());
         }
@@ -1758,13 +1764,27 @@ impl AppState {
     }
 
     /// Called after a file is opened or saved — updates recent files, git gutter,
-    /// and installs a file watcher for the new path.
+    /// installs a file watcher, and notifies the LSP server.
     fn after_file_open_or_save(&mut self) {
         if let Some(path) = self.editor.active().path.clone() {
             add_to_recent_files(&path, &self.workspace.clone());
             self.file_watcher = FileWatcher::new(&path);
         }
         self.refresh_git_gutter();
+        // Notify LSP server that a file was opened.
+        let handle = self.editor.active();
+        // Avoid borrow conflict by extracting what we need.
+        let path = handle.path.clone();
+        let lang = handle.syntax.language.name().to_lowercase();
+        let version = handle.lsp_state.version;
+        let text = handle.buffer.rope().to_string();
+        if let Some(registry) = &self.lsp
+            && registry.is_ready()
+            && let Some(path) = &path
+        {
+            let uri = crate::lsp::types::path_to_uri(path);
+            let _ = registry.client().did_open(&uri, &lang, version, &text);
+        }
     }
 
     /// Poll the file watcher; if the file changed externally, reload automatically.
@@ -1827,8 +1847,7 @@ impl AppState {
                 self.notify_lsp_did_open_all();
             }
             LspUpdate::Diagnostics { uri, diagnostics } => {
-                // Store raw diagnostic JSON for now; Phase 2 will convert to LspDiagnostic.
-                let _ = (uri, diagnostics);
+                self.apply_diagnostics(&uri, &diagnostics);
             }
             LspUpdate::ServerExited => {
                 let config = self.lsp_config.clone();
@@ -1864,9 +1883,132 @@ impl AppState {
                 let uri = crate::lsp::types::path_to_uri(path);
                 let lang_id = tab.syntax.language.name().to_lowercase();
                 let text = tab.buffer.rope().to_string();
-                let _ = registry.client().did_open(&uri, &lang_id, 0, &text);
+                let _ = registry
+                    .client()
+                    .did_open(&uri, &lang_id, tab.lsp_state.version, &text);
             }
         }
+    }
+
+    /// Send `textDocument/didOpen` for a single buffer.
+    #[allow(dead_code)]
+    fn notify_lsp_did_open(&self, handle: &crate::editor::tab::BufferHandle) {
+        let Some(registry) = &self.lsp else { return };
+        if !registry.is_ready() {
+            return;
+        }
+        if let Some(path) = &handle.path {
+            let uri = crate::lsp::types::path_to_uri(path);
+            let lang_id = handle.syntax.language.name().to_lowercase();
+            let text = handle.buffer.rope().to_string();
+            let _ = registry
+                .client()
+                .did_open(&uri, &lang_id, handle.lsp_state.version, &text);
+        }
+    }
+
+    /// Send `textDocument/didChange` for the active buffer (full sync).
+    fn notify_lsp_did_change(&mut self) {
+        let handle = self.editor.active_mut();
+        handle.lsp_state.version += 1;
+        let version = handle.lsp_state.version;
+
+        let Some(registry) = &self.lsp else { return };
+        if !registry.is_ready() {
+            return;
+        }
+        let handle = self.editor.active();
+        if let Some(path) = &handle.path {
+            let uri = crate::lsp::types::path_to_uri(path);
+            let text = handle.buffer.rope().to_string();
+            let _ = registry.client().did_change(&uri, version, &text);
+        }
+    }
+
+    /// Send `textDocument/didSave` for the active buffer.
+    fn notify_lsp_did_save(&self) {
+        let Some(registry) = &self.lsp else { return };
+        if !registry.is_ready() {
+            return;
+        }
+        if let Some(path) = &self.editor.active().path {
+            let uri = crate::lsp::types::path_to_uri(path);
+            let _ = registry.client().did_save(&uri);
+        }
+    }
+
+    /// Send `textDocument/didClose` for a buffer by path.
+    fn notify_lsp_did_close(&self, path: &std::path::Path) {
+        let Some(registry) = &self.lsp else { return };
+        if !registry.is_ready() {
+            return;
+        }
+        let uri = crate::lsp::types::path_to_uri(path);
+        let _ = registry.client().did_close(&uri);
+    }
+
+    /// Convert raw diagnostic JSON from the server to byte-offset `LspDiagnostic`s
+    /// and store them on the matching buffer.
+    fn apply_diagnostics(&mut self, uri: &str, raw_diagnostics: &[serde_json::Value]) {
+        use crate::lsp::types::{DiagSeverity, LspDiagnostic, lsp_position_to_byte_offset};
+
+        let path = match crate::lsp::types::uri_to_path(uri) {
+            Some(p) => p,
+            None => return,
+        };
+
+        // Find the buffer that matches this URI.
+        let tab = self
+            .editor
+            .tabs
+            .iter_mut()
+            .find(|t| t.path.as_ref().is_some_and(|p| same_file(p, &path)));
+        let Some(tab) = tab else { return };
+
+        let rope = tab.buffer.rope();
+        let mut diagnostics = Vec::with_capacity(raw_diagnostics.len());
+
+        for raw in raw_diagnostics {
+            let range = match raw.get("range") {
+                Some(r) => r,
+                None => continue,
+            };
+            let start = match parse_lsp_position(range.get("start")) {
+                Some(pos) => match lsp_position_to_byte_offset(rope, pos) {
+                    Some(b) => b,
+                    None => continue,
+                },
+                None => continue,
+            };
+            let end = match parse_lsp_position(range.get("end")) {
+                Some(pos) => match lsp_position_to_byte_offset(rope, pos) {
+                    Some(b) => b,
+                    None => continue,
+                },
+                None => continue,
+            };
+            let severity = match raw.get("severity").and_then(|v| v.as_u64()) {
+                Some(1) => DiagSeverity::Error,
+                Some(2) => DiagSeverity::Warning,
+                Some(3) => DiagSeverity::Information,
+                _ => DiagSeverity::Hint,
+            };
+            let message = raw
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let source = raw.get("source").and_then(|v| v.as_str()).map(String::from);
+
+            diagnostics.push(LspDiagnostic {
+                range: crate::buffer::cursor::ByteRange { start, end },
+                severity,
+                message,
+                source,
+            });
+        }
+
+        tab.lsp_state.diagnostics = diagnostics;
     }
 
     // ── Coordinate helpers ───────────────────────────────────────────────────
@@ -1997,5 +2139,24 @@ impl App {
 impl Default for App {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ── Free helpers for LSP ─────────────────────────────────────────────────────
+
+/// Parse an LSP `{ line, character }` JSON value into our `LspPosition`.
+fn parse_lsp_position(val: Option<&serde_json::Value>) -> Option<crate::lsp::types::LspPosition> {
+    let obj = val?;
+    Some(crate::lsp::types::LspPosition {
+        line: obj.get("line")?.as_u64()? as u32,
+        character: obj.get("character")?.as_u64()? as u32,
+    })
+}
+
+/// Compare two paths, canonicalizing to handle symlinks / relative paths.
+fn same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => a == b,
     }
 }

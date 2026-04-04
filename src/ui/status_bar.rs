@@ -79,11 +79,20 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
         None => " TS",
     };
 
-    // Right side: word-wrap flag + LSP/TS mode + language + position + encoding
+    let errors = handle.lsp_state.error_count();
+    let warnings = handle.lsp_state.warning_count();
+    let diag_str = if errors > 0 || warnings > 0 {
+        format!(" E:{} W:{}", errors, warnings)
+    } else {
+        String::new()
+    };
+
+    // Right side: word-wrap flag + LSP/TS mode + diagnostics + language + position + encoding
     let right = format!(
-        "{}{}{}  {}{}",
+        "{}{}{}{}  {}{}",
         wrap_flag,
         lsp_flag,
+        diag_str,
         if !lang.is_empty() {
             format!(" {}", lang)
         } else {

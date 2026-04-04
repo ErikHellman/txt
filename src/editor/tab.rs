@@ -2,9 +2,42 @@ use std::path::PathBuf;
 
 use crate::buffer::Buffer;
 use crate::editor::viewport::Viewport;
+use crate::lsp::types::{DiagSeverity, LspDiagnostic};
 use crate::syntax::{SyntaxHost, language::Lang};
 
 pub type BufferId = usize;
+
+/// Per-buffer LSP state: document version and diagnostics.
+pub struct LspState {
+    /// Document version, incremented on every edit. Sent with didChange.
+    pub version: u64,
+    /// Diagnostics received from the LSP server (converted to byte offsets).
+    pub diagnostics: Vec<LspDiagnostic>,
+}
+
+impl LspState {
+    pub fn new() -> Self {
+        Self {
+            version: 0,
+            diagnostics: Vec::new(),
+        }
+    }
+
+    /// Count diagnostics by severity.
+    pub fn error_count(&self) -> usize {
+        self.diagnostics
+            .iter()
+            .filter(|d| d.severity == DiagSeverity::Error)
+            .count()
+    }
+
+    pub fn warning_count(&self) -> usize {
+        self.diagnostics
+            .iter()
+            .filter(|d| d.severity == DiagSeverity::Warning)
+            .count()
+    }
+}
 
 /// One open buffer — the unit of a tab in the editor.
 ///
@@ -17,6 +50,7 @@ pub struct BufferHandle {
     pub viewport: Viewport,
     pub path: Option<PathBuf>,
     pub syntax: SyntaxHost,
+    pub lsp_state: LspState,
 }
 
 impl BufferHandle {
@@ -28,6 +62,7 @@ impl BufferHandle {
             viewport: Viewport::new(),
             path: None,
             syntax: SyntaxHost::new(),
+            lsp_state: LspState::new(),
         }
     }
 
@@ -49,6 +84,7 @@ impl BufferHandle {
             viewport: Viewport::new(),
             path: Some(path),
             syntax,
+            lsp_state: LspState::new(),
         })
     }
 
