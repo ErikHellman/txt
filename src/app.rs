@@ -399,7 +399,7 @@ impl SidebarState {
         self.entries.get(self.selected).map(|e| &e.path)
     }
 
-    /// Reload the sidebar, preserving expanded directories and clamping selection.
+    /// Reload the sidebar, preserving expanded directories and selection by path.
     pub fn refresh(&mut self) {
         let expanded: Vec<PathBuf> = self
             .entries
@@ -407,6 +407,7 @@ impl SidebarState {
             .filter(|e| e.is_dir && e.expanded)
             .map(|e| e.path.clone())
             .collect();
+        let old_path = self.selected_path().cloned();
         let old_selected = self.selected;
         self.load_root();
         // Re-expand previously expanded directories.
@@ -421,7 +422,13 @@ impl SidebarState {
                 self.toggle_selected();
             }
         }
-        // Restore selection (clamped).
+        // Restore selection by path if possible, otherwise clamp the old index.
+        if let Some(ref old) = old_path
+            && let Some(idx) = self.entries.iter().position(|e| &e.path == old)
+        {
+            self.selected = idx;
+            return;
+        }
         self.selected = old_selected.min(self.entries.len().saturating_sub(1));
     }
 }
@@ -1110,12 +1117,17 @@ impl AppState {
                     }
                     InputMode::RenamePath(original, input) => {
                         let new_name = input.trim();
-                        if !new_name.is_empty()
-                            && let Some(parent) = original.parent()
-                        {
+                        // Validate: must be a plain filename (no path separators or ..).
+                        let mut components = std::path::Path::new(new_name).components();
+                        let is_plain_name = matches!(
+                            (components.next(), components.next()),
+                            (Some(std::path::Component::Normal(_)), None)
+                        );
+                        if is_plain_name && let Some(parent) = original.parent() {
                             let new_path = parent.join(new_name);
-                            let _ = std::fs::rename(&original, &new_path);
-                            self.refresh_sidebar();
+                            if !new_path.exists() && std::fs::rename(&original, &new_path).is_ok() {
+                                self.refresh_sidebar();
+                            }
                         }
                     }
                     InputMode::Normal => {}
@@ -1635,7 +1647,7 @@ impl AppState {
 
     /// Paste from the sidebar clipboard into the currently selected location.
     fn sidebar_paste(&mut self) {
-        let clip = match self.sidebar_clipboard.take() {
+        let clip = match &self.sidebar_clipboard {
             Some(c) => c,
             None => return,
         };
@@ -1648,21 +1660,27 @@ impl AppState {
             None => return,
         };
         if clip.is_cut {
-            // Move: rename source into dest directory.
-            if let Some(name) = clip.path.file_name() {
+            // Move: rename source into dest directory with collision check.
+            let source = clip.path.clone();
+            if let Some(name) = source.file_name() {
                 let new_path = dest_dir.join(name);
-                let _ = std::fs::rename(&clip.path, &new_path);
+                if new_path.exists() {
+                    return; // Don't overwrite existing files.
+                }
+                if std::fs::rename(&source, &new_path).is_ok() {
+                    // Only consume clipboard on success.
+                    self.sidebar_clipboard = None;
+                }
             }
-            // Cut clipboard is consumed (already taken above).
         } else {
             // Copy: only files (not directories).
-            if clip.path.is_file()
-                && let Some(new_path) = copy_target_path(&clip.path, &dest_dir)
+            let source = clip.path.clone();
+            if source.is_file()
+                && let Some(new_path) = copy_target_path(&source, &dest_dir)
             {
-                let _ = std::fs::copy(&clip.path, &new_path);
+                let _ = std::fs::copy(&source, &new_path);
             }
-            // Keep clipboard so user can paste again.
-            self.sidebar_clipboard = Some(clip);
+            // Clipboard is kept so user can paste again.
         }
         self.refresh_sidebar();
     }

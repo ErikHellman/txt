@@ -68,10 +68,10 @@ const ENTRIES: &[(&str, &str)] = &[
     ("Alt+C", "Toggle case-sensitive"),
     // ── Sidebar ──────────────────────────────────────────────────────
     ("", "Sidebar"),
-    ("Ctrl+C", "Copy file (sidebar)"),
-    ("Ctrl+X", "Cut file (sidebar)"),
-    ("Ctrl+V", "Paste file (sidebar)"),
-    ("F2", "Rename file (sidebar)"),
+    ("Ctrl+C", "Copy file only (sidebar)"),
+    ("Ctrl+X", "Cut file/dir (sidebar)"),
+    ("Ctrl+V", "Paste (sidebar)"),
+    ("F2", "Rename file/dir (sidebar)"),
     ("Delete", "Delete file/dir (sidebar)"),
     // ── View & App ───────────────────────────────────────────────────
     ("", "View & App"),
