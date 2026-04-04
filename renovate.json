@@ -37,7 +37,4 @@
       "labels": ["dependencies", "major-update"]
     }
   ],
-  "extends": [
-    "config:recommended"
-  ]
 }
