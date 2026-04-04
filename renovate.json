@@ -1,0 +1,40 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "Europe/Stockholm",
+  "schedule": ["after 2am and before 5am every weekday"],
+  "labels": ["dependencies"],
+  "dependencyDashboard": true,
+  "packageRules": [
+    {
+      "description": "unicode-width must stay pinned to =0.2.2 — changing it silently breaks cursor rendering because it must match ratatui-core's internal version exactly.",
+      "matchPackageNames": ["unicode-width"],
+      "enabled": false
+    },
+    {
+      "description": "Group all tree-sitter crates into one PR so the core library and all language parsers stay in sync.",
+      "matchPackageNames": [
+        "tree-sitter",
+        "tree-sitter-rust",
+        "tree-sitter-python",
+        "tree-sitter-javascript",
+        "tree-sitter-json"
+      ],
+      "groupName": "tree-sitter crates",
+      "automerge": false
+    },
+    {
+      "description": "Auto-merge minor and patch updates after CI passes.",
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash"
+    },
+    {
+      "description": "Major version bumps open a PR for manual review — never auto-merge.",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["dependencies", "major-update"]
+    }
+  ]
+}
