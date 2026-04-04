@@ -234,13 +234,20 @@ pub fn byte_range_to_lsp_range(rope: &Rope, range: ByteRange) -> LspRange {
 /// Convert a file path to a `file://` URI.
 pub fn path_to_uri(path: &std::path::Path) -> String {
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    format!("file://{}", canonical.display())
+    url::Url::from_file_path(&canonical)
+        .or_else(|_| url::Url::from_file_path(path))
+        .map(|u| u.into())
+        .unwrap_or_else(|_| format!("file://{}", canonical.display()))
 }
 
 /// Convert a `file://` URI to a `PathBuf`.
 #[allow(dead_code)]
 pub fn uri_to_path(uri: &str) -> Option<std::path::PathBuf> {
-    uri.strip_prefix("file://").map(std::path::PathBuf::from)
+    let parsed = url::Url::parse(uri).ok()?;
+    if parsed.scheme() != "file" {
+        return None;
+    }
+    parsed.to_file_path().ok()
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
