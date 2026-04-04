@@ -22,8 +22,11 @@ impl InputHandler {
         match event.code {
             // ── Function keys ─────────────────────────────────────────
             KeyCode::F(1) => EditorAction::ToggleHelp,
+            KeyCode::F(2) => EditorAction::RenameSymbol,
             KeyCode::F(3) if shift => EditorAction::SearchPrev,
             KeyCode::F(3) => EditorAction::SearchNext,
+            KeyCode::F(12) if shift => EditorAction::FindReferences,
+            KeyCode::F(12) => EditorAction::GoToDefinition,
             KeyCode::Esc => EditorAction::CloseSearch,
 
             // ── Alt combinations ──────────────────────────────────────
@@ -32,6 +35,8 @@ impl InputHandler {
             KeyCode::Char('z') if alt && !ctrl => EditorAction::ToggleWordWrap,
 
             // ── Printable characters ──────────────────────────────────
+            KeyCode::Char(' ') if ctrl => EditorAction::TriggerCompletion,
+            KeyCode::Char('.') if ctrl => EditorAction::CodeAction,
             KeyCode::Char(c) if ctrl && !shift && !alt => self.handle_ctrl_char(c),
             KeyCode::Char(c) if ctrl && shift => self.handle_ctrl_shift_char(c),
             KeyCode::Char(c) if !ctrl => EditorAction::InsertChar(c),
@@ -115,6 +120,7 @@ impl InputHandler {
             'p' | 'P' => EditorAction::OpenFuzzyPicker,
             'f' | 'F' => EditorAction::OpenSearch,
             'h' | 'H' => EditorAction::OpenReplace,
+            'k' | 'K' => EditorAction::ShowHover,
             'l' | 'L' => EditorAction::OpenLspConfig,
             'r' | 'R' => EditorAction::OpenRecentFiles,
             '/' => EditorAction::ToggleLineComment,

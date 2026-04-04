@@ -146,6 +146,20 @@ pub enum EditorAction {
     /// Open the LSP server configuration overlay (Ctrl+L).
     OpenLspConfig,
 
+    // ── LSP features ─────────────────────────────────────────────────
+    /// Trigger code completion (Ctrl+Space).
+    TriggerCompletion,
+    /// Show hover info at cursor (Ctrl+K).
+    ShowHover,
+    /// Go to definition (F12).
+    GoToDefinition,
+    /// Find references (Shift+F12).
+    FindReferences,
+    /// Rename symbol (F2).
+    RenameSymbol,
+    /// Code actions / quick fix (Ctrl+.).
+    CodeAction,
+
     // ── App lifecycle ─────────────────────────────────────────────────
     /// Quit the editor. The app will confirm if there are unsaved changes.
     Quit,

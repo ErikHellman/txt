@@ -1,8 +1,11 @@
 pub mod command_palette;
+pub mod completion_popup;
 pub mod editor_view;
 pub mod fuzzy_picker;
 pub mod help_overlay;
+pub mod hover_popup;
 pub mod lsp_picker;
+pub mod references_list;
 pub mod search_bar;
 pub mod settings_overlay;
 pub mod sidebar;
@@ -200,5 +203,28 @@ pub fn render(state: &AppState, frame: &mut Frame) {
     // ── LSP picker overlay ───────────────────────────────────────────────────
     if let Some(picker) = &state.lsp_picker {
         lsp_picker::render(picker, area, buf);
+    }
+
+    // ── Completion popup ─────────────────────────────────────────────────────
+    if let Some(comp) = &state.completion {
+        let cursor = handle.buffer.cursors.primary();
+        let cursor_row =
+            editor_area.y + cursor.line.saturating_sub(handle.viewport.scroll_row) as u16;
+        let cursor_col = editor_area.x + cursor.col as u16;
+        completion_popup::render(comp, cursor_row, cursor_col, area, buf);
+    }
+
+    // ── Hover popup ──────────────────────────────────────────────────────────
+    if let Some(hover) = &state.hover {
+        let cursor = handle.buffer.cursors.primary();
+        let cursor_row =
+            editor_area.y + cursor.line.saturating_sub(handle.viewport.scroll_row) as u16;
+        let cursor_col = editor_area.x + cursor.col as u16;
+        hover_popup::render(hover, cursor_row, cursor_col, area, buf);
+    }
+
+    // ── References list overlay ──────────────────────────────────────────────
+    if let Some(refs) = &state.references_list {
+        references_list::render(refs, area, buf);
     }
 }

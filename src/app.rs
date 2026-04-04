@@ -41,6 +41,8 @@ pub enum InputMode {
     OpenFilePath(String),
     /// Ctrl+Shift+S: "Save as: {input}"
     SaveAsPath(String),
+    /// F2: "Rename: {input}"
+    Rename(String),
 }
 
 impl InputMode {
@@ -384,6 +386,91 @@ impl SidebarState {
 
 // ── LSP picker state ─────────────────────────────────────────────────────────
 
+/// State for the code completion popup.
+pub struct CompletionState {
+    /// All items received from the server.
+    pub items: Vec<CompletionItemEntry>,
+    /// Indices into `items` after prefix filtering.
+    pub filtered: Vec<usize>,
+    /// Currently highlighted row in `filtered`.
+    pub selected: usize,
+    /// Byte offset where completion was triggered (start of the prefix).
+    pub anchor_byte: usize,
+    /// Line of the trigger position (for popup positioning).
+    #[allow(dead_code)]
+    pub anchor_line: usize,
+    /// Display column of the trigger position.
+    #[allow(dead_code)]
+    pub anchor_col: usize,
+}
+
+/// A single completion item (simplified from LSP).
+pub struct CompletionItemEntry {
+    pub label: String,
+    pub detail: Option<String>,
+    pub insert_text: String,
+    pub filter_text: String,
+    pub kind_label: &'static str,
+}
+
+impl CompletionState {
+    pub fn new(anchor_byte: usize, anchor_line: usize, anchor_col: usize) -> Self {
+        Self {
+            items: Vec::new(),
+            filtered: Vec::new(),
+            selected: 0,
+            anchor_byte,
+            anchor_line,
+            anchor_col,
+        }
+    }
+
+    /// Re-filter items against the typed prefix.
+    pub fn filter(&mut self, prefix: &str) {
+        let lower_prefix = prefix.to_lowercase();
+        self.filtered = self
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| item.filter_text.to_lowercase().contains(&lower_prefix))
+            .map(|(i, _)| i)
+            .collect();
+        if self.selected >= self.filtered.len() {
+            self.selected = 0;
+        }
+    }
+
+    /// Get the currently selected item, if any.
+    pub fn selected_item(&self) -> Option<&CompletionItemEntry> {
+        self.filtered
+            .get(self.selected)
+            .and_then(|&i| self.items.get(i))
+    }
+}
+
+/// State for the hover info popup.
+pub struct HoverState {
+    pub content: String,
+    #[allow(dead_code)]
+    pub anchor_line: usize,
+    #[allow(dead_code)]
+    pub anchor_col: usize,
+}
+
+/// State for the references list overlay.
+pub struct ReferencesListState {
+    pub items: Vec<ReferenceItem>,
+    pub selected: usize,
+}
+
+/// A single reference location.
+pub struct ReferenceItem {
+    pub path: PathBuf,
+    pub line: usize,
+    pub col: usize,
+    pub context: String,
+}
+
 /// Built-in LSP server definitions the user can choose from.
 pub const LSP_SERVER_OPTIONS: &[(&str, &str, &[&str])] = &[
     // (display name / key, command, args)
@@ -449,6 +536,9 @@ pub struct AppState {
     pub show_settings: bool,
     pub settings_cursor: usize,
     pub lsp_picker: Option<LspPickerState>,
+    pub completion: Option<CompletionState>,
+    pub hover: Option<HoverState>,
+    pub references_list: Option<ReferencesListState>,
     pub git_gutter: Option<GitGutter>,
     pub config: Config,
     pub workspace: PathBuf,
@@ -488,6 +578,9 @@ impl AppState {
             show_settings: false,
             settings_cursor: 0,
             lsp_picker: None,
+            completion: None,
+            hover: None,
+            references_list: None,
             git_gutter: None,
             config,
             workspace,
@@ -560,6 +653,16 @@ impl AppState {
         // Fuzzy picker — captured input
         if self.fuzzy_picker.is_some() {
             self.handle_fuzzy_picker(action);
+            return;
+        }
+
+        // Completion popup — partially captured (chars fall through to editing)
+        if self.completion.is_some() && self.handle_completion_input(&action) {
+            return;
+        }
+
+        // References list — captured input
+        if self.references_list.is_some() && self.handle_references_input(&action) {
             return;
         }
 
@@ -921,6 +1024,24 @@ impl AppState {
                     self.lsp_picker = Some(LspPickerState::new(&self.lsp_config));
                 }
             }
+            EditorAction::TriggerCompletion => {
+                self.trigger_completion();
+            }
+            EditorAction::ShowHover => {
+                self.trigger_hover();
+            }
+            EditorAction::GoToDefinition => {
+                self.trigger_go_to_definition();
+            }
+            EditorAction::FindReferences => {
+                self.trigger_find_references();
+            }
+            EditorAction::RenameSymbol => {
+                self.trigger_rename();
+            }
+            EditorAction::CodeAction => {
+                self.trigger_code_action();
+            }
             EditorAction::ToggleLineComment => {
                 self.toggle_line_comment();
             }
@@ -1017,10 +1138,18 @@ impl AppState {
             EditorAction::Unhandled => {}
         }
 
+        // Dismiss hover on any action.
+        self.hover = None;
+
         // Re-parse the active buffer if it was modified this action.
         if self.editor.active().buffer.modified {
             self.editor.active_mut().reparse();
             self.notify_lsp_did_change();
+
+            // Re-filter completion popup if open.
+            if self.completion.is_some() {
+                self.refilter_completion();
+            }
         }
     }
 
@@ -1034,7 +1163,9 @@ impl AppState {
                     InputMode::JumpToLine(s) if c.is_ascii_digit() || c == ':' => {
                         s.push(c);
                     }
-                    InputMode::OpenFilePath(s) | InputMode::SaveAsPath(s) => {
+                    InputMode::OpenFilePath(s)
+                    | InputMode::SaveAsPath(s)
+                    | InputMode::Rename(s) => {
                         s.push(c);
                     }
                     _ => {}
@@ -1045,7 +1176,8 @@ impl AppState {
                 match &mut self.input_mode {
                     InputMode::JumpToLine(s)
                     | InputMode::OpenFilePath(s)
-                    | InputMode::SaveAsPath(s) => {
+                    | InputMode::SaveAsPath(s)
+                    | InputMode::Rename(s) => {
                         s.pop();
                     }
                     InputMode::Normal => {}
@@ -1105,6 +1237,11 @@ impl AppState {
                         let path = PathBuf::from(input.trim());
                         let _ = self.editor.active_mut().save_as(path);
                         self.after_file_open_or_save();
+                    }
+                    InputMode::Rename(input) => {
+                        if !input.is_empty() {
+                            self.send_rename(&input);
+                        }
                     }
                     InputMode::Normal => {}
                 }
@@ -1865,11 +2002,32 @@ impl AppState {
                     self.lsp = None;
                 }
             }
-            LspUpdate::Error(msg) => {
-                let _ = msg; // TODO: show in status bar or log
+            LspUpdate::Completion { items, .. } => {
+                self.apply_completion_response(items);
             }
-            // Other updates will be handled in later phases.
-            _ => {}
+            LspUpdate::Hover { contents, .. } => {
+                self.apply_hover_response(contents);
+            }
+            LspUpdate::Definition { locations, .. } => {
+                self.apply_definition_response(locations);
+            }
+            LspUpdate::References { locations, .. } => {
+                self.apply_references_response(locations);
+            }
+            LspUpdate::Rename { edit, .. } => {
+                if let Some(edit) = edit {
+                    self.apply_workspace_edit(&edit);
+                }
+            }
+            LspUpdate::CodeActions { actions, .. } => {
+                let _ = actions; // TODO: show code action picker
+            }
+            LspUpdate::SemanticTokens { .. } => {
+                // Phase 7
+            }
+            LspUpdate::Error(msg) => {
+                let _ = msg;
+            }
         }
     }
 
@@ -2009,6 +2167,486 @@ impl AppState {
         }
 
         tab.lsp_state.diagnostics = diagnostics;
+    }
+
+    // ── Completion ───────────────────────────────────────────────────────────
+
+    fn trigger_completion(&mut self) {
+        let Some(registry) = &mut self.lsp else {
+            return;
+        };
+        if !registry.is_ready() {
+            return;
+        }
+        let handle = self.editor.active();
+        let Some(path) = &handle.path else { return };
+        let uri = crate::lsp::types::path_to_uri(path);
+        let cursor = handle.buffer.cursors.primary();
+        let pos = crate::lsp::types::byte_offset_to_lsp_position(
+            handle.buffer.rope(),
+            cursor.byte_offset,
+        );
+        let anchor_byte = cursor.byte_offset;
+        let anchor_line = cursor.line;
+        let anchor_col = cursor.col;
+
+        let _ = registry
+            .client_mut()
+            .request_completion(&uri, pos.line, pos.character);
+
+        self.completion = Some(CompletionState::new(anchor_byte, anchor_line, anchor_col));
+    }
+
+    fn handle_completion_input(&mut self, action: &EditorAction) -> bool {
+        match action {
+            EditorAction::MoveCursor(Direction::Up) => {
+                if let Some(c) = &mut self.completion {
+                    c.selected = c.selected.saturating_sub(1);
+                }
+                true
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                if let Some(c) = &mut self.completion
+                    && !c.filtered.is_empty()
+                {
+                    c.selected = (c.selected + 1).min(c.filtered.len() - 1);
+                }
+                true
+            }
+            EditorAction::InsertNewline | EditorAction::InsertTab => {
+                self.accept_completion();
+                true
+            }
+            EditorAction::CloseSearch => {
+                self.completion = None;
+                true
+            }
+            // Cursor movement dismisses completion.
+            EditorAction::MoveCursor(_)
+            | EditorAction::MoveCursorWord(_)
+            | EditorAction::MoveCursorHome
+            | EditorAction::MoveCursorEnd => {
+                self.completion = None;
+                false // let the movement fall through
+            }
+            // Characters fall through to editing, then refilter.
+            _ => false,
+        }
+    }
+
+    fn accept_completion(&mut self) {
+        let insert_text = match &self.completion {
+            Some(c) => match c.selected_item() {
+                Some(item) => item.insert_text.clone(),
+                None => {
+                    self.completion = None;
+                    return;
+                }
+            },
+            None => return,
+        };
+        let anchor = self.completion.as_ref().unwrap().anchor_byte;
+        let cursor_byte = self.editor.active().buffer.cursors.primary().byte_offset;
+
+        // Delete the typed prefix and insert the completion text.
+        if cursor_byte > anchor {
+            let rope = self.editor.active().buffer.rope();
+            let start_char = rope.byte_to_char(anchor);
+            let end_char = rope.byte_to_char(cursor_byte);
+            self.editor
+                .active_mut()
+                .buffer
+                .delete_range(start_char, end_char);
+        }
+        self.editor.active_mut().buffer.insert_str(&insert_text);
+
+        self.completion = None;
+    }
+
+    fn refilter_completion(&mut self) {
+        let Some(comp) = &mut self.completion else {
+            return;
+        };
+        let cursor_byte = self.editor.active().buffer.cursors.primary().byte_offset;
+        if cursor_byte < comp.anchor_byte {
+            self.completion = None;
+            return;
+        }
+        let rope = self.editor.active().buffer.rope();
+        let start = rope.byte_to_char(comp.anchor_byte);
+        let end = rope.byte_to_char(cursor_byte);
+        let prefix: String = rope.slice(start..end).chars().collect();
+        comp.filter(&prefix);
+    }
+
+    fn apply_completion_response(&mut self, items: Vec<serde_json::Value>) {
+        let Some(comp) = &mut self.completion else {
+            return;
+        };
+        comp.items = items
+            .iter()
+            .map(|item| {
+                let label = item
+                    .get("label")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let detail = item
+                    .get("detail")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                let insert_text = item
+                    .get("insertText")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&label)
+                    .to_string();
+                let filter_text = item
+                    .get("filterText")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&label)
+                    .to_string();
+                let kind = item.get("kind").and_then(|v| v.as_u64()).unwrap_or(0);
+                let kind_label = completion_kind_label(kind);
+                CompletionItemEntry {
+                    label,
+                    detail,
+                    insert_text,
+                    filter_text,
+                    kind_label,
+                }
+            })
+            .collect();
+        comp.filtered = (0..comp.items.len()).collect();
+        self.refilter_completion();
+    }
+
+    // ── Hover ────────────────────────────────────────────────────────────────
+
+    fn trigger_hover(&mut self) {
+        let Some(registry) = &mut self.lsp else {
+            return;
+        };
+        if !registry.is_ready() || !registry.client().capabilities.hover_provider {
+            return;
+        }
+        let handle = self.editor.active();
+        let Some(path) = &handle.path else { return };
+        let uri = crate::lsp::types::path_to_uri(path);
+        let cursor = handle.buffer.cursors.primary();
+        let pos = crate::lsp::types::byte_offset_to_lsp_position(
+            handle.buffer.rope(),
+            cursor.byte_offset,
+        );
+        let anchor_line = cursor.line;
+        let anchor_col = cursor.col;
+
+        let _ = registry
+            .client_mut()
+            .request_hover(&uri, pos.line, pos.character);
+
+        // We'll set hover state when the response arrives.
+        let _ = (anchor_line, anchor_col);
+    }
+
+    fn apply_hover_response(&mut self, contents: Option<serde_json::Value>) {
+        let Some(contents) = contents else { return };
+        let text = extract_hover_text(&contents);
+        if text.is_empty() {
+            return;
+        }
+        let cursor = self.editor.active().buffer.cursors.primary();
+        self.hover = Some(HoverState {
+            content: text,
+            anchor_line: cursor.line,
+            anchor_col: cursor.col,
+        });
+    }
+
+    // ── Go to Definition ─────────────────────────────────────────────────────
+
+    fn trigger_go_to_definition(&mut self) {
+        let Some(registry) = &mut self.lsp else {
+            return;
+        };
+        if !registry.is_ready() || !registry.client().capabilities.definition_provider {
+            return;
+        }
+        let handle = self.editor.active();
+        let Some(path) = &handle.path else { return };
+        let uri = crate::lsp::types::path_to_uri(path);
+        let cursor = handle.buffer.cursors.primary();
+        let pos = crate::lsp::types::byte_offset_to_lsp_position(
+            handle.buffer.rope(),
+            cursor.byte_offset,
+        );
+
+        let _ = registry
+            .client_mut()
+            .request_definition(&uri, pos.line, pos.character);
+    }
+
+    fn apply_definition_response(&mut self, locations: serde_json::Value) {
+        let locs = parse_locations(&locations);
+        if locs.is_empty() {
+            return;
+        }
+        if locs.len() == 1 {
+            self.jump_to_location(&locs[0]);
+        } else {
+            self.show_references_list(locs);
+        }
+    }
+
+    // ── Find References ──────────────────────────────────────────────────────
+
+    fn trigger_find_references(&mut self) {
+        let Some(registry) = &mut self.lsp else {
+            return;
+        };
+        if !registry.is_ready() || !registry.client().capabilities.references_provider {
+            return;
+        }
+        let handle = self.editor.active();
+        let Some(path) = &handle.path else { return };
+        let uri = crate::lsp::types::path_to_uri(path);
+        let cursor = handle.buffer.cursors.primary();
+        let pos = crate::lsp::types::byte_offset_to_lsp_position(
+            handle.buffer.rope(),
+            cursor.byte_offset,
+        );
+
+        let _ = registry
+            .client_mut()
+            .request_references(&uri, pos.line, pos.character);
+    }
+
+    fn apply_references_response(&mut self, locations: serde_json::Value) {
+        let locs = parse_locations(&locations);
+        if locs.is_empty() {
+            return;
+        }
+        self.show_references_list(locs);
+    }
+
+    fn show_references_list(&mut self, locs: Vec<(PathBuf, usize, usize)>) {
+        let items: Vec<ReferenceItem> = locs
+            .into_iter()
+            .map(|(path, line, col)| {
+                let context = std::fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|text| text.lines().nth(line).map(|l| l.trim().to_string()))
+                    .unwrap_or_default();
+                ReferenceItem {
+                    path,
+                    line,
+                    col,
+                    context,
+                }
+            })
+            .collect();
+        self.references_list = Some(ReferencesListState { items, selected: 0 });
+    }
+
+    fn handle_references_input(&mut self, action: &EditorAction) -> bool {
+        let num_items = self
+            .references_list
+            .as_ref()
+            .map(|r| r.items.len())
+            .unwrap_or(0);
+        match action {
+            EditorAction::MoveCursor(Direction::Up) => {
+                if let Some(r) = &mut self.references_list {
+                    r.selected = r.selected.saturating_sub(1);
+                }
+                true
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                if let Some(r) = &mut self.references_list {
+                    r.selected = (r.selected + 1).min(num_items.saturating_sub(1));
+                }
+                true
+            }
+            EditorAction::InsertNewline => {
+                if let Some(r) = &self.references_list
+                    && let Some(item) = r.items.get(r.selected)
+                {
+                    let path = item.path.clone();
+                    let line = item.line;
+                    let col = item.col;
+                    self.references_list = None;
+                    self.jump_to_location(&(path, line, col));
+                }
+                true
+            }
+            EditorAction::CloseSearch => {
+                self.references_list = None;
+                true
+            }
+            EditorAction::Quit | EditorAction::ForceQuit => {
+                self.references_list = None;
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn jump_to_location(&mut self, loc: &(PathBuf, usize, usize)) {
+        let (path, line, col) = loc;
+
+        // Check if file is already open in a tab.
+        let existing = self
+            .editor
+            .tabs
+            .iter()
+            .position(|t| t.path.as_ref().is_some_and(|p| same_file(p, path)));
+
+        if let Some(idx) = existing {
+            self.editor.go_to_tab(idx);
+        } else {
+            // Open in new tab.
+            if self.editor.open_tab(path.clone()).is_err() {
+                return;
+            }
+            self.after_file_open_or_save();
+        }
+
+        // Jump cursor to position.
+        let rope = self.editor.active().buffer.rope().clone();
+        let cursor = crate::buffer::cursor::Cursor::from_line_col(&rope, *line, *col);
+        *self.editor.active_mut().buffer.cursors.primary_mut() = cursor;
+    }
+
+    // ── Rename ───────────────────────────────────────────────────────────────
+
+    fn trigger_rename(&mut self) {
+        let Some(registry) = &self.lsp else { return };
+        if !registry.is_ready() || !registry.client().capabilities.rename_provider {
+            return;
+        }
+        // Enter rename modal: prompt for new name.
+        let handle = self.editor.active();
+        let cursor = handle.buffer.cursors.primary();
+        // Extract word under cursor as the default name.
+        let rope = handle.buffer.rope();
+        let byte = cursor.byte_offset;
+        let text = rope.to_string();
+        let word = extract_word_at(&text, byte);
+        self.input_mode = InputMode::Rename(word);
+    }
+
+    /// Send rename request after the user confirms the new name.
+    fn send_rename(&mut self, new_name: &str) {
+        let Some(registry) = &mut self.lsp else {
+            return;
+        };
+        if !registry.is_ready() {
+            return;
+        }
+        let handle = self.editor.active();
+        let Some(path) = &handle.path else { return };
+        let uri = crate::lsp::types::path_to_uri(path);
+        let cursor = handle.buffer.cursors.primary();
+        let pos = crate::lsp::types::byte_offset_to_lsp_position(
+            handle.buffer.rope(),
+            cursor.byte_offset,
+        );
+
+        let _ = registry
+            .client_mut()
+            .request_rename(&uri, pos.line, pos.character, new_name);
+    }
+
+    fn apply_workspace_edit(&mut self, edit: &serde_json::Value) {
+        let changes = match edit.get("changes").and_then(|v| v.as_object()) {
+            Some(c) => c,
+            None => return,
+        };
+
+        for (uri, edits) in changes {
+            let path = match crate::lsp::types::uri_to_path(uri) {
+                Some(p) => p,
+                None => continue,
+            };
+            let edits = match edits.as_array() {
+                Some(e) => e,
+                None => continue,
+            };
+
+            // Find or open the tab.
+            let tab_idx = self
+                .editor
+                .tabs
+                .iter()
+                .position(|t| t.path.as_ref().is_some_and(|p| same_file(p, &path)));
+            let tab_idx = match tab_idx {
+                Some(i) => i,
+                None => continue, // Skip files not open.
+            };
+
+            // Collect and sort edits in reverse order to avoid offset shifting.
+            let mut text_edits: Vec<(usize, usize, String)> = Vec::new();
+            let rope = self.editor.tabs[tab_idx].buffer.rope();
+            for e in edits {
+                let range = match e.get("range") {
+                    Some(r) => r,
+                    None => continue,
+                };
+                let start = match parse_lsp_position(range.get("start")) {
+                    Some(pos) => {
+                        crate::lsp::types::lsp_position_to_byte_offset(rope, pos).unwrap_or(0)
+                    }
+                    None => continue,
+                };
+                let end = match parse_lsp_position(range.get("end")) {
+                    Some(pos) => {
+                        crate::lsp::types::lsp_position_to_byte_offset(rope, pos).unwrap_or(0)
+                    }
+                    None => continue,
+                };
+                let new_text = e
+                    .get("newText")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                text_edits.push((start, end, new_text));
+            }
+
+            // Apply in reverse byte order.
+            text_edits.sort_by(|a, b| b.0.cmp(&a.0));
+            let tab = &mut self.editor.tabs[tab_idx];
+            for (start, end, new_text) in &text_edits {
+                let rope = tab.buffer.rope();
+                let start_char = rope.byte_to_char(*start);
+                let end_char = rope.byte_to_char(*end);
+                tab.buffer.delete_range(start_char, end_char);
+                tab.buffer.insert_str(new_text);
+            }
+        }
+    }
+
+    // ── Code Action ──────────────────────────────────────────────────────────
+
+    fn trigger_code_action(&mut self) {
+        let Some(registry) = &mut self.lsp else {
+            return;
+        };
+        if !registry.is_ready() || !registry.client().capabilities.code_action_provider {
+            return;
+        }
+        let handle = self.editor.active();
+        let Some(path) = &handle.path else { return };
+        let uri = crate::lsp::types::path_to_uri(path);
+        let cursor = handle.buffer.cursors.primary();
+        let pos = crate::lsp::types::byte_offset_to_lsp_position(
+            handle.buffer.rope(),
+            cursor.byte_offset,
+        );
+        let range = serde_json::json!({
+            "start": { "line": pos.line, "character": pos.character },
+            "end": { "line": pos.line, "character": pos.character },
+        });
+
+        let _ = registry.client_mut().request_code_action(&uri, range);
     }
 
     // ── Coordinate helpers ───────────────────────────────────────────────────
@@ -2159,4 +2797,84 @@ fn same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
         (Ok(ca), Ok(cb)) => ca == cb,
         _ => a == b,
     }
+}
+
+/// Map an LSP completion item kind number to a short label.
+fn completion_kind_label(kind: u64) -> &'static str {
+    match kind {
+        1 => "txt",
+        2 => "fn ",
+        3 => "fn ",
+        4 => "new",
+        5 => "fld",
+        6 => "var",
+        7 => "cls",
+        8 => "ifc",
+        9 => "mod",
+        10 => "prp",
+        14 => "kw ",
+        15 => "snp",
+        21 => "cst",
+        _ => "   ",
+    }
+}
+
+/// Extract plain text from an LSP hover contents value.
+fn extract_hover_text(contents: &serde_json::Value) -> String {
+    // Can be a string, a { kind, value } MarkupContent, or an array.
+    if let Some(s) = contents.as_str() {
+        return s.to_string();
+    }
+    if let Some(value) = contents.get("value").and_then(|v| v.as_str()) {
+        return value.to_string();
+    }
+    if let Some(arr) = contents.as_array() {
+        return arr
+            .iter()
+            .filter_map(|v| {
+                v.as_str()
+                    .map(String::from)
+                    .or_else(|| v.get("value").and_then(|v| v.as_str()).map(String::from))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    String::new()
+}
+
+/// Parse LSP Location or Location[] into (path, line, col) tuples.
+fn parse_locations(value: &serde_json::Value) -> Vec<(PathBuf, usize, usize)> {
+    let locs = if value.is_array() {
+        value.as_array().cloned().unwrap_or_default()
+    } else if value.is_object() {
+        vec![value.clone()]
+    } else {
+        return Vec::new();
+    };
+
+    locs.iter()
+        .filter_map(|loc| {
+            let uri = loc.get("uri")?.as_str()?;
+            let path = crate::lsp::types::uri_to_path(uri)?;
+            let range = loc.get("range")?;
+            let start = range.get("start")?;
+            let line = start.get("line")?.as_u64()? as usize;
+            let col = start.get("character")?.as_u64()? as usize;
+            Some((path, line, col))
+        })
+        .collect()
+}
+
+/// Extract the word under the cursor at a byte offset.
+fn extract_word_at(text: &str, byte_offset: usize) -> String {
+    let bytes = text.as_bytes();
+    let mut start = byte_offset;
+    let mut end = byte_offset;
+    while start > 0 && ((bytes[start - 1] as char).is_alphanumeric() || bytes[start - 1] == b'_') {
+        start -= 1;
+    }
+    while end < bytes.len() && ((bytes[end] as char).is_alphanumeric() || bytes[end] == b'_') {
+        end += 1;
+    }
+    text[start..end].to_string()
 }
