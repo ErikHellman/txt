@@ -72,7 +72,7 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
     let lang = handle.syntax.language.name();
     let pos = format!(" {}:{} ", line, col);
     let mem_str = if state.memory_rss_kb > 0 {
-        format!(" {} ", format_memory(state.memory_rss_kb))
+        format_memory(state.memory_rss_kb)
     } else {
         String::new()
     };
@@ -162,11 +162,11 @@ fn modal_prompt(mode: &InputMode) -> Option<String> {
 
 fn format_memory(kb: u64) -> String {
     if kb >= 1_048_576 {
-        format!("{:.1} GB", kb as f64 / 1_048_576.0)
+        format!(" {:.1} GiB ", kb as f64 / 1_048_576.0)
     } else if kb >= 1024 {
-        format!("{:.1} MB", kb as f64 / 1024.0)
+        format!(" {:.1} MiB ", kb as f64 / 1024.0)
     } else {
-        format!("{} KB", kb)
+        format!(" {} KiB ", kb)
     }
 }
 

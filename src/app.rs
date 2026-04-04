@@ -1800,14 +1800,20 @@ fn read_rss_kb() -> Option<u64> {
 
     const MACH_TASK_BASIC_INFO: u32 = 20;
 
+    type TaskT = u32;
+    type TaskFlavorT = u32;
+    type TaskInfoT = u32;
+    type MachMsgTypeNumberT = u32;
+    type KernReturnT = i32;
+
     extern "C" {
-        fn mach_task_self() -> u32;
+        fn mach_task_self() -> TaskT;
         fn task_info(
-            target_task: u32,
-            flavor: u32,
-            task_info_out: *mut u8,
-            task_info_outCnt: *mut u32,
-        ) -> i32;
+            target_task: TaskT,
+            flavor: TaskFlavorT,
+            task_info_out: *mut TaskInfoT,
+            task_info_outCnt: *mut MachMsgTypeNumberT,
+        ) -> KernReturnT;
     }
 
     #[repr(C)]
@@ -1827,7 +1833,7 @@ fn read_rss_kb() -> Option<u64> {
         let ret = task_info(
             mach_task_self(),
             MACH_TASK_BASIC_INFO,
-            &mut info as *mut _ as *mut u8,
+            &mut info as *mut _ as *mut TaskInfoT,
             &mut count,
         );
         if ret == 0 {
