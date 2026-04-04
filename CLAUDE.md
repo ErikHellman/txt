@@ -13,7 +13,8 @@ cargo run -- <file>          # open a file
 cargo run -- <directory>     # open a directory — sidebar opens automatically
 ```
 
-No separate lint step. Fix all compiler warnings before finishing — `#[allow(dead_code)]` is used deliberately on future API (see below), not as a workaround for real warnings.
+**IMPORTANT: Run `scripts/check.sh` after every code change before finishing.**
+It runs the same four checks as CI (fmt, build, clippy, test) and exits on the first failure. Fix all reported issues before committing — `#[allow(dead_code)]` is used deliberately on future API (see below), not as a workaround for real warnings.
 
 ## Critical constraints
 
