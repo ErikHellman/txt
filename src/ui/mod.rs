@@ -15,12 +15,14 @@ use ratatui::{
 };
 
 use crate::app::{AppState, SIDEBAR_WIDTH};
+use crate::theme::ThemeColors;
 
 /// Top-level render function. Called once per frame with an immutable reference
 /// to the application state. Builds the layout and delegates to sub-renderers.
 pub fn render(state: &AppState, frame: &mut Frame) {
     let area = frame.area();
     let buf = frame.buffer_mut();
+    let theme = ThemeColors::for_theme(&state.config.theme);
 
     // ── Reserve status bar (1 row at very bottom) ─────────────────────────────
     let status_y = area.y + area.height.saturating_sub(1);
@@ -128,7 +130,7 @@ pub fn render(state: &AppState, frame: &mut Frame) {
             side_a.height,
         );
         if let Some(sidebar) = &state.sidebar {
-            sidebar::render(sidebar, state.sidebar_focused, sb_inner, buf);
+            sidebar::render(sidebar, state.sidebar_focused, &theme, sb_inner, buf);
         }
         let sep_x = side_a.x + side_a.width.saturating_sub(1);
         let sep_style = Style::default()
@@ -151,6 +153,8 @@ pub fn render(state: &AppState, frame: &mut Frame) {
         &highlight_spans,
         state.git_gutter.as_ref(),
         editor_focused,
+        state.config.show_whitespace,
+        &theme,
         editor_area,
         buf,
     );
@@ -161,7 +165,7 @@ pub fn render(state: &AppState, frame: &mut Frame) {
         search_bar::render(ss, sa, buf);
     }
 
-    status_bar::render(state, status_area, buf);
+    status_bar::render(state, &theme, status_area, buf);
 
     // ── Confirm-quit overlay (replaces status bar) ────────────────────────────
     if state.confirm_quit {
@@ -178,12 +182,12 @@ pub fn render(state: &AppState, frame: &mut Frame) {
 
     // ── Fuzzy picker floating overlay ─────────────────────────────────────────
     if let Some(picker) = &state.fuzzy_picker {
-        fuzzy_picker::render(picker, area, buf);
+        fuzzy_picker::render(picker, &theme, area, buf);
     }
 
     // ── Command palette overlay ───────────────────────────────────────────────
     if let Some(palette) = &state.command_palette {
-        command_palette::render(palette, area, buf);
+        command_palette::render(palette, &theme, area, buf);
     }
 
     // ── Help overlay ─────────────────────────────────────────────────────────

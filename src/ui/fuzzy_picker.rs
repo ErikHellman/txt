@@ -5,9 +5,10 @@ use ratatui::{
 };
 
 use crate::app::FuzzyPickerState;
+use crate::theme::ThemeColors;
 
 /// Render the fuzzy file picker as a centered floating overlay.
-pub fn render(picker: &FuzzyPickerState, area: Rect, buf: &mut TermBuffer) {
+pub fn render(picker: &FuzzyPickerState, theme: &ThemeColors, area: Rect, buf: &mut TermBuffer) {
     // ── Compute overlay dimensions ────────────────────────────────────────────
     let overlay_w = (area.width * 2 / 3).max(40).min(area.width);
     let overlay_h = (area.height * 2 / 3).max(8).min(area.height);
@@ -17,18 +18,16 @@ pub fn render(picker: &FuzzyPickerState, area: Rect, buf: &mut TermBuffer) {
     let overlay = Rect::new(overlay_x, overlay_y, overlay_w, overlay_h);
 
     // ── Styles ────────────────────────────────────────────────────────────────
-    let bg_style = Style::default().bg(Color::Rgb(25, 25, 40)).fg(Color::White);
+    let bg_style = Style::default().bg(theme.picker_bg).fg(Color::White);
     let border_style = Style::default()
-        .bg(Color::Rgb(25, 25, 40))
+        .bg(theme.picker_bg)
         .fg(Color::Rgb(80, 80, 140));
     let header_style = Style::default()
-        .bg(Color::Rgb(35, 35, 55))
+        .bg(theme.picker_bg)
         .fg(Color::Rgb(180, 180, 220))
         .add_modifier(Modifier::BOLD);
-    let query_style = Style::default().bg(Color::Rgb(35, 35, 55)).fg(Color::White);
-    let selected_style = Style::default()
-        .bg(Color::Rgb(60, 80, 140))
-        .fg(Color::White);
+    let query_style = Style::default().bg(theme.picker_bg).fg(Color::White);
+    let selected_style = Style::default().bg(theme.picker_sel_bg).fg(Color::White);
     let item_style = bg_style;
 
     // ── Clear the overlay area ────────────────────────────────────────────────

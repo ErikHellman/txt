@@ -404,6 +404,8 @@ pub struct AppState {
     pub workspace: PathBuf,
     pub should_quit: bool,
     pub confirm_quit: bool,
+    /// Debounce timer for auto-save: reset on every edit, fires after 1 s of inactivity.
+    auto_save_timer: Option<std::time::Instant>,
     /// Active file watcher for the current buffer (replaced on each file open/save).
     file_watcher: Option<FileWatcher>,
     pub term_width: u16,
@@ -432,6 +434,7 @@ impl AppState {
             workspace,
             should_quit: false,
             confirm_quit: false,
+            auto_save_timer: None,
             file_watcher: None,
             term_width: 80,
             term_height: 24,
@@ -930,7 +933,7 @@ impl AppState {
 
             // ── App lifecycle ─────────────────────────────────────────
             EditorAction::Quit => {
-                if self.editor.active().buffer.modified {
+                if self.editor.active().buffer.modified && self.config.confirm_exit {
                     self.confirm_quit = true;
                 } else {
                     self.should_quit = true;
@@ -945,6 +948,11 @@ impl AppState {
         // Re-parse the active buffer if it was modified this action.
         if self.editor.active().buffer.modified {
             self.editor.active_mut().reparse();
+        }
+
+        // Reset the auto-save debounce timer on every update that leaves the buffer dirty.
+        if self.config.auto_save && self.editor.active().buffer.modified {
+            self.auto_save_timer = Some(std::time::Instant::now());
         }
     }
 
@@ -1569,7 +1577,7 @@ impl AppState {
     // ── File helpers ─────────────────────────────────────────────────────────
 
     fn close_tab(&mut self) {
-        if self.editor.active().buffer.modified {
+        if self.editor.active().buffer.modified && self.config.confirm_exit {
             self.confirm_quit = true; // reuse confirm for "discard changes?"
         } else {
             self.editor.close_active_tab();
@@ -1612,6 +1620,22 @@ impl AppState {
             && watcher.poll()
         {
             self.reload_active_file();
+        }
+    }
+
+    /// Save the active buffer automatically after 1 second of inactivity (debounced).
+    ///
+    /// Only saves when `config.auto_save` is enabled and the buffer has a path.
+    pub fn poll_auto_save(&mut self) {
+        if !self.config.auto_save {
+            return;
+        }
+        if let Some(t) = self.auto_save_timer
+            && t.elapsed() >= std::time::Duration::from_secs(1)
+            && self.editor.active().path.is_some()
+        {
+            self.save_active();
+            self.auto_save_timer = None;
         }
     }
 
@@ -1735,6 +1759,7 @@ impl App {
 
             // Check for external file changes (non-blocking).
             state.poll_file_watcher();
+            state.poll_auto_save();
 
             terminal.draw(|frame| ui::render(&state, frame))?;
 

@@ -1,5 +1,7 @@
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use tree_sitter::{Node, Tree};
+
+use crate::theme::ThemeColors;
 
 use crate::syntax::language::Lang;
 
@@ -53,19 +55,19 @@ pub fn highlight(
     spans
 }
 
-/// Convert a `HighlightKind` to a ratatui `Style`. Used by the editor view.
-pub fn style_for_kind(kind: HighlightKind) -> Style {
+/// Convert a `HighlightKind` to a ratatui `Style` using the active theme colors.
+pub fn style_for_kind(kind: HighlightKind, theme: &ThemeColors) -> Style {
     match kind {
-        HighlightKind::Keyword => Style::default().fg(Color::Rgb(197, 134, 192)),
-        HighlightKind::String => Style::default().fg(Color::Rgb(206, 145, 120)),
+        HighlightKind::Keyword => Style::default().fg(theme.syn_keyword),
+        HighlightKind::String => Style::default().fg(theme.syn_string),
         HighlightKind::Comment => Style::default()
-            .fg(Color::Rgb(106, 153, 85))
+            .fg(theme.syn_comment)
             .add_modifier(Modifier::ITALIC),
-        HighlightKind::Number => Style::default().fg(Color::Rgb(181, 206, 168)),
-        HighlightKind::Type => Style::default().fg(Color::Rgb(78, 201, 176)),
-        HighlightKind::Function => Style::default().fg(Color::Rgb(220, 220, 170)),
-        HighlightKind::Attribute => Style::default().fg(Color::Rgb(156, 220, 254)),
-        HighlightKind::Punctuation => Style::default().fg(Color::DarkGray),
+        HighlightKind::Number => Style::default().fg(theme.syn_number),
+        HighlightKind::Type => Style::default().fg(theme.syn_type),
+        HighlightKind::Function => Style::default().fg(theme.syn_function),
+        HighlightKind::Attribute => Style::default().fg(theme.syn_attribute),
+        HighlightKind::Punctuation => Style::default().fg(theme.syn_punctuation),
     }
 }
 
@@ -578,6 +580,8 @@ mod tests {
 
     #[test]
     fn style_for_kind_produces_distinct_styles() {
+        use ratatui::style::Color;
+        let theme = crate::theme::ThemeColors::for_theme(&crate::config::Theme::Default);
         // Each kind should produce a non-default style.
         let kinds = [
             HighlightKind::Keyword,
@@ -591,7 +595,7 @@ mod tests {
         ];
         let default_style = Style::default().fg(Color::White);
         for kind in kinds {
-            let style = style_for_kind(kind);
+            let style = style_for_kind(kind, &theme);
             assert_ne!(
                 style, default_style,
                 "{:?} should not map to default White style",

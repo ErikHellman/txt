@@ -8,6 +8,7 @@ mod git;
 mod input;
 mod search;
 mod syntax;
+mod theme;
 mod ui;
 mod watcher;
 

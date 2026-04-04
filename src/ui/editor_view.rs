@@ -10,6 +10,7 @@ use crate::editor::tab::BufferHandle;
 use crate::git::{GitGutter, GutterMark};
 use crate::search::SearchState;
 use crate::syntax::highlighter::{HighlightSpan, style_for_kind};
+use crate::theme::ThemeColors;
 
 /// Width of a single space used as a separator between gutter and text.
 const GUTTER_PAD: u16 = 1;
@@ -26,12 +27,15 @@ const GIT_GUTTER_W: u16 = 1;
 ///   5. Bracket-pair highlight
 ///   6. Syntax highlight (tree-sitter)
 ///   7. Plain text
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     handle: &BufferHandle,
     search: Option<&SearchState>,
     highlights: &[HighlightSpan],
     git_gutter: Option<&GitGutter>,
     focused: bool,
+    show_whitespace: bool,
+    theme: &ThemeColors,
     area: Rect,
     buf: &mut TermBuffer,
 ) {
@@ -54,11 +58,9 @@ pub fn render(
 
     // Styles
     let line_num_style = Style::default().fg(Color::DarkGray);
-    let line_num_current_style = Style::default().fg(Color::Yellow);
-    let text_style = Style::default().fg(Color::White);
-    let selection_style = Style::default()
-        .bg(Color::Rgb(60, 80, 120))
-        .fg(Color::White);
+    let line_num_current_style = Style::default().fg(theme.line_num_cur);
+    let text_style = Style::default().fg(theme.text);
+    let selection_style = Style::default().bg(theme.selection_bg).fg(theme.text);
     let cursor_style = if focused {
         Style::default()
             .bg(Color::White)
@@ -80,6 +82,7 @@ pub fn render(
         .bg(Color::Rgb(60, 80, 60))
         .fg(Color::Rgb(140, 220, 140))
         .add_modifier(Modifier::BOLD);
+    let whitespace_style = Style::default().fg(Color::Rgb(80, 80, 100));
 
     // Git gutter styles.
     let git_added_style = Style::default().fg(Color::Rgb(80, 200, 80));
@@ -187,10 +190,39 @@ pub fn render(
                 break;
             }
             let gw_g = UnicodeWidthStr::width(grapheme) as u16;
+
+            // In show_whitespace mode, render tab as a visible glyph (width 1).
             if gw_g == 0 {
+                if show_whitespace && grapheme == "\t" && screen_x < max_x {
+                    let style = style_for_byte(
+                        byte_offset,
+                        cursor.byte_offset,
+                        has_selection,
+                        selection,
+                        search,
+                        bracket_pair,
+                        highlights,
+                        theme,
+                        cursor_style,
+                        selection_style,
+                        current_match_style,
+                        match_style,
+                        bracket_style,
+                        whitespace_style,
+                    );
+                    buf.set_string(screen_x, y, "→", style);
+                    screen_x += 1;
+                }
                 byte_offset += grapheme.len();
                 continue;
             }
+
+            // In show_whitespace mode, substitute space with middle dot.
+            let (display_glyph, is_ws) = if show_whitespace && grapheme == " " {
+                ("·", true)
+            } else {
+                (grapheme, false)
+            };
 
             let style = style_for_byte(
                 byte_offset,
@@ -200,15 +232,16 @@ pub fn render(
                 search,
                 bracket_pair,
                 highlights,
+                theme,
                 cursor_style,
                 selection_style,
                 current_match_style,
                 match_style,
                 bracket_style,
-                text_style,
+                if is_ws { whitespace_style } else { text_style },
             );
 
-            buf.set_string(screen_x, y, grapheme, style);
+            buf.set_string(screen_x, y, display_glyph, style);
             if gw_g > 1 && screen_x + 1 < max_x {
                 buf.set_string(screen_x + 1, y, " ", style);
             }
@@ -251,6 +284,7 @@ fn style_for_byte(
     search: Option<&SearchState>,
     bracket_pair: Option<(usize, usize)>,
     highlights: &[HighlightSpan],
+    theme: &ThemeColors,
     cursor_style: Style,
     selection_style: Style,
     current_match_style: Style,
@@ -289,7 +323,7 @@ fn style_for_byte(
     }
     // 6. Syntax highlight
     if let Some(span) = find_highlight(highlights, byte_offset) {
-        return style_for_kind(span.kind);
+        return style_for_kind(span.kind, theme);
     }
     // 7. Default text
     text_style

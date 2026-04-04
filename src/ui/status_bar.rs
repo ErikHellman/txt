@@ -5,6 +5,7 @@ use ratatui::{
 };
 
 use crate::app::{AppState, InputMode};
+use crate::theme::ThemeColors;
 
 /// Render the status bar at the bottom of the screen.
 ///
@@ -13,7 +14,7 @@ use crate::app::{AppState, InputMode};
 ///
 /// Modal layout:
 ///   [ JumpToLine / OpenFile / SaveAs prompt ]
-pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
+pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermBuffer) {
     if area.height == 0 || area.width == 0 {
         return;
     }
@@ -33,17 +34,17 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
 
     let handle = state.editor.active();
 
-    let bar_style = Style::default().bg(Color::Rgb(40, 40, 60)).fg(Color::White);
+    let bar_style = Style::default().bg(theme.statusbar_bg).fg(Color::White);
     let name_style = Style::default()
-        .bg(Color::Rgb(40, 40, 60))
+        .bg(theme.statusbar_bg)
         .fg(Color::White)
         .add_modifier(Modifier::BOLD);
     let modified_style = Style::default()
-        .bg(Color::Rgb(40, 40, 60))
-        .fg(Color::Rgb(255, 150, 50))
+        .bg(theme.statusbar_bg)
+        .fg(theme.statusbar_modified_fg)
         .add_modifier(Modifier::BOLD);
     let lang_style = Style::default()
-        .bg(Color::Rgb(40, 40, 60))
+        .bg(theme.statusbar_bg)
         .fg(Color::Rgb(140, 180, 140));
     let info_style = Style::default()
         .bg(Color::Rgb(60, 60, 80))

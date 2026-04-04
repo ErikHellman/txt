@@ -5,6 +5,7 @@ use ratatui::{
 };
 
 use crate::input::action::EditorAction;
+use crate::theme::ThemeColors;
 
 /// A single entry in the command palette.
 pub struct CommandEntry {
@@ -204,7 +205,12 @@ impl Default for CommandPaletteState {
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
-pub fn render(palette: &CommandPaletteState, area: Rect, buf: &mut TermBuffer) {
+pub fn render(
+    palette: &CommandPaletteState,
+    theme: &ThemeColors,
+    area: Rect,
+    buf: &mut TermBuffer,
+) {
     if area.width < 30 || area.height < 6 {
         return;
     }
@@ -218,17 +224,17 @@ pub fn render(palette: &CommandPaletteState, area: Rect, buf: &mut TermBuffer) {
     let oy = area.y + area.height.saturating_sub(overlay_h) / 3; // upper-third
     let overlay = Rect::new(ox, oy, overlay_w, overlay_h);
 
-    let bg = Color::Rgb(22, 26, 46);
+    let bg = theme.picker_bg;
     let border_style = Style::default().bg(bg).fg(Color::Rgb(80, 100, 160));
-    let input_style = Style::default().bg(Color::Rgb(32, 36, 60)).fg(Color::White);
+    let input_style = Style::default().bg(bg).fg(Color::White);
     let selected_style = Style::default()
-        .bg(Color::Rgb(50, 70, 120))
+        .bg(theme.picker_sel_bg)
         .fg(Color::White)
         .add_modifier(Modifier::BOLD);
     let normal_style = Style::default().bg(bg).fg(Color::Rgb(200, 200, 220));
     let key_style = Style::default().bg(bg).fg(Color::Rgb(120, 160, 120));
     let selected_key_style = Style::default()
-        .bg(Color::Rgb(50, 70, 120))
+        .bg(theme.picker_sel_bg)
         .fg(Color::Rgb(160, 220, 160));
 
     // Background fill.
@@ -432,9 +438,10 @@ mod tests {
 
     #[test]
     fn render_does_not_panic() {
+        let theme = crate::theme::ThemeColors::for_theme(&crate::config::Theme::Default);
         let state = CommandPaletteState::new();
         let area = Rect::new(0, 0, 100, 40);
         let mut buf = TermBuffer::empty(area);
-        render(&state, area, &mut buf);
+        render(&state, &theme, area, &mut buf);
     }
 }
