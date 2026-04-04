@@ -18,6 +18,20 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
         return;
     }
 
+    // Show error message (cleared on next user interaction).
+    if let Some(err) = &state.status_error {
+        let err_style = Style::default()
+            .bg(Color::Rgb(140, 30, 30))
+            .fg(Color::White);
+        for x in area.x..area.x + area.width {
+            buf.set_string(x, area.y, " ", err_style);
+        }
+        let msg = format!(" {} ", err);
+        let truncated = truncate_str(&msg, area.width as usize);
+        buf.set_string(area.x, area.y, &truncated, err_style);
+        return;
+    }
+
     // Show prompt when a modal input is active.
     if let Some(prompt) = modal_prompt(&state.input_mode) {
         let prompt_style = Style::default()

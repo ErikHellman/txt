@@ -550,6 +550,8 @@ pub struct AppState {
     pub lsp_config: crate::lsp::config::WorkspaceLspConfig,
     /// Active LSP server connection (None when LSP is disabled or unavailable).
     pub lsp: Option<crate::lsp::LspRegistry>,
+    /// Transient error message shown in the status bar (cleared on next user action).
+    pub status_error: Option<String>,
     pub term_width: u16,
     pub term_height: u16,
 }
@@ -589,6 +591,7 @@ impl AppState {
             file_watcher: None,
             lsp_config,
             lsp,
+            status_error: None,
             term_width: 80,
             term_height: 24,
         };
@@ -605,6 +608,9 @@ impl AppState {
 
     pub fn update(&mut self, action: EditorAction, terminal_height: u16) {
         self.term_height = terminal_height;
+
+        // Clear transient status error on any user interaction.
+        self.status_error = None;
 
         // Quit confirmation mode
         if self.confirm_quit {
@@ -2015,6 +2021,10 @@ impl AppState {
 
                 if disable_lsp {
                     self.lsp = None;
+                    self.status_error =
+                        Some("LSP server exited unexpectedly (restart limit reached)".into());
+                } else {
+                    self.status_error = Some("LSP server exited, restarting…".into());
                 }
             }
             LspUpdate::Completion { items, .. } => {
@@ -2041,7 +2051,7 @@ impl AppState {
                 self.apply_semantic_tokens(&uri, &data);
             }
             LspUpdate::Error(msg) => {
-                let _ = msg;
+                self.status_error = Some(msg);
             }
         }
     }
