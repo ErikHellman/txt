@@ -143,6 +143,8 @@ pub enum EditorAction {
     OpenCommandPalette,
     /// Open the open-buffer switcher (Ctrl+Shift+E).
     OpenBufferSwitcher,
+    /// Open the LSP server configuration overlay (Ctrl+L).
+    OpenLspConfig,
 
     // ── App lifecycle ─────────────────────────────────────────────────
     /// Quit the editor. The app will confirm if there are unsaved changes.

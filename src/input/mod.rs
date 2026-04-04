@@ -115,6 +115,7 @@ impl InputHandler {
             'p' | 'P' => EditorAction::OpenFuzzyPicker,
             'f' | 'F' => EditorAction::OpenSearch,
             'h' | 'H' => EditorAction::OpenReplace,
+            'l' | 'L' => EditorAction::OpenLspConfig,
             'r' | 'R' => EditorAction::OpenRecentFiles,
             '/' => EditorAction::ToggleLineComment,
             ',' => EditorAction::OpenSettings,
@@ -426,6 +427,14 @@ mod tests {
         assert_eq!(
             IH.handle_key(ctrl(KeyCode::Char('r'))),
             EditorAction::OpenRecentFiles
+        );
+    }
+
+    #[test]
+    fn open_lsp_config() {
+        assert_eq!(
+            IH.handle_key(ctrl(KeyCode::Char('l'))),
+            EditorAction::OpenLspConfig
         );
     }
 

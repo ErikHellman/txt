@@ -71,6 +71,7 @@ const ENTRIES: &[(&str, &str)] = &[
     ("Alt+Z", "Toggle word wrap"),
     ("F1", "Toggle this help  (↑↓ to scroll)"),
     ("Ctrl+,", "Settings"),
+    ("Ctrl+L", "Configure LSP server"),
     ("Ctrl+Q", "Quit"),
 ];
 

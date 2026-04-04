@@ -382,6 +382,55 @@ impl SidebarState {
     }
 }
 
+// ── LSP picker state ─────────────────────────────────────────────────────────
+
+/// Built-in LSP server definitions the user can choose from.
+pub const LSP_SERVER_OPTIONS: &[(&str, &str, &[&str])] = &[
+    // (display name / key, command, args)
+    ("rust-analyzer", "rust-analyzer", &[]),
+    ("pyright", "pyright-langserver", &["--stdio"]),
+    (
+        "typescript-language-server",
+        "typescript-language-server",
+        &["--stdio"],
+    ),
+    ("clangd", "clangd", &[]),
+    ("gopls", "gopls", &["serve"]),
+    ("lua-language-server", "lua-language-server", &[]),
+    ("zls", "zls", &[]),
+];
+
+/// State for the LSP configuration picker overlay.
+pub struct LspPickerState {
+    /// Currently highlighted row. 0 = Disabled, 1..=N = server options.
+    pub selected: usize,
+}
+
+impl LspPickerState {
+    pub fn new(lsp_config: &crate::lsp::config::WorkspaceLspConfig) -> Self {
+        // Pre-select the currently active server, or 0 (Disabled).
+        let selected = if !lsp_config.is_active() {
+            0
+        } else {
+            lsp_config
+                .server
+                .as_deref()
+                .and_then(|key| {
+                    LSP_SERVER_OPTIONS
+                        .iter()
+                        .position(|(name, _, _)| *name == key)
+                        .map(|i| i + 1)
+                })
+                .unwrap_or(0)
+        };
+        Self { selected }
+    }
+
+    pub fn num_rows(&self) -> usize {
+        1 + LSP_SERVER_OPTIONS.len() // "Disabled" + servers
+    }
+}
+
 // ── AppState ──────────────────────────────────────────────────────────────────
 
 /// All mutable application state. Renderers receive `&AppState` (read-only).
@@ -399,6 +448,7 @@ pub struct AppState {
     pub help_scroll: usize,
     pub show_settings: bool,
     pub settings_cursor: usize,
+    pub lsp_picker: Option<LspPickerState>,
     pub git_gutter: Option<GitGutter>,
     pub config: Config,
     pub workspace: PathBuf,
@@ -406,7 +456,6 @@ pub struct AppState {
     pub confirm_quit: bool,
     /// Active file watcher for the current buffer (replaced on each file open/save).
     file_watcher: Option<FileWatcher>,
-    /// Per-workspace LSP configuration (loaded from `<workspace>/.txt/lsp.toml`).
     /// Per-workspace LSP configuration (loaded from `<workspace>/.txt/lsp.toml`).
     pub lsp_config: crate::lsp::config::WorkspaceLspConfig,
     /// Active LSP server connection (None when LSP is disabled or unavailable).
@@ -438,6 +487,7 @@ impl AppState {
             help_scroll: 0,
             show_settings: false,
             settings_cursor: 0,
+            lsp_picker: None,
             git_gutter: None,
             config,
             workspace,
@@ -488,6 +538,11 @@ impl AppState {
 
         // Settings overlay — intercept navigation and edits
         if self.show_settings && self.handle_settings(&action) {
+            return;
+        }
+
+        // LSP config picker — intercept navigation and selection
+        if self.lsp_picker.is_some() && self.handle_lsp_picker(&action) {
             return;
         }
 
@@ -857,6 +912,13 @@ impl AppState {
                 self.show_settings = !self.show_settings;
                 if self.show_settings {
                     self.settings_cursor = 0;
+                }
+            }
+            EditorAction::OpenLspConfig => {
+                if self.lsp_picker.is_some() {
+                    self.lsp_picker = None;
+                } else {
+                    self.lsp_picker = Some(LspPickerState::new(&self.lsp_config));
                 }
             }
             EditorAction::ToggleLineComment => {
@@ -1418,6 +1480,92 @@ impl AppState {
         self.config.save();
     }
 
+    // ── LSP picker input handling ────────────────────────────────────────────
+
+    /// Handle input while the LSP config picker is open.
+    /// Returns `true` if the action was consumed, `false` to let it fall through.
+    fn handle_lsp_picker(&mut self, action: &EditorAction) -> bool {
+        let num_rows = 1 + LSP_SERVER_OPTIONS.len();
+        match action {
+            EditorAction::MoveCursor(Direction::Up) => {
+                if let Some(picker) = &mut self.lsp_picker {
+                    picker.selected = picker.selected.saturating_sub(1);
+                }
+                true
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                if let Some(picker) = &mut self.lsp_picker {
+                    picker.selected = (picker.selected + 1).min(num_rows - 1);
+                }
+                true
+            }
+            EditorAction::InsertChar(' ') | EditorAction::InsertNewline => {
+                self.apply_lsp_picker_selection();
+                self.lsp_picker = None;
+                true
+            }
+            EditorAction::OpenLspConfig | EditorAction::CloseSearch => {
+                self.lsp_picker = None;
+                true
+            }
+            EditorAction::Quit | EditorAction::ForceQuit => {
+                self.lsp_picker = None;
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// Write the selected LSP config to `<workspace>/.txt/lsp.toml` and reload.
+    fn apply_lsp_picker_selection(&mut self) {
+        let selected = match &self.lsp_picker {
+            Some(p) => p.selected,
+            None => return,
+        };
+
+        use crate::lsp::config::{LspServerEntry, WorkspaceLspConfig};
+        use std::collections::HashMap;
+
+        let new_config = if selected == 0 {
+            // Disabled
+            WorkspaceLspConfig::default()
+        } else {
+            let (name, command, args) = LSP_SERVER_OPTIONS[selected - 1];
+            let mut servers = HashMap::new();
+            servers.insert(
+                name.to_string(),
+                LspServerEntry {
+                    command: command.to_string(),
+                    args: args.iter().map(|s| s.to_string()).collect(),
+                    init_options: None,
+                },
+            );
+            WorkspaceLspConfig {
+                enabled: true,
+                server: Some(name.to_string()),
+                servers,
+            }
+        };
+
+        // Write config file.
+        let txt_dir = self.workspace.join(".txt");
+        let _ = std::fs::create_dir_all(&txt_dir);
+        if let Ok(text) = toml::to_string(&new_config) {
+            let _ = std::fs::write(txt_dir.join("lsp.toml"), text);
+        }
+
+        // Tear down existing LSP connection if any.
+        self.lsp = None;
+
+        // Apply new config.
+        self.lsp_config = new_config;
+
+        // Start new server if enabled.
+        if self.lsp_config.is_active() {
+            self.lsp = crate::lsp::LspRegistry::start(&self.lsp_config, &self.workspace).ok();
+        }
+    }
+
     // ── Sidebar input handling ────────────────────────────────────────────────
 
     /// Handle input while the sidebar is focused.
@@ -1683,13 +1831,19 @@ impl AppState {
                 let _ = (uri, diagnostics);
             }
             LspUpdate::ServerExited => {
-                // Try to restart the server.
+                let config = self.lsp_config.clone();
+                let workspace = self.workspace.clone();
+                let mut disable_lsp = false;
+
                 if let Some(registry) = &mut self.lsp
-                    && !registry.restart_exhausted()
+                    && (registry.restart_exhausted()
+                        || registry.try_restart(&config, &workspace).is_err())
                 {
-                    let config = self.lsp_config.clone();
-                    let workspace = self.workspace.clone();
-                    let _ = registry.try_restart(&config, &workspace);
+                    disable_lsp = true;
+                }
+
+                if disable_lsp {
+                    self.lsp = None;
                 }
             }
             LspUpdate::Error(msg) => {

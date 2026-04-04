@@ -71,9 +71,9 @@ pub struct LspClient {
     out_tx: mpsc::Sender<OutboundMessage>,
     /// Next request ID (monotonically increasing).
     next_id: u64,
-    /// The reader thread handle (joined on drop).
+    /// The reader thread handle (detached on drop — kept alive as long as client lives).
     _reader_handle: thread::JoinHandle<()>,
-    /// The writer thread handle (joined on drop).
+    /// The writer thread handle (detached on drop — kept alive as long as client lives).
     _writer_handle: thread::JoinHandle<()>,
     /// The child process (killed on drop if still running).
     child: Child,

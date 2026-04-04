@@ -2,6 +2,7 @@ pub mod command_palette;
 pub mod editor_view;
 pub mod fuzzy_picker;
 pub mod help_overlay;
+pub mod lsp_picker;
 pub mod search_bar;
 pub mod settings_overlay;
 pub mod sidebar;
@@ -194,5 +195,10 @@ pub fn render(state: &AppState, frame: &mut Frame) {
     // ── Settings overlay ──────────────────────────────────────────────────────
     if state.show_settings {
         settings_overlay::render(state, area, buf);
+    }
+
+    // ── LSP picker overlay ───────────────────────────────────────────────────
+    if let Some(picker) = &state.lsp_picker {
+        lsp_picker::render(picker, area, buf);
     }
 }

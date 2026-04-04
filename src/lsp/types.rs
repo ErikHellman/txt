@@ -299,11 +299,13 @@ mod tests {
 
     #[test]
     fn path_uri_roundtrip() {
-        let path = std::path::Path::new("/tmp/test.rs");
-        let uri = path_to_uri(path);
-        assert!(uri.starts_with("file:///"));
+        let path = std::env::temp_dir().join("test.rs");
+        let uri = path_to_uri(&path);
+        assert!(uri.starts_with("file:"));
         let back = uri_to_path(&uri).unwrap();
-        assert_eq!(back, std::path::PathBuf::from("/tmp/test.rs"));
+        // Compare canonicalized forms since path_to_uri canonicalizes.
+        let expected = path.canonicalize().unwrap_or(path);
+        assert_eq!(back, expected);
     }
 
     #[test]

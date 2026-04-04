@@ -25,7 +25,9 @@ pub fn read_message(reader: &mut impl BufRead) -> Result<Value> {
             // Empty line = end of headers.
             break;
         }
-        if let Some(value) = line.strip_prefix("Content-Length: ") {
+        if let Some((name, value)) = line.split_once(':')
+            && name.eq_ignore_ascii_case("Content-Length")
+        {
             content_length = Some(
                 value
                     .trim()
