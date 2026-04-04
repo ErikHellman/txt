@@ -103,13 +103,64 @@ pub struct CodeAction {
 }
 
 /// Decoded semantic token with absolute byte positions.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticTokenSpan {
     pub start_byte: usize,
     pub end_byte: usize,
     pub token_type: u32,
     pub modifiers: u32,
+}
+
+/// Decode delta-encoded semantic tokens (LSP format: groups of 5 u32s) into
+/// absolute byte positions using the rope for line/character -> byte conversion.
+pub fn decode_semantic_tokens(data: &[u32], rope: &Rope) -> Vec<SemanticTokenSpan> {
+    let mut tokens = Vec::new();
+    let mut prev_line: u32 = 0;
+    let mut prev_start_char: u32 = 0;
+
+    let mut i = 0;
+    while i + 4 < data.len() {
+        let delta_line = data[i];
+        let delta_start = data[i + 1];
+        let length = data[i + 2];
+        let token_type = data[i + 3];
+        let modifiers = data[i + 4];
+        i += 5;
+
+        if delta_line > 0 {
+            prev_line += delta_line;
+            prev_start_char = delta_start;
+        } else {
+            prev_start_char += delta_start;
+        }
+
+        let pos_start = LspPosition {
+            line: prev_line,
+            character: prev_start_char,
+        };
+        let pos_end = LspPosition {
+            line: prev_line,
+            character: prev_start_char + length,
+        };
+
+        let start_byte = match lsp_position_to_byte_offset(rope, pos_start) {
+            Some(b) => b,
+            None => continue,
+        };
+        let end_byte = match lsp_position_to_byte_offset(rope, pos_end) {
+            Some(b) => b,
+            None => continue,
+        };
+
+        tokens.push(SemanticTokenSpan {
+            start_byte,
+            end_byte,
+            token_type,
+            modifiers,
+        });
+    }
+
+    tokens
 }
 
 // ── Position conversion ──────────────────────────────────────────────────────

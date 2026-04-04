@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::buffer::Buffer;
 use crate::editor::viewport::Viewport;
-use crate::lsp::types::{DiagSeverity, LspDiagnostic};
+use crate::lsp::types::{DiagSeverity, LspDiagnostic, SemanticTokenSpan};
 use crate::syntax::{SyntaxHost, language::Lang};
 
 pub type BufferId = usize;
@@ -13,6 +13,8 @@ pub struct LspState {
     pub version: u64,
     /// Diagnostics received from the LSP server (converted to byte offsets).
     pub diagnostics: Vec<LspDiagnostic>,
+    /// Semantic tokens from the LSP server (decoded to absolute byte positions).
+    pub semantic_tokens: Option<Vec<SemanticTokenSpan>>,
 }
 
 impl LspState {
@@ -20,6 +22,7 @@ impl LspState {
         Self {
             version: 0,
             diagnostics: Vec::new(),
+            semantic_tokens: None,
         }
     }
 

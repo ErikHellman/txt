@@ -449,6 +449,18 @@ fn dispatch_response(
         });
     }
 
+    // Semantic tokens response: { data: [u32...] }
+    if let Some(data) = result.get("data").and_then(|v| v.as_array()) {
+        let nums: Vec<u32> = data
+            .iter()
+            .filter_map(|v| v.as_u64().map(|n| n as u32))
+            .collect();
+        return Some(LspUpdate::SemanticTokens {
+            uri: String::new(), // URI will be matched by the caller
+            data: nums,
+        });
+    }
+
     // Default: treat as definition/references (Location or Location[])
     Some(LspUpdate::Definition {
         request_id: id,

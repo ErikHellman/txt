@@ -88,6 +88,7 @@ pub fn render(state: &AppState, frame: &mut Frame) {
         };
 
     // ── Compute syntax highlights for visible range ───────────────────────────
+    // Prefer LSP semantic tokens when available; fall back to tree-sitter.
     let handle = state.editor.active();
     let highlight_spans = if editor_area.height > 0 {
         let visible_start = handle.viewport.scroll_row;
@@ -107,10 +108,17 @@ pub fn render(state: &AppState, frame: &mut Frame) {
                     .rope()
                     .char_to_byte(handle.buffer.rope().line_to_char(end_line))
             };
-            let source = handle.buffer.to_string();
-            handle
-                .syntax
-                .highlight_spans(source.as_bytes(), start_byte, end_byte)
+
+            // Use semantic tokens if available from LSP; otherwise tree-sitter.
+            if let Some(tokens) = &handle.lsp_state.semantic_tokens {
+                use crate::syntax::highlighter::semantic_tokens_to_highlights;
+                semantic_tokens_to_highlights(tokens, start_byte, end_byte)
+            } else {
+                let source = handle.buffer.to_string();
+                handle
+                    .syntax
+                    .highlight_spans(source.as_bytes(), start_byte, end_byte)
+            }
         } else {
             Vec::new()
         }

@@ -1145,6 +1145,8 @@ impl AppState {
         if self.editor.active().buffer.modified {
             self.editor.active_mut().reparse();
             self.notify_lsp_did_change();
+            // Invalidate semantic tokens (will be refreshed after debounce in Phase 8).
+            self.editor.active_mut().lsp_state.semantic_tokens = None;
 
             // Re-filter completion popup if open.
             if self.completion.is_some() {
@@ -1982,6 +1984,8 @@ impl AppState {
                 }
                 // Send didOpen for all currently open buffers.
                 self.notify_lsp_did_open_all();
+                // Request semantic tokens for the active buffer.
+                self.request_semantic_tokens_for_active();
             }
             LspUpdate::Diagnostics { uri, diagnostics } => {
                 self.apply_diagnostics(&uri, &diagnostics);
@@ -2022,8 +2026,8 @@ impl AppState {
             LspUpdate::CodeActions { actions, .. } => {
                 let _ = actions; // TODO: show code action picker
             }
-            LspUpdate::SemanticTokens { .. } => {
-                // Phase 7
+            LspUpdate::SemanticTokens { uri, data } => {
+                self.apply_semantic_tokens(&uri, &data);
             }
             LspUpdate::Error(msg) => {
                 let _ = msg;
@@ -2647,6 +2651,44 @@ impl AppState {
         });
 
         let _ = registry.client_mut().request_code_action(&uri, range);
+    }
+
+    // ── Semantic Tokens ──────────────────────────────────────────────────────
+
+    fn apply_semantic_tokens(&mut self, uri: &str, data: &[u32]) {
+        let path = match crate::lsp::types::uri_to_path(uri) {
+            Some(p) => p,
+            None => return,
+        };
+        let tab = self
+            .editor
+            .tabs
+            .iter_mut()
+            .find(|t| t.path.as_ref().is_some_and(|p| same_file(p, &path)));
+        let Some(tab) = tab else { return };
+
+        let rope = tab.buffer.rope();
+        let tokens = crate::lsp::types::decode_semantic_tokens(data, rope);
+        tab.lsp_state.semantic_tokens = Some(tokens);
+    }
+
+    /// Request semantic tokens for the active buffer.
+    fn request_semantic_tokens_for_active(&mut self) {
+        let Some(registry) = &mut self.lsp else {
+            return;
+        };
+        if !registry.is_ready() || !registry.client().capabilities.semantic_tokens_provider {
+            return;
+        }
+        let handle = self.editor.active();
+        let Some(path) = &handle.path else { return };
+        let uri = crate::lsp::types::path_to_uri(path);
+        let _ = registry.client_mut().send_request(
+            "textDocument/semanticTokens/full",
+            Some(serde_json::json!({
+                "textDocument": { "uri": uri }
+            })),
+        );
     }
 
     // ── Coordinate helpers ───────────────────────────────────────────────────
