@@ -66,6 +66,12 @@ const ENTRIES: &[(&str, &str)] = &[
     ("F3 / Shift+F3", "Next / Prev match"),
     ("Alt+R", "Toggle regex"),
     ("Alt+C", "Toggle case-sensitive"),
+    // ── Sidebar ──────────────────────────────────────────────────────
+    ("", "Sidebar"),
+    ("Ctrl+C", "Copy file (sidebar)"),
+    ("Ctrl+X", "Cut file (sidebar)"),
+    ("Ctrl+V", "Paste file (sidebar)"),
+    ("F2", "Rename file (sidebar)"),
     // ── View & App ───────────────────────────────────────────────────
     ("", "View & App"),
     ("Alt+Z", "Toggle word wrap"),

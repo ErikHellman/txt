@@ -150,6 +150,10 @@ pub enum EditorAction {
     #[allow(dead_code)]
     ForceQuit,
 
+    // ── Sidebar file operations ───────────────────────────────────────
+    /// Rename the selected file/directory in the sidebar (F2).
+    SidebarRename,
+
     // ── Placeholder for unrecognised / unimplemented keys ─────────────
     Unhandled,
 }

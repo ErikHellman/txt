@@ -151,6 +151,7 @@ fn modal_prompt(mode: &InputMode) -> Option<String> {
         InputMode::JumpToLine(s) => Some(format!(" Go to [line:col]: {}_", s)),
         InputMode::OpenFilePath(s) => Some(format!(" Open: {}_", s)),
         InputMode::SaveAsPath(s) => Some(format!(" Save as: {}_", s)),
+        InputMode::RenamePath(_, s) => Some(format!(" Rename: {}_", s)),
     }
 }
 

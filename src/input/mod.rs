@@ -22,6 +22,7 @@ impl InputHandler {
         match event.code {
             // ── Function keys ─────────────────────────────────────────
             KeyCode::F(1) => EditorAction::ToggleHelp,
+            KeyCode::F(2) => EditorAction::SidebarRename,
             KeyCode::F(3) if shift => EditorAction::SearchPrev,
             KeyCode::F(3) => EditorAction::SearchNext,
             KeyCode::Esc => EditorAction::CloseSearch,

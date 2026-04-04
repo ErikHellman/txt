@@ -41,6 +41,8 @@ pub enum InputMode {
     OpenFilePath(String),
     /// Ctrl+Shift+S: "Save as: {input}"
     SaveAsPath(String),
+    /// F2 (sidebar): "Rename: {input}" — carries (original_path, current_input).
+    RenamePath(PathBuf, String),
 }
 
 impl InputMode {
@@ -172,6 +174,12 @@ impl FuzzyPickerState {
 // ── Sidebar / file tree ────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
+/// Tracks a file that has been cut or copied in the sidebar.
+pub struct SidebarClipboard {
+    pub path: PathBuf,
+    pub is_cut: bool, // true = move, false = copy
+}
+
 pub struct TreeEntry {
     pub path: PathBuf,
     pub depth: usize,
@@ -380,6 +388,53 @@ impl SidebarState {
     pub fn selected_path(&self) -> Option<&PathBuf> {
         self.entries.get(self.selected).map(|e| &e.path)
     }
+
+    /// Reload the sidebar, preserving expanded directories and clamping selection.
+    pub fn refresh(&mut self) {
+        let expanded: Vec<PathBuf> = self
+            .entries
+            .iter()
+            .filter(|e| e.is_dir && e.expanded)
+            .map(|e| e.path.clone())
+            .collect();
+        let old_selected = self.selected;
+        self.load_root();
+        // Re-expand previously expanded directories.
+        for path in &expanded {
+            if let Some(idx) = self
+                .entries
+                .iter()
+                .position(|e| &e.path == path && e.is_dir)
+                && !self.entries[idx].expanded
+            {
+                self.selected = idx;
+                self.toggle_selected();
+            }
+        }
+        // Restore selection (clamped).
+        self.selected = old_selected.min(self.entries.len().saturating_sub(1));
+    }
+}
+
+/// Generate a copy target path with a `-N` suffix (before the extension).
+/// Returns `None` if no suitable name can be found within 1000 attempts.
+fn copy_target_path(source: &std::path::Path, dest_dir: &std::path::Path) -> Option<PathBuf> {
+    let stem = source
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file");
+    let ext = source.extension().and_then(|e| e.to_str());
+    for n in 1..1000 {
+        let name = match ext {
+            Some(e) => format!("{}-{}.{}", stem, n, e),
+            None => format!("{}-{}", stem, n),
+        };
+        let candidate = dest_dir.join(&name);
+        if !candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 // ── AppState ──────────────────────────────────────────────────────────────────
@@ -393,6 +448,7 @@ pub struct AppState {
     pub sidebar: Option<SidebarState>,
     pub sidebar_focused: bool,
     saved_sidebar: Option<SidebarState>,
+    pub sidebar_clipboard: Option<SidebarClipboard>,
     pub search_state: Option<SearchState>,
     pub command_palette: Option<CommandPaletteState>,
     pub show_help: bool,
@@ -421,6 +477,7 @@ impl AppState {
             sidebar: None,
             sidebar_focused: false,
             saved_sidebar: None,
+            sidebar_clipboard: None,
             search_state: None,
             command_palette: None,
             show_help: false,
@@ -939,7 +996,7 @@ impl AppState {
             EditorAction::ForceQuit => {
                 self.should_quit = true;
             }
-            EditorAction::Unhandled => {}
+            EditorAction::SidebarRename | EditorAction::Unhandled => {}
         }
 
         // Re-parse the active buffer if it was modified this action.
@@ -958,7 +1015,9 @@ impl AppState {
                     InputMode::JumpToLine(s) if c.is_ascii_digit() || c == ':' => {
                         s.push(c);
                     }
-                    InputMode::OpenFilePath(s) | InputMode::SaveAsPath(s) => {
+                    InputMode::OpenFilePath(s)
+                    | InputMode::SaveAsPath(s)
+                    | InputMode::RenamePath(_, s) => {
                         s.push(c);
                     }
                     _ => {}
@@ -969,7 +1028,8 @@ impl AppState {
                 match &mut self.input_mode {
                     InputMode::JumpToLine(s)
                     | InputMode::OpenFilePath(s)
-                    | InputMode::SaveAsPath(s) => {
+                    | InputMode::SaveAsPath(s)
+                    | InputMode::RenamePath(_, s) => {
                         s.pop();
                     }
                     InputMode::Normal => {}
@@ -1029,6 +1089,16 @@ impl AppState {
                         let path = PathBuf::from(input.trim());
                         let _ = self.editor.active_mut().save_as(path);
                         self.after_file_open_or_save();
+                    }
+                    InputMode::RenamePath(original, input) => {
+                        let new_name = input.trim();
+                        if !new_name.is_empty()
+                            && let Some(parent) = original.parent()
+                        {
+                            let new_path = parent.join(new_name);
+                            let _ = std::fs::rename(&original, &new_path);
+                            self.refresh_sidebar();
+                        }
                     }
                     InputMode::Normal => {}
                 }
@@ -1480,7 +1550,94 @@ impl AppState {
                 self.sidebar_focused = false;
                 true
             }
+            EditorAction::Copy => {
+                // Ctrl+C: copy file path to sidebar clipboard.
+                if let Some(path) = self
+                    .sidebar
+                    .as_ref()
+                    .and_then(|sb| sb.selected_path().cloned())
+                {
+                    self.sidebar_clipboard = Some(SidebarClipboard {
+                        path,
+                        is_cut: false,
+                    });
+                }
+                true
+            }
+            EditorAction::Cut => {
+                // Ctrl+X: cut file path to sidebar clipboard.
+                if let Some(path) = self
+                    .sidebar
+                    .as_ref()
+                    .and_then(|sb| sb.selected_path().cloned())
+                {
+                    self.sidebar_clipboard = Some(SidebarClipboard { path, is_cut: true });
+                }
+                true
+            }
+            EditorAction::Paste(_) => {
+                // Ctrl+V: paste (move or copy) the file from sidebar clipboard.
+                self.sidebar_paste();
+                true
+            }
+            EditorAction::SidebarRename => {
+                // F2: rename the selected file/directory.
+                if let Some(path) = self
+                    .sidebar
+                    .as_ref()
+                    .and_then(|sb| sb.selected_path().cloned())
+                {
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    self.input_mode = InputMode::RenamePath(path, name);
+                }
+                true
+            }
             _ => false,
+        }
+    }
+
+    /// Paste from the sidebar clipboard into the currently selected location.
+    fn sidebar_paste(&mut self) {
+        let clip = match self.sidebar_clipboard.take() {
+            Some(c) => c,
+            None => return,
+        };
+        let dest_dir = match self.sidebar.as_ref() {
+            Some(sb) => match sb.entries.get(sb.selected) {
+                Some(entry) if entry.is_dir => entry.path.clone(),
+                Some(entry) => entry.path.parent().unwrap_or(&sb.root).to_path_buf(),
+                None => return,
+            },
+            None => return,
+        };
+        if clip.is_cut {
+            // Move: rename source into dest directory.
+            if let Some(name) = clip.path.file_name() {
+                let new_path = dest_dir.join(name);
+                let _ = std::fs::rename(&clip.path, &new_path);
+            }
+            // Cut clipboard is consumed (already taken above).
+        } else {
+            // Copy: only files (not directories).
+            if clip.path.is_file()
+                && let Some(new_path) = copy_target_path(&clip.path, &dest_dir)
+            {
+                let _ = std::fs::copy(&clip.path, &new_path);
+            }
+            // Keep clipboard so user can paste again.
+            self.sidebar_clipboard = Some(clip);
+        }
+        self.refresh_sidebar();
+    }
+
+    /// Refresh the sidebar entries after a file operation.
+    fn refresh_sidebar(&mut self) {
+        if let Some(sb) = &mut self.sidebar {
+            sb.refresh();
         }
     }
 

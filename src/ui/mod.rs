@@ -128,7 +128,13 @@ pub fn render(state: &AppState, frame: &mut Frame) {
             side_a.height,
         );
         if let Some(sidebar) = &state.sidebar {
-            sidebar::render(sidebar, state.sidebar_focused, sb_inner, buf);
+            sidebar::render(
+                sidebar,
+                state.sidebar_clipboard.as_ref(),
+                state.sidebar_focused,
+                sb_inner,
+                buf,
+            );
         }
         let sep_x = side_a.x + side_a.width.saturating_sub(1);
         let sep_style = Style::default()

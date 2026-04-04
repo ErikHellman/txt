@@ -6,11 +6,18 @@ use ratatui::{
     style::{Color, Modifier, Style},
 };
 
-use crate::app::SidebarState;
+use crate::app::{SidebarClipboard, SidebarState};
 
 /// Render the file tree sidebar.
 /// `focused` controls whether the header is highlighted to indicate keyboard focus.
-pub fn render(sidebar: &SidebarState, focused: bool, area: Rect, buf: &mut TermBuffer) {
+/// `clipboard` is used to show italic on cut entries.
+pub fn render(
+    sidebar: &SidebarState,
+    clipboard: Option<&SidebarClipboard>,
+    focused: bool,
+    area: Rect,
+    buf: &mut TermBuffer,
+) {
     if area.height == 0 || area.width == 0 {
         return;
     }
@@ -67,10 +74,23 @@ pub fn render(sidebar: &SidebarState, focused: bool, area: Rect, buf: &mut TermB
         let y = list_area.y + screen_row as u16;
         let is_selected = global_idx == sidebar.selected;
 
+        let is_cut = clipboard
+            .map(|c| c.is_cut && c.path == entry.path)
+            .unwrap_or(false);
         let base_style = if is_selected {
-            selected_style
+            if is_cut {
+                selected_style.add_modifier(Modifier::ITALIC)
+            } else {
+                selected_style
+            }
         } else if entry.is_dir {
-            dir_style
+            if is_cut {
+                dir_style.add_modifier(Modifier::ITALIC)
+            } else {
+                dir_style
+            }
+        } else if is_cut {
+            file_style.add_modifier(Modifier::ITALIC)
         } else {
             file_style
         };
