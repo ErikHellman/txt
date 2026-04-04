@@ -91,7 +91,9 @@ impl Config {
 
     /// Persist config to `~/.config/txt/config.toml`. Silently ignores errors.
     pub fn save(&self) {
-        let Some(path) = Self::config_path() else { return };
+        let Some(path) = Self::config_path() else {
+            return;
+        };
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }

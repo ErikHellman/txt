@@ -1363,7 +1363,10 @@ impl AppState {
             2 => self.config.show_whitespace = !self.config.show_whitespace,
             3 => {
                 let all = Theme::ALL;
-                let idx = all.iter().position(|t| t == &self.config.theme).unwrap_or(0);
+                let idx = all
+                    .iter()
+                    .position(|t| t == &self.config.theme)
+                    .unwrap_or(0);
                 let next = if forward {
                     (idx + 1) % all.len()
                 } else {
