@@ -11,7 +11,7 @@ use crate::app::AppState;
 const OVERLAY_W: u16 = 50;
 // Rows: top border + header + separator + 4 settings + separator + hint + bottom border = 10
 const NUM_SETTINGS: usize = 4;
-const OVERLAY_H: u16 = (3 + NUM_SETTINGS as u16 + 3) as u16; // 10
+const OVERLAY_H: u16 = 3 + NUM_SETTINGS as u16 + 3; // 10
 
 /// Render the settings overlay centered in `area`.
 pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {

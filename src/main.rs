@@ -29,21 +29,21 @@ use crate::{app::App, editor::Editor};
 fn main() -> Result<()> {
     let arg = std::env::args().nth(1).map(PathBuf::from);
 
-    if let Some(ref p) = arg {
-        if p == std::path::Path::new("--help") || p == std::path::Path::new("-h") {
-            println!("txt — a fast terminal text editor\n");
-            println!("USAGE:");
-            println!("  txt                  Open an empty buffer");
-            println!("  txt <file>           Open a file");
-            println!("  txt <directory>      Open a directory (shows file sidebar)");
-            println!();
-            println!("KEYS (press F1 inside the editor for the full list):");
-            println!("  Ctrl+S      Save          Ctrl+O      Open file");
-            println!("  Ctrl+Q      Quit          Ctrl+,      Settings");
-            println!("  Ctrl+P      File picker   Ctrl+B      Toggle sidebar");
-            println!("  Ctrl+F      Find          F1          Help");
-            return Ok(());
-        }
+    if let Some(ref p) = arg
+        && (p == std::path::Path::new("--help") || p == std::path::Path::new("-h"))
+    {
+        println!("txt — a fast terminal text editor\n");
+        println!("USAGE:");
+        println!("  txt                  Open an empty buffer");
+        println!("  txt <file>           Open a file");
+        println!("  txt <directory>      Open a directory (shows file sidebar)");
+        println!();
+        println!("KEYS (press F1 inside the editor for the full list):");
+        println!("  Ctrl+S      Save          Ctrl+O      Open file");
+        println!("  Ctrl+Q      Quit          Ctrl+,      Settings");
+        println!("  Ctrl+P      File picker   Ctrl+B      Toggle sidebar");
+        println!("  Ctrl+F      Find          F1          Help");
+        return Ok(());
     }
 
     let (editor, open_sidebar) = match arg {
