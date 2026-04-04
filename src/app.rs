@@ -613,6 +613,18 @@ impl AppState {
                     self.clipboard.set(text);
                 }
             }
+            EditorAction::CopyFileReference => {
+                if let Some(path) = self.editor.active().path.as_ref() {
+                    let cursor = self.editor.active().buffer.cursors.primary();
+                    let relative = path
+                        .strip_prefix(&self.workspace)
+                        .unwrap_or(path)
+                        .display()
+                        .to_string();
+                    let reference = format!("{}:{},{}", relative, cursor.line + 1, cursor.col + 1,);
+                    self.clipboard.set(reference);
+                }
+            }
             EditorAction::Cut => {
                 if let Some(text) = self.selected_text() {
                     self.clipboard.set(text);
@@ -1473,6 +1485,22 @@ impl AppState {
                 // Ctrl+B: save state and close.
                 self.saved_sidebar = self.sidebar.take();
                 self.sidebar_focused = false;
+                true
+            }
+            EditorAction::CopyFileReference => {
+                // Copy just the file path (no cursor location) when in sidebar.
+                let selected_path = self
+                    .sidebar
+                    .as_ref()
+                    .and_then(|sb| sb.selected_path().cloned());
+                if let Some(path) = selected_path {
+                    let reference = path
+                        .strip_prefix(&self.workspace)
+                        .unwrap_or(&path)
+                        .display()
+                        .to_string();
+                    self.clipboard.set(reference);
+                }
                 true
             }
             EditorAction::CloseSearch => {

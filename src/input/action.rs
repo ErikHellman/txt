@@ -48,6 +48,8 @@ pub enum EditorAction {
     Cut,
     /// Paste the given text at the cursor, replacing any selection.
     Paste(String),
+    /// Copy a reference to the current file and cursor location (path:line,col).
+    CopyFileReference,
 
     // ── Edit operations ───────────────────────────────────────────────
     Undo,

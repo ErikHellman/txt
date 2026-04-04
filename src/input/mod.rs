@@ -143,6 +143,7 @@ impl InputHandler {
             'l' => EditorAction::SelectAllOccurrences,
             'p' => EditorAction::OpenCommandPalette,
             'e' => EditorAction::OpenBufferSwitcher,
+            'c' => EditorAction::CopyFileReference,
             _ => EditorAction::Unhandled,
         }
     }
