@@ -1042,6 +1042,17 @@ impl AppState {
             EditorAction::CodeAction => {
                 self.trigger_code_action();
             }
+            EditorAction::LspRestart => {
+                self.lsp_restart();
+            }
+            EditorAction::LspStop => {
+                self.lsp = None;
+                // Clear diagnostics and semantic tokens from all buffers.
+                for tab in &mut self.editor.tabs {
+                    tab.lsp_state.diagnostics.clear();
+                    tab.lsp_state.semantic_tokens = None;
+                }
+            }
             EditorAction::ToggleLineComment => {
                 self.toggle_line_comment();
             }
@@ -2689,6 +2700,22 @@ impl AppState {
                 "textDocument": { "uri": uri }
             })),
         );
+    }
+
+    // ── LSP restart/stop ──────────────────────────────────────────────────────
+
+    fn lsp_restart(&mut self) {
+        // Tear down existing connection.
+        self.lsp = None;
+        // Clear stale state from all buffers.
+        for tab in &mut self.editor.tabs {
+            tab.lsp_state.diagnostics.clear();
+            tab.lsp_state.semantic_tokens = None;
+        }
+        // Start fresh if config is active.
+        if self.lsp_config.is_active() {
+            self.lsp = crate::lsp::LspRegistry::start(&self.lsp_config, &self.workspace).ok();
+        }
     }
 
     // ── Coordinate helpers ───────────────────────────────────────────────────

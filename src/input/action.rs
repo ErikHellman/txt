@@ -159,6 +159,12 @@ pub enum EditorAction {
     RenameSymbol,
     /// Code actions / quick fix (Ctrl+.).
     CodeAction,
+    /// Restart the LSP server (command palette).
+    #[allow(dead_code)]
+    LspRestart,
+    /// Stop the LSP server (command palette).
+    #[allow(dead_code)]
+    LspStop,
 
     // ── App lifecycle ─────────────────────────────────────────────────
     /// Quit the editor. The app will confirm if there are unsaved changes.
