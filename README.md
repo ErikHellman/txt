@@ -189,6 +189,8 @@ All editing and navigation operations apply to every cursor simultaneously.
 
 ### LSP (when active)
 
+> LSP servers must be installed separately on your system before they can be used. Use **Ctrl+L** to configure which server to launch for the current file type.
+
 | Key | Action |
 |-----|--------|
 | Ctrl+Space | Code completion |
