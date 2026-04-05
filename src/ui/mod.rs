@@ -1,7 +1,11 @@
 pub mod command_palette;
+pub mod completion_popup;
 pub mod editor_view;
 pub mod fuzzy_picker;
 pub mod help_overlay;
+pub mod hover_popup;
+pub mod lsp_picker;
+pub mod references_list;
 pub mod search_bar;
 pub mod settings_overlay;
 pub mod sidebar;
@@ -84,6 +88,7 @@ pub fn render(state: &AppState, frame: &mut Frame) {
         };
 
     // ── Compute syntax highlights for visible range ───────────────────────────
+    // Prefer LSP semantic tokens when available; fall back to tree-sitter.
     let handle = state.editor.active();
     let highlight_spans = if editor_area.height > 0 {
         let visible_start = handle.viewport.scroll_row;
@@ -103,10 +108,17 @@ pub fn render(state: &AppState, frame: &mut Frame) {
                     .rope()
                     .char_to_byte(handle.buffer.rope().line_to_char(end_line))
             };
-            let source = handle.buffer.to_string();
-            handle
-                .syntax
-                .highlight_spans(source.as_bytes(), start_byte, end_byte)
+
+            // Use semantic tokens if available from LSP; otherwise tree-sitter.
+            if let Some(tokens) = &handle.lsp_state.semantic_tokens {
+                use crate::syntax::highlighter::semantic_tokens_to_highlights;
+                semantic_tokens_to_highlights(tokens, start_byte, end_byte)
+            } else {
+                let source = handle.buffer.to_string();
+                handle
+                    .syntax
+                    .highlight_spans(source.as_bytes(), start_byte, end_byte)
+            }
         } else {
             Vec::new()
         }
@@ -226,5 +238,33 @@ pub fn render(state: &AppState, frame: &mut Frame) {
     // ── Settings overlay ──────────────────────────────────────────────────────
     if state.show_settings {
         settings_overlay::render(state, area, buf);
+    }
+
+    // ── LSP picker overlay ───────────────────────────────────────────────────
+    if let Some(picker) = &state.lsp_picker {
+        lsp_picker::render(picker, area, buf);
+    }
+
+    // ── Completion popup ─────────────────────────────────────────────────────
+    if let Some(comp) = &state.completion {
+        let cursor = handle.buffer.cursors.primary();
+        let cursor_row =
+            editor_area.y + cursor.line.saturating_sub(handle.viewport.scroll_row) as u16;
+        let cursor_col = editor_area.x + cursor.col as u16;
+        completion_popup::render(comp, cursor_row, cursor_col, area, buf);
+    }
+
+    // ── Hover popup ──────────────────────────────────────────────────────────
+    if let Some(hover) = &state.hover {
+        let cursor = handle.buffer.cursors.primary();
+        let cursor_row =
+            editor_area.y + cursor.line.saturating_sub(handle.viewport.scroll_row) as u16;
+        let cursor_col = editor_area.x + cursor.col as u16;
+        hover_popup::render(hover, cursor_row, cursor_col, area, buf);
+    }
+
+    // ── References list overlay ──────────────────────────────────────────────
+    if let Some(refs) = &state.references_list {
+        references_list::render(refs, area, buf);
     }
 }

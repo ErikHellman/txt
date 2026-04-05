@@ -8,6 +8,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::buffer::cursor::ByteRange;
 use crate::editor::tab::BufferHandle;
 use crate::git::{GitGutter, GutterMark};
+use crate::lsp::types::DiagSeverity;
 use crate::search::SearchState;
 use crate::syntax::highlighter::{HighlightSpan, style_for_kind};
 
@@ -15,6 +16,8 @@ use crate::syntax::highlighter::{HighlightSpan, style_for_kind};
 const GUTTER_PAD: u16 = 1;
 /// Width of the git gutter column (shown left of line numbers when active).
 const GIT_GUTTER_W: u16 = 1;
+/// Width of the diagnostic gutter column (shown when diagnostics are present).
+const DIAG_GUTTER_W: u16 = 1;
 
 /// Render the text editing area into the ratatui terminal buffer.
 ///
@@ -42,8 +45,27 @@ pub fn render(
     let total_lines = handle.buffer.len_lines();
     let has_git = git_gutter.is_some();
     let git_col_w: u16 = if has_git { GIT_GUTTER_W } else { 0 };
+    let has_diag = !handle.lsp_state.diagnostics.is_empty();
+    let diag_col_w: u16 = if has_diag { DIAG_GUTTER_W } else { 0 };
     let gw = gutter_width(total_lines);
-    let text_area = text_area(area, gw, git_col_w);
+    let text_area = text_area(area, gw, git_col_w, diag_col_w);
+
+    // Build per-line diagnostic severity map (highest severity per line).
+    let diag_line_severity = if has_diag {
+        let rope = handle.buffer.rope();
+        let mut map = std::collections::HashMap::<usize, DiagSeverity>::new();
+        for diag in &handle.lsp_state.diagnostics {
+            let line = rope.byte_to_char(diag.range.start.min(rope.len_bytes()));
+            let line_idx = rope.char_to_line(line);
+            let entry = map.entry(line_idx).or_insert(DiagSeverity::Hint);
+            if diag.severity < *entry {
+                *entry = diag.severity;
+            }
+        }
+        map
+    } else {
+        std::collections::HashMap::new()
+    };
 
     let cursor = handle.buffer.cursors.primary();
     let selection = cursor.selection_bytes();
@@ -85,6 +107,12 @@ pub fn render(
     let git_added_style = Style::default().fg(Color::Rgb(80, 200, 80));
     let git_modified_style = Style::default().fg(Color::Rgb(200, 160, 60));
     let git_deleted_style = Style::default().fg(Color::Rgb(200, 80, 80));
+
+    // Diagnostic gutter styles.
+    let diag_error_style = Style::default().fg(Color::Rgb(240, 80, 80));
+    let diag_warning_style = Style::default().fg(Color::Rgb(240, 200, 60));
+    let diag_info_style = Style::default().fg(Color::Rgb(80, 160, 240));
+    let diag_hint_style = Style::default().fg(Color::Rgb(120, 120, 140));
 
     // Collect visual lines — either wrapped or plain depending on the viewport mode.
     struct VisualLine {
@@ -150,8 +178,21 @@ pub fn render(
             buf.set_string(area.x, y, git_sym, git_sty);
         }
 
+        // ── Diagnostic gutter ────────────────────────────────────────────────
+        if has_diag && vl.is_first_seg {
+            let diag_x = area.x + git_col_w;
+            let (diag_sym, diag_sty) = match diag_line_severity.get(&line_idx) {
+                Some(DiagSeverity::Error) => ("●", diag_error_style),
+                Some(DiagSeverity::Warning) => ("▲", diag_warning_style),
+                Some(DiagSeverity::Information) => ("ℹ", diag_info_style),
+                Some(DiagSeverity::Hint) => ("·", diag_hint_style),
+                None => (" ", Style::default()),
+            };
+            buf.set_string(diag_x, y, diag_sym, diag_sty);
+        }
+
         // ── Gutter (line number) ─────────────────────────────────────────────
-        let gutter_x = area.x + git_col_w;
+        let gutter_x = area.x + git_col_w + diag_col_w;
         let is_current_line = line_idx == cursor.line;
         let num_style = if is_current_line {
             line_num_current_style
@@ -318,8 +359,8 @@ pub fn gutter_width(total_lines: usize) -> u16 {
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
-fn text_area(area: Rect, gutter_w: u16, git_col_w: u16) -> Rect {
-    let gutter_total = git_col_w + gutter_w + GUTTER_PAD;
+fn text_area(area: Rect, gutter_w: u16, git_col_w: u16, diag_col_w: u16) -> Rect {
+    let gutter_total = git_col_w + diag_col_w + gutter_w + GUTTER_PAD;
     if area.width <= gutter_total {
         return Rect::new(area.x + area.width, area.y, 0, area.height);
     }
@@ -437,7 +478,7 @@ mod tests {
     #[test]
     fn text_area_layout_no_git() {
         let area = Rect::new(0, 0, 80, 24);
-        let ta = text_area(area, 3, 0);
+        let ta = text_area(area, 3, 0, 0);
         assert_eq!(ta.x, 4);
         assert_eq!(ta.width, 76);
     }
@@ -445,7 +486,7 @@ mod tests {
     #[test]
     fn text_area_layout_with_git_gutter() {
         let area = Rect::new(0, 0, 80, 24);
-        let ta = text_area(area, 3, GIT_GUTTER_W);
+        let ta = text_area(area, 3, GIT_GUTTER_W, 0);
         // git(1) + line_num(3) + pad(1) = 5
         assert_eq!(ta.x, 5);
         assert_eq!(ta.width, 75);
@@ -454,8 +495,17 @@ mod tests {
     #[test]
     fn text_area_too_narrow() {
         let area = Rect::new(0, 0, 3, 24);
-        let ta = text_area(area, 3, 0);
+        let ta = text_area(area, 3, 0, 0);
         assert_eq!(ta.width, 0);
+    }
+
+    #[test]
+    fn text_area_layout_with_diagnostics() {
+        let area = Rect::new(0, 0, 80, 24);
+        let ta = text_area(area, 3, GIT_GUTTER_W, DIAG_GUTTER_W);
+        // git(1) + diag(1) + line_num(3) + pad(1) = 6
+        assert_eq!(ta.x, 6);
+        assert_eq!(ta.width, 74);
     }
 
     #[test]
