@@ -1,0 +1,8 @@
+title: txt
+description: A fast, keyboard-driven terminal text editor for engineers.
+url: "https://erikhellman.github.io"
+baseurl: "/txt"
+markdown: kramdown
+kramdown:
+  input: GFM
+  hard_wrap: false
