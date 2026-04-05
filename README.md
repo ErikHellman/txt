@@ -50,7 +50,14 @@ Download the archive for your platform from the [Releases page](https://github.c
 sha256sum --check checksums.txt
 ```
 
-### Homebrew / AUR
+### Homebrew (macOS and Linux)
+
+```sh
+brew tap ErikHellman/tap
+brew install txt
+```
+
+### AUR (Arch Linux)
 
 > Not yet available.
 

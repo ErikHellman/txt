@@ -83,9 +83,7 @@ Once the workflow finishes:
 
 ### 4. Post-release: update distribution channels
 
-> **Note:** The Homebrew tap and AUR package are not yet active. The instructions
-> below are kept for reference when these channels are set up.
->
+> **Note:** The AUR package is not yet active. The instructions below are kept for reference when that channel is set up.
 
 #### Homebrew tap
 
@@ -146,8 +144,6 @@ To update, run the same command again.
 To uninstall: delete `%LOCALAPPDATA%\txt` and remove it from your `PATH`.
 
 ### Homebrew (macOS and Linux)
-
-> Not yet available.
 
 ```sh
 brew tap ErikHellman/tap
