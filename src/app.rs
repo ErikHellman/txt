@@ -723,6 +723,9 @@ impl AppState {
         // Clear transient status error on any user interaction.
         self.status_error = None;
 
+        // Capture undo depth before dispatch so we can detect actual buffer edits below.
+        let pre_undo_depth = self.editor.active().buffer.undo_depth();
+
         // Quit confirmation mode
         if self.confirm_quit {
             match action {
@@ -1323,9 +1326,15 @@ impl AppState {
             }
         }
 
-        // Reset the auto-save debounce timer on every update that leaves the buffer dirty.
-        if self.config.auto_save && self.editor.active().buffer.modified {
-            self.auto_save_timer = Some(std::time::Instant::now());
+        // Reset the auto-save debounce timer only when buffer content actually changed.
+        if self.config.auto_save {
+            let post_undo_depth = self.editor.active().buffer.undo_depth();
+            if self.editor.active().buffer.modified && pre_undo_depth != post_undo_depth {
+                self.auto_save_timer = Some(std::time::Instant::now());
+            } else if !self.editor.active().buffer.modified {
+                // Undo back to saved state — nothing left to auto-save.
+                self.auto_save_timer = None;
+            }
         }
     }
 

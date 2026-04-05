@@ -291,7 +291,7 @@ theme = "default"         # "default" | "monokai" | "gruvbox" | "nord"
 
 Settings can also be changed interactively via **Ctrl+,** and are written back to `config.toml` immediately.
 
-**Recent files** are stored per-workspace in `<workspace>/.txt/recents.json` (up to 50 entries). This file is local to each project and gitignored by default when you open a directory with txt.
+**Recent files** are stored per-workspace in `<workspace>/.txt/recents.json` (up to 50 entries). This file is local to each project. If you do not want it to appear in Git, add `.txt/` to your project's `.gitignore`.
 
 ## Development
 

@@ -173,6 +173,7 @@ pub fn render(state: &AppState, frame: &mut Frame) {
         state.git_gutter.as_ref(),
         editor_focused,
         state.config.show_whitespace,
+        state.config.tab_size,
         &theme,
         editor_area,
         buf,

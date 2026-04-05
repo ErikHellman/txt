@@ -38,6 +38,7 @@ pub fn render(
     git_gutter: Option<&GitGutter>,
     focused: bool,
     show_whitespace: bool,
+    tab_size: usize,
     theme: &ThemeColors,
     area: Rect,
     buf: &mut TermBuffer,
@@ -232,9 +233,12 @@ pub fn render(
             }
             let gw_g = UnicodeWidthStr::width(grapheme) as u16;
 
-            // In show_whitespace mode, render tab as a visible glyph (width 1).
+            // Tabs have zero display width per unicode-width; expand them to the
+            // next tab stop manually.
             if gw_g == 0 {
-                if show_whitespace && grapheme == "\t" && screen_x < max_x {
+                if grapheme == "\t" && screen_x < max_x {
+                    let col = (screen_x - text_area.x) as usize;
+                    let tab_w = (tab_size - (col % tab_size)).max(1) as u16;
                     let style = style_for_byte(
                         byte_offset,
                         cursor.byte_offset,
@@ -249,10 +253,27 @@ pub fn render(
                         current_match_style,
                         match_style,
                         bracket_style,
-                        whitespace_style,
+                        if show_whitespace {
+                            whitespace_style
+                        } else {
+                            text_style
+                        },
                     );
-                    buf.set_string(screen_x, y, "→", style);
-                    screen_x += 1;
+                    if show_whitespace {
+                        // Render arrow glyph at the tab position, then fill with spaces.
+                        buf.set_string(screen_x, y, "→", style);
+                        let fill_end = (screen_x + tab_w).min(max_x);
+                        for fx in (screen_x + 1)..fill_end {
+                            buf.set_string(fx, y, " ", style);
+                        }
+                    } else {
+                        // Render spaces to fill to next tab stop.
+                        let fill_end = (screen_x + tab_w).min(max_x);
+                        for fx in screen_x..fill_end {
+                            buf.set_string(fx, y, " ", style);
+                        }
+                    }
+                    screen_x = (screen_x + tab_w).min(max_x);
                 }
                 byte_offset += grapheme.len();
                 continue;

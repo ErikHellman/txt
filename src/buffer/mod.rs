@@ -90,6 +90,12 @@ impl Buffer {
         self.history.can_redo()
     }
 
+    /// Number of undo entries currently on the stack. Changes whenever the buffer
+    /// content is modified (edit, undo, or redo) — useful for detecting actual edits.
+    pub fn undo_depth(&self) -> usize {
+        self.history.undo_depth()
+    }
+
     /// Undo the most recent command (or batch). Returns the byte offset the cursor
     /// should land on after the undo.
     pub fn undo(&mut self) -> Option<usize> {
