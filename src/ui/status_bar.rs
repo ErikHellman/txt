@@ -18,6 +18,20 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
         return;
     }
 
+    // Show error message (cleared on next user interaction).
+    if let Some(err) = &state.status_error {
+        let err_style = Style::default()
+            .bg(Color::Rgb(140, 30, 30))
+            .fg(Color::White);
+        for x in area.x..area.x + area.width {
+            buf.set_string(x, area.y, " ", err_style);
+        }
+        let msg = format!(" {} ", err);
+        let truncated = truncate_str(&msg, area.width as usize);
+        buf.set_string(area.x, area.y, &truncated, err_style);
+        return;
+    }
+
     // Show prompt when a modal input is active.
     if let Some(prompt) = modal_prompt(&state.input_mode) {
         let prompt_style = Style::default()
@@ -78,11 +92,26 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
     };
     let enc = " UTF-8  F1:Help ";
     let wrap_flag = if handle.viewport.word_wrap { " WW" } else { "" };
+    let lsp_flag = match &state.lsp {
+        Some(registry) if registry.is_ready() => " LSP",
+        Some(_) => " LSP…",
+        None => " TS",
+    };
 
-    // Right side: word-wrap flag + language + position + memory + encoding
+    let errors = handle.lsp_state.error_count();
+    let warnings = handle.lsp_state.warning_count();
+    let diag_str = if errors > 0 || warnings > 0 {
+        format!(" E:{} W:{}", errors, warnings)
+    } else {
+        String::new()
+    };
+
+    // Right side: word-wrap flag + LSP/TS mode + diagnostics + language + position + memory + encoding
     let right = format!(
-        "{}{}  {}{}{}",
+        "{}{}{}{}  {}{}{}",
         wrap_flag,
+        lsp_flag,
+        diag_str,
         if !lang.is_empty() {
             format!(" {}", lang)
         } else {
@@ -157,6 +186,7 @@ fn modal_prompt(mode: &InputMode) -> Option<String> {
         InputMode::JumpToLine(s) => Some(format!(" Go to [line:col]: {}_", s)),
         InputMode::OpenFilePath(s) => Some(format!(" Open: {}_", s)),
         InputMode::SaveAsPath(s) => Some(format!(" Save as: {}_", s)),
+        InputMode::Rename(s) => Some(format!(" Rename: {}_", s)),
     }
 }
 

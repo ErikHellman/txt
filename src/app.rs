@@ -41,6 +41,8 @@ pub enum InputMode {
     OpenFilePath(String),
     /// Ctrl+Shift+S: "Save as: {input}"
     SaveAsPath(String),
+    /// F2: "Rename: {input}"
+    Rename(String),
 }
 
 impl InputMode {
@@ -382,6 +384,140 @@ impl SidebarState {
     }
 }
 
+// ── LSP picker state ─────────────────────────────────────────────────────────
+
+/// State for the code completion popup.
+pub struct CompletionState {
+    /// All items received from the server.
+    pub items: Vec<CompletionItemEntry>,
+    /// Indices into `items` after prefix filtering.
+    pub filtered: Vec<usize>,
+    /// Currently highlighted row in `filtered`.
+    pub selected: usize,
+    /// Byte offset where completion was triggered (start of the prefix).
+    pub anchor_byte: usize,
+    /// Line of the trigger position (for popup positioning).
+    #[allow(dead_code)]
+    pub anchor_line: usize,
+    /// Display column of the trigger position.
+    #[allow(dead_code)]
+    pub anchor_col: usize,
+}
+
+/// A single completion item (simplified from LSP).
+pub struct CompletionItemEntry {
+    pub label: String,
+    pub detail: Option<String>,
+    pub insert_text: String,
+    pub filter_text: String,
+    pub kind_label: &'static str,
+}
+
+impl CompletionState {
+    pub fn new(anchor_byte: usize, anchor_line: usize, anchor_col: usize) -> Self {
+        Self {
+            items: Vec::new(),
+            filtered: Vec::new(),
+            selected: 0,
+            anchor_byte,
+            anchor_line,
+            anchor_col,
+        }
+    }
+
+    /// Re-filter items against the typed prefix.
+    pub fn filter(&mut self, prefix: &str) {
+        let lower_prefix = prefix.to_lowercase();
+        self.filtered = self
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| item.filter_text.to_lowercase().contains(&lower_prefix))
+            .map(|(i, _)| i)
+            .collect();
+        if self.selected >= self.filtered.len() {
+            self.selected = 0;
+        }
+    }
+
+    /// Get the currently selected item, if any.
+    pub fn selected_item(&self) -> Option<&CompletionItemEntry> {
+        self.filtered
+            .get(self.selected)
+            .and_then(|&i| self.items.get(i))
+    }
+}
+
+/// State for the hover info popup.
+pub struct HoverState {
+    pub content: String,
+    #[allow(dead_code)]
+    pub anchor_line: usize,
+    #[allow(dead_code)]
+    pub anchor_col: usize,
+}
+
+/// State for the references list overlay.
+pub struct ReferencesListState {
+    pub items: Vec<ReferenceItem>,
+    pub selected: usize,
+}
+
+/// A single reference location.
+pub struct ReferenceItem {
+    pub path: PathBuf,
+    pub line: usize,
+    pub col: usize,
+    pub context: String,
+}
+
+/// Built-in LSP server definitions the user can choose from.
+pub const LSP_SERVER_OPTIONS: &[(&str, &str, &[&str])] = &[
+    // (display name / key, command, args)
+    ("rust-analyzer", "rust-analyzer", &[]),
+    ("pyright", "pyright-langserver", &["--stdio"]),
+    (
+        "typescript-language-server",
+        "typescript-language-server",
+        &["--stdio"],
+    ),
+    ("clangd", "clangd", &[]),
+    ("gopls", "gopls", &["serve"]),
+    ("lua-language-server", "lua-language-server", &[]),
+    ("zls", "zls", &[]),
+];
+
+/// State for the LSP configuration picker overlay.
+pub struct LspPickerState {
+    /// Currently highlighted row. 0 = Disabled, 1..=N = server options.
+    pub selected: usize,
+}
+
+impl LspPickerState {
+    pub fn new(lsp_config: &crate::lsp::config::WorkspaceLspConfig) -> Self {
+        // Pre-select the currently active server, or 0 (Disabled).
+        let selected = if !lsp_config.is_active() {
+            0
+        } else {
+            lsp_config
+                .server
+                .as_deref()
+                .and_then(|key| {
+                    LSP_SERVER_OPTIONS
+                        .iter()
+                        .position(|(name, _, _)| *name == key)
+                        .map(|i| i + 1)
+                })
+                .unwrap_or(0)
+        };
+        Self { selected }
+    }
+
+    pub fn num_rows(&self) -> usize {
+        1 + LSP_SERVER_OPTIONS.len() // "Disabled" + servers
+    }
+}
+
 // ── AppState ──────────────────────────────────────────────────────────────────
 
 /// All mutable application state. Renderers receive `&AppState` (read-only).
@@ -399,6 +535,10 @@ pub struct AppState {
     pub help_scroll: usize,
     pub show_settings: bool,
     pub settings_cursor: usize,
+    pub lsp_picker: Option<LspPickerState>,
+    pub completion: Option<CompletionState>,
+    pub hover: Option<HoverState>,
+    pub references_list: Option<ReferencesListState>,
     pub git_gutter: Option<GitGutter>,
     pub config: Config,
     pub workspace: PathBuf,
@@ -406,6 +546,18 @@ pub struct AppState {
     pub confirm_quit: bool,
     /// Active file watcher for the current buffer (replaced on each file open/save).
     file_watcher: Option<FileWatcher>,
+    /// Per-workspace LSP configuration (loaded from `<workspace>/.txt/lsp.toml`).
+    pub lsp_config: crate::lsp::config::WorkspaceLspConfig,
+    /// Active LSP server connection (None when LSP is disabled or unavailable).
+    pub lsp: Option<crate::lsp::LspRegistry>,
+    /// Transient error message shown in the status bar (cleared on next user action).
+    pub status_error: Option<String>,
+    /// When the buffer was last edited — used to debounce `didChange` notifications
+    /// and semantic token re-requests so we don't send the full buffer on every keystroke.
+    lsp_dirty_since: Option<Instant>,
+    /// Whether `didChange` has been sent for the current dirty period (but semantic
+    /// tokens haven't been re-requested yet).
+    lsp_change_sent: bool,
     pub term_width: u16,
     pub term_height: u16,
     pub memory_rss_kb: u64,
@@ -415,6 +567,12 @@ pub struct AppState {
 impl AppState {
     pub fn new(editor: Editor, workspace: PathBuf) -> Self {
         let config = Config::load();
+        let lsp_config = crate::lsp::config::WorkspaceLspConfig::load(&workspace);
+        let lsp = if lsp_config.is_active() {
+            crate::lsp::LspRegistry::start(&lsp_config, &workspace).ok()
+        } else {
+            None
+        };
         let mut state = Self {
             editor,
             clipboard: ClipboardManager::new(),
@@ -429,12 +587,21 @@ impl AppState {
             help_scroll: 0,
             show_settings: false,
             settings_cursor: 0,
+            lsp_picker: None,
+            completion: None,
+            hover: None,
+            references_list: None,
             git_gutter: None,
             config,
             workspace,
             should_quit: false,
             confirm_quit: false,
             file_watcher: None,
+            lsp_config,
+            lsp,
+            status_error: None,
+            lsp_dirty_since: None,
+            lsp_change_sent: false,
             term_width: 80,
             term_height: 24,
             memory_rss_kb: 0,
@@ -453,6 +620,9 @@ impl AppState {
 
     pub fn update(&mut self, action: EditorAction, terminal_height: u16) {
         self.term_height = terminal_height;
+
+        // Clear transient status error on any user interaction.
+        self.status_error = None;
 
         // Quit confirmation mode
         if self.confirm_quit {
@@ -482,6 +652,11 @@ impl AppState {
             return;
         }
 
+        // LSP config picker — intercept navigation and selection
+        if self.lsp_picker.is_some() && self.handle_lsp_picker(&action) {
+            return;
+        }
+
         // Sidebar focus — intercept navigation when sidebar has focus
         if self.sidebar_focused && self.handle_sidebar_input(&action) {
             return;
@@ -496,6 +671,16 @@ impl AppState {
         // Fuzzy picker — captured input
         if self.fuzzy_picker.is_some() {
             self.handle_fuzzy_picker(action);
+            return;
+        }
+
+        // Completion popup — partially captured (chars fall through to editing)
+        if self.completion.is_some() && self.handle_completion_input(&action) {
+            return;
+        }
+
+        // References list — captured input
+        if self.references_list.is_some() && self.handle_references_input(&action) {
             return;
         }
 
@@ -850,6 +1035,42 @@ impl AppState {
                     self.settings_cursor = 0;
                 }
             }
+            EditorAction::OpenLspConfig => {
+                if self.lsp_picker.is_some() {
+                    self.lsp_picker = None;
+                } else {
+                    self.lsp_picker = Some(LspPickerState::new(&self.lsp_config));
+                }
+            }
+            EditorAction::TriggerCompletion => {
+                self.trigger_completion();
+            }
+            EditorAction::ShowHover => {
+                self.trigger_hover();
+            }
+            EditorAction::GoToDefinition => {
+                self.trigger_go_to_definition();
+            }
+            EditorAction::FindReferences => {
+                self.trigger_find_references();
+            }
+            EditorAction::RenameSymbol => {
+                self.trigger_rename();
+            }
+            EditorAction::CodeAction => {
+                self.trigger_code_action();
+            }
+            EditorAction::LspRestart => {
+                self.lsp_restart();
+            }
+            EditorAction::LspStop => {
+                self.lsp = None;
+                // Clear diagnostics and semantic tokens from all buffers.
+                for tab in &mut self.editor.tabs {
+                    tab.lsp_state.diagnostics.clear();
+                    tab.lsp_state.semantic_tokens = None;
+                }
+            }
             EditorAction::ToggleLineComment => {
                 self.toggle_line_comment();
             }
@@ -946,9 +1167,24 @@ impl AppState {
             EditorAction::Unhandled => {}
         }
 
+        // Dismiss hover on any action.
+        self.hover = None;
+
         // Re-parse the active buffer if it was modified this action.
         if self.editor.active().buffer.modified {
             self.editor.active_mut().reparse();
+            // Bump the version immediately but defer the actual didChange send
+            // until the debounce timer fires (avoids full-buffer copy per keystroke).
+            self.editor.active_mut().lsp_state.version += 1;
+            self.lsp_dirty_since = Some(Instant::now());
+            self.lsp_change_sent = false;
+            // Invalidate semantic tokens (re-requested after debounce).
+            self.editor.active_mut().lsp_state.semantic_tokens = None;
+
+            // Re-filter completion popup if open.
+            if self.completion.is_some() {
+                self.refilter_completion();
+            }
         }
     }
 
@@ -962,7 +1198,9 @@ impl AppState {
                     InputMode::JumpToLine(s) if c.is_ascii_digit() || c == ':' => {
                         s.push(c);
                     }
-                    InputMode::OpenFilePath(s) | InputMode::SaveAsPath(s) => {
+                    InputMode::OpenFilePath(s)
+                    | InputMode::SaveAsPath(s)
+                    | InputMode::Rename(s) => {
                         s.push(c);
                     }
                     _ => {}
@@ -973,7 +1211,8 @@ impl AppState {
                 match &mut self.input_mode {
                     InputMode::JumpToLine(s)
                     | InputMode::OpenFilePath(s)
-                    | InputMode::SaveAsPath(s) => {
+                    | InputMode::SaveAsPath(s)
+                    | InputMode::Rename(s) => {
                         s.pop();
                     }
                     InputMode::Normal => {}
@@ -1033,6 +1272,11 @@ impl AppState {
                         let path = PathBuf::from(input.trim());
                         let _ = self.editor.active_mut().save_as(path);
                         self.after_file_open_or_save();
+                    }
+                    InputMode::Rename(input) => {
+                        if !input.is_empty() {
+                            self.send_rename(&input);
+                        }
                     }
                     InputMode::Normal => {}
                 }
@@ -1409,6 +1653,92 @@ impl AppState {
         self.config.save();
     }
 
+    // ── LSP picker input handling ────────────────────────────────────────────
+
+    /// Handle input while the LSP config picker is open.
+    /// Returns `true` if the action was consumed, `false` to let it fall through.
+    fn handle_lsp_picker(&mut self, action: &EditorAction) -> bool {
+        let num_rows = 1 + LSP_SERVER_OPTIONS.len();
+        match action {
+            EditorAction::MoveCursor(Direction::Up) => {
+                if let Some(picker) = &mut self.lsp_picker {
+                    picker.selected = picker.selected.saturating_sub(1);
+                }
+                true
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                if let Some(picker) = &mut self.lsp_picker {
+                    picker.selected = (picker.selected + 1).min(num_rows - 1);
+                }
+                true
+            }
+            EditorAction::InsertChar(' ') | EditorAction::InsertNewline => {
+                self.apply_lsp_picker_selection();
+                self.lsp_picker = None;
+                true
+            }
+            EditorAction::OpenLspConfig | EditorAction::CloseSearch => {
+                self.lsp_picker = None;
+                true
+            }
+            EditorAction::Quit | EditorAction::ForceQuit => {
+                self.lsp_picker = None;
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// Write the selected LSP config to `<workspace>/.txt/lsp.toml` and reload.
+    fn apply_lsp_picker_selection(&mut self) {
+        let selected = match &self.lsp_picker {
+            Some(p) => p.selected,
+            None => return,
+        };
+
+        use crate::lsp::config::{LspServerEntry, WorkspaceLspConfig};
+        use std::collections::HashMap;
+
+        let new_config = if selected == 0 {
+            // Disabled
+            WorkspaceLspConfig::default()
+        } else {
+            let (name, command, args) = LSP_SERVER_OPTIONS[selected - 1];
+            let mut servers = HashMap::new();
+            servers.insert(
+                name.to_string(),
+                LspServerEntry {
+                    command: command.to_string(),
+                    args: args.iter().map(|s| s.to_string()).collect(),
+                    init_options: None,
+                },
+            );
+            WorkspaceLspConfig {
+                enabled: true,
+                server: Some(name.to_string()),
+                servers,
+            }
+        };
+
+        // Write config file.
+        let txt_dir = self.workspace.join(".txt");
+        let _ = std::fs::create_dir_all(&txt_dir);
+        if let Ok(text) = toml::to_string(&new_config) {
+            let _ = std::fs::write(txt_dir.join("lsp.toml"), text);
+        }
+
+        // Tear down existing LSP connection if any.
+        self.lsp = None;
+
+        // Apply new config.
+        self.lsp_config = new_config;
+
+        // Start new server if enabled.
+        if self.lsp_config.is_active() {
+            self.lsp = crate::lsp::LspRegistry::start(&self.lsp_config, &self.workspace).ok();
+        }
+    }
+
     // ── Sidebar input handling ────────────────────────────────────────────────
 
     /// Handle input while the sidebar is focused.
@@ -1576,6 +1906,10 @@ impl AppState {
         if self.editor.active().buffer.modified {
             self.confirm_quit = true; // reuse confirm for "discard changes?"
         } else {
+            // Notify LSP before closing.
+            if let Some(path) = self.editor.active().path.clone() {
+                self.notify_lsp_did_close(&path);
+            }
             self.editor.close_active_tab();
         }
     }
@@ -1584,6 +1918,13 @@ impl AppState {
         if self.editor.active().path.is_some() {
             let _ = self.editor.active_mut().save();
             self.after_file_open_or_save();
+            // Flush any pending didChange before sending didSave.
+            if self.lsp_dirty_since.is_some() && !self.lsp_change_sent {
+                self.send_lsp_did_change();
+            }
+            self.lsp_dirty_since = None;
+            self.lsp_change_sent = false;
+            self.notify_lsp_did_save();
         } else {
             self.input_mode = InputMode::SaveAsPath(String::new());
         }
@@ -1601,13 +1942,27 @@ impl AppState {
     }
 
     /// Called after a file is opened or saved — updates recent files, git gutter,
-    /// and installs a file watcher for the new path.
+    /// installs a file watcher, and notifies the LSP server.
     fn after_file_open_or_save(&mut self) {
         if let Some(path) = self.editor.active().path.clone() {
             add_to_recent_files(&path, &self.workspace.clone());
             self.file_watcher = FileWatcher::new(&path);
         }
         self.refresh_git_gutter();
+        // Notify LSP server that a file was opened.
+        let handle = self.editor.active();
+        // Avoid borrow conflict by extracting what we need.
+        let path = handle.path.clone();
+        let lang = handle.syntax.language.name().to_lowercase();
+        let version = handle.lsp_state.version;
+        let text = handle.buffer.rope().to_string();
+        if let Some(registry) = &self.lsp
+            && registry.is_ready()
+            && let Some(path) = &path
+        {
+            let uri = crate::lsp::types::path_to_uri(path);
+            let _ = registry.client().did_open(&uri, &lang, version, &text);
+        }
     }
 
     /// Poll the file watcher; if the file changed externally, reload automatically.
@@ -1649,6 +2004,784 @@ impl AppState {
         // Re-install watcher after reload so we don't miss the next change.
         if let Some(path) = self.editor.active().path.clone() {
             self.file_watcher = FileWatcher::new(&path);
+        }
+    }
+
+    // ── LSP polling ──────────────────────────────────────────────────────────
+
+    /// How long to wait after the last edit before sending `didChange`.
+    const LSP_DEBOUNCE: Duration = Duration::from_millis(100);
+    /// How long to wait after the last edit before re-requesting semantic tokens.
+    const SEMANTIC_TOKEN_DEBOUNCE: Duration = Duration::from_millis(300);
+
+    /// Flush debounced LSP notifications if enough idle time has passed.
+    /// Called once per frame in the event loop.
+    pub fn flush_lsp_debounce(&mut self) {
+        let Some(dirty_since) = self.lsp_dirty_since else {
+            return;
+        };
+        let elapsed = dirty_since.elapsed();
+
+        // After 100ms idle, send the buffered didChange (one full-buffer copy).
+        if elapsed >= Self::LSP_DEBOUNCE && !self.lsp_change_sent {
+            self.send_lsp_did_change();
+            self.lsp_change_sent = true;
+        }
+
+        // After 300ms idle, re-request semantic tokens and clear the timer.
+        if elapsed >= Self::SEMANTIC_TOKEN_DEBOUNCE {
+            self.request_semantic_tokens_for_active();
+            self.lsp_dirty_since = None;
+            self.lsp_change_sent = false;
+        }
+    }
+
+    /// Non-blocking drain of pending LSP updates. Called once per frame.
+    pub fn poll_lsp_updates(&mut self) {
+        let Some(registry) = &mut self.lsp else {
+            return;
+        };
+        let updates = registry.poll();
+        for update in updates {
+            self.apply_lsp_update(update);
+        }
+    }
+
+    fn apply_lsp_update(&mut self, update: crate::lsp::client::LspUpdate) {
+        use crate::lsp::client::LspUpdate;
+        match update {
+            LspUpdate::Initialized(caps) => {
+                if let Some(registry) = &mut self.lsp {
+                    registry.client_mut().capabilities = caps;
+                    registry.client_mut().initialized = true;
+                    let _ = registry
+                        .client()
+                        .send_notification("initialized", Some(serde_json::json!({})));
+                }
+                // Send didOpen for all currently open buffers.
+                self.notify_lsp_did_open_all();
+                // Request semantic tokens for the active buffer.
+                self.request_semantic_tokens_for_active();
+            }
+            LspUpdate::Diagnostics { uri, diagnostics } => {
+                self.apply_diagnostics(&uri, &diagnostics);
+            }
+            LspUpdate::ServerExited => {
+                let config = self.lsp_config.clone();
+                let workspace = self.workspace.clone();
+                let mut disable_lsp = false;
+
+                if let Some(registry) = &mut self.lsp
+                    && (registry.restart_exhausted()
+                        || registry.try_restart(&config, &workspace).is_err())
+                {
+                    disable_lsp = true;
+                }
+
+                if disable_lsp {
+                    self.lsp = None;
+                    self.status_error =
+                        Some("LSP server exited unexpectedly (restart limit reached)".into());
+                } else {
+                    self.status_error = Some("LSP server exited, restarting…".into());
+                }
+            }
+            LspUpdate::Completion { items, .. } => {
+                self.apply_completion_response(items);
+            }
+            LspUpdate::Hover { contents, .. } => {
+                self.apply_hover_response(contents);
+            }
+            LspUpdate::Definition { locations, .. } => {
+                self.apply_definition_response(locations);
+            }
+            LspUpdate::References { locations, .. } => {
+                self.apply_references_response(locations);
+            }
+            LspUpdate::Rename { edit, .. } => {
+                if let Some(edit) = edit {
+                    self.apply_workspace_edit(&edit);
+                }
+            }
+            LspUpdate::CodeActions { actions, .. } => {
+                let _ = actions; // TODO: show code action picker
+            }
+            LspUpdate::SemanticTokens { uri, data } => {
+                self.apply_semantic_tokens(&uri, &data);
+            }
+            LspUpdate::Error(msg) => {
+                self.status_error = Some(msg);
+            }
+        }
+    }
+
+    fn notify_lsp_did_open_all(&self) {
+        let Some(registry) = &self.lsp else { return };
+        if !registry.is_ready() {
+            return;
+        }
+        for tab in &self.editor.tabs {
+            if let Some(path) = &tab.path {
+                let uri = crate::lsp::types::path_to_uri(path);
+                let lang_id = tab.syntax.language.name().to_lowercase();
+                let text = tab.buffer.rope().to_string();
+                let _ = registry
+                    .client()
+                    .did_open(&uri, &lang_id, tab.lsp_state.version, &text);
+            }
+        }
+    }
+
+    /// Send `textDocument/didOpen` for a single buffer.
+    #[allow(dead_code)]
+    fn notify_lsp_did_open(&self, handle: &crate::editor::tab::BufferHandle) {
+        let Some(registry) = &self.lsp else { return };
+        if !registry.is_ready() {
+            return;
+        }
+        if let Some(path) = &handle.path {
+            let uri = crate::lsp::types::path_to_uri(path);
+            let lang_id = handle.syntax.language.name().to_lowercase();
+            let text = handle.buffer.rope().to_string();
+            let _ = registry
+                .client()
+                .did_open(&uri, &lang_id, handle.lsp_state.version, &text);
+        }
+    }
+
+    /// Send `textDocument/didChange` for the active buffer (full sync).
+    /// Version must already be bumped before calling this.
+    fn send_lsp_did_change(&self) {
+        let Some(registry) = &self.lsp else { return };
+        if !registry.is_ready() {
+            return;
+        }
+        let handle = self.editor.active();
+        if let Some(path) = &handle.path {
+            let uri = crate::lsp::types::path_to_uri(path);
+            let version = handle.lsp_state.version;
+            let text = handle.buffer.rope().to_string();
+            let _ = registry.client().did_change(&uri, version, &text);
+        }
+    }
+
+    /// Send `textDocument/didSave` for the active buffer.
+    fn notify_lsp_did_save(&self) {
+        let Some(registry) = &self.lsp else { return };
+        if !registry.is_ready() {
+            return;
+        }
+        if let Some(path) = &self.editor.active().path {
+            let uri = crate::lsp::types::path_to_uri(path);
+            let _ = registry.client().did_save(&uri);
+        }
+    }
+
+    /// Send `textDocument/didClose` for a buffer by path.
+    fn notify_lsp_did_close(&self, path: &std::path::Path) {
+        let Some(registry) = &self.lsp else { return };
+        if !registry.is_ready() {
+            return;
+        }
+        let uri = crate::lsp::types::path_to_uri(path);
+        let _ = registry.client().did_close(&uri);
+    }
+
+    /// Convert raw diagnostic JSON from the server to byte-offset `LspDiagnostic`s
+    /// and store them on the matching buffer.
+    fn apply_diagnostics(&mut self, uri: &str, raw_diagnostics: &[serde_json::Value]) {
+        use crate::lsp::types::{DiagSeverity, LspDiagnostic, lsp_position_to_byte_offset};
+
+        let path = match crate::lsp::types::uri_to_path(uri) {
+            Some(p) => p,
+            None => return,
+        };
+
+        // Find the buffer that matches this URI.
+        let tab = self
+            .editor
+            .tabs
+            .iter_mut()
+            .find(|t| t.path.as_ref().is_some_and(|p| same_file(p, &path)));
+        let Some(tab) = tab else { return };
+
+        let rope = tab.buffer.rope();
+        let mut diagnostics = Vec::with_capacity(raw_diagnostics.len());
+
+        for raw in raw_diagnostics {
+            let range = match raw.get("range") {
+                Some(r) => r,
+                None => continue,
+            };
+            let start = match parse_lsp_position(range.get("start")) {
+                Some(pos) => match lsp_position_to_byte_offset(rope, pos) {
+                    Some(b) => b,
+                    None => continue,
+                },
+                None => continue,
+            };
+            let end = match parse_lsp_position(range.get("end")) {
+                Some(pos) => match lsp_position_to_byte_offset(rope, pos) {
+                    Some(b) => b,
+                    None => continue,
+                },
+                None => continue,
+            };
+            let severity = match raw.get("severity").and_then(|v| v.as_u64()) {
+                Some(1) => DiagSeverity::Error,
+                Some(2) => DiagSeverity::Warning,
+                Some(3) => DiagSeverity::Information,
+                _ => DiagSeverity::Hint,
+            };
+            let message = raw
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let source = raw.get("source").and_then(|v| v.as_str()).map(String::from);
+
+            diagnostics.push(LspDiagnostic {
+                range: crate::buffer::cursor::ByteRange { start, end },
+                severity,
+                message,
+                source,
+            });
+        }
+
+        tab.lsp_state.diagnostics = diagnostics;
+    }
+
+    // ── Completion ───────────────────────────────────────────────────────────
+
+    fn trigger_completion(&mut self) {
+        let Some(registry) = &mut self.lsp else {
+            return;
+        };
+        if !registry.is_ready() {
+            return;
+        }
+        let handle = self.editor.active();
+        let Some(path) = &handle.path else { return };
+        let uri = crate::lsp::types::path_to_uri(path);
+        let cursor = handle.buffer.cursors.primary();
+        let pos = crate::lsp::types::byte_offset_to_lsp_position(
+            handle.buffer.rope(),
+            cursor.byte_offset,
+        );
+        let anchor_byte = cursor.byte_offset;
+        let anchor_line = cursor.line;
+        let anchor_col = cursor.col;
+
+        let _ = registry
+            .client_mut()
+            .request_completion(&uri, pos.line, pos.character);
+
+        self.completion = Some(CompletionState::new(anchor_byte, anchor_line, anchor_col));
+    }
+
+    fn handle_completion_input(&mut self, action: &EditorAction) -> bool {
+        match action {
+            EditorAction::MoveCursor(Direction::Up) => {
+                if let Some(c) = &mut self.completion {
+                    c.selected = c.selected.saturating_sub(1);
+                }
+                true
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                if let Some(c) = &mut self.completion
+                    && !c.filtered.is_empty()
+                {
+                    c.selected = (c.selected + 1).min(c.filtered.len() - 1);
+                }
+                true
+            }
+            EditorAction::InsertNewline | EditorAction::InsertTab => {
+                self.accept_completion();
+                true
+            }
+            EditorAction::CloseSearch => {
+                self.completion = None;
+                true
+            }
+            // Cursor movement dismisses completion.
+            EditorAction::MoveCursor(_)
+            | EditorAction::MoveCursorWord(_)
+            | EditorAction::MoveCursorHome
+            | EditorAction::MoveCursorEnd => {
+                self.completion = None;
+                false // let the movement fall through
+            }
+            // Characters fall through to editing, then refilter.
+            _ => false,
+        }
+    }
+
+    fn accept_completion(&mut self) {
+        let insert_text = match &self.completion {
+            Some(c) => match c.selected_item() {
+                Some(item) => item.insert_text.clone(),
+                None => {
+                    self.completion = None;
+                    return;
+                }
+            },
+            None => return,
+        };
+        let anchor = self.completion.as_ref().unwrap().anchor_byte;
+        let cursor_byte = self.editor.active().buffer.cursors.primary().byte_offset;
+
+        // Delete the typed prefix and insert the completion text.
+        if cursor_byte > anchor {
+            let rope = self.editor.active().buffer.rope();
+            let start_char = rope.byte_to_char(anchor);
+            let end_char = rope.byte_to_char(cursor_byte);
+            self.editor
+                .active_mut()
+                .buffer
+                .delete_range(start_char, end_char);
+        }
+        self.editor.active_mut().buffer.insert_str(&insert_text);
+
+        self.completion = None;
+    }
+
+    fn refilter_completion(&mut self) {
+        let Some(comp) = &mut self.completion else {
+            return;
+        };
+        let cursor_byte = self.editor.active().buffer.cursors.primary().byte_offset;
+        if cursor_byte < comp.anchor_byte {
+            self.completion = None;
+            return;
+        }
+        let rope = self.editor.active().buffer.rope();
+        let start = rope.byte_to_char(comp.anchor_byte);
+        let end = rope.byte_to_char(cursor_byte);
+        let prefix: String = rope.slice(start..end).chars().collect();
+        comp.filter(&prefix);
+    }
+
+    fn apply_completion_response(&mut self, items: Vec<serde_json::Value>) {
+        let Some(comp) = &mut self.completion else {
+            return;
+        };
+        comp.items = items
+            .iter()
+            .map(|item| {
+                let label = item
+                    .get("label")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let detail = item
+                    .get("detail")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                let insert_text = item
+                    .get("insertText")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&label)
+                    .to_string();
+                let filter_text = item
+                    .get("filterText")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&label)
+                    .to_string();
+                let kind = item.get("kind").and_then(|v| v.as_u64()).unwrap_or(0);
+                let kind_label = completion_kind_label(kind);
+                CompletionItemEntry {
+                    label,
+                    detail,
+                    insert_text,
+                    filter_text,
+                    kind_label,
+                }
+            })
+            .collect();
+        comp.filtered = (0..comp.items.len()).collect();
+        self.refilter_completion();
+    }
+
+    // ── Hover ────────────────────────────────────────────────────────────────
+
+    fn trigger_hover(&mut self) {
+        let Some(registry) = &mut self.lsp else {
+            return;
+        };
+        if !registry.is_ready() || !registry.client().capabilities.hover_provider {
+            return;
+        }
+        let handle = self.editor.active();
+        let Some(path) = &handle.path else { return };
+        let uri = crate::lsp::types::path_to_uri(path);
+        let cursor = handle.buffer.cursors.primary();
+        let pos = crate::lsp::types::byte_offset_to_lsp_position(
+            handle.buffer.rope(),
+            cursor.byte_offset,
+        );
+        let anchor_line = cursor.line;
+        let anchor_col = cursor.col;
+
+        let _ = registry
+            .client_mut()
+            .request_hover(&uri, pos.line, pos.character);
+
+        // We'll set hover state when the response arrives.
+        let _ = (anchor_line, anchor_col);
+    }
+
+    fn apply_hover_response(&mut self, contents: Option<serde_json::Value>) {
+        let Some(contents) = contents else { return };
+        let text = extract_hover_text(&contents);
+        if text.is_empty() {
+            return;
+        }
+        let cursor = self.editor.active().buffer.cursors.primary();
+        self.hover = Some(HoverState {
+            content: text,
+            anchor_line: cursor.line,
+            anchor_col: cursor.col,
+        });
+    }
+
+    // ── Go to Definition ─────────────────────────────────────────────────────
+
+    fn trigger_go_to_definition(&mut self) {
+        let Some(registry) = &mut self.lsp else {
+            return;
+        };
+        if !registry.is_ready() || !registry.client().capabilities.definition_provider {
+            return;
+        }
+        let handle = self.editor.active();
+        let Some(path) = &handle.path else { return };
+        let uri = crate::lsp::types::path_to_uri(path);
+        let cursor = handle.buffer.cursors.primary();
+        let pos = crate::lsp::types::byte_offset_to_lsp_position(
+            handle.buffer.rope(),
+            cursor.byte_offset,
+        );
+
+        let _ = registry
+            .client_mut()
+            .request_definition(&uri, pos.line, pos.character);
+    }
+
+    fn apply_definition_response(&mut self, locations: serde_json::Value) {
+        let locs = parse_locations(&locations);
+        if locs.is_empty() {
+            return;
+        }
+        if locs.len() == 1 {
+            self.jump_to_location(&locs[0]);
+        } else {
+            self.show_references_list(locs);
+        }
+    }
+
+    // ── Find References ──────────────────────────────────────────────────────
+
+    fn trigger_find_references(&mut self) {
+        let Some(registry) = &mut self.lsp else {
+            return;
+        };
+        if !registry.is_ready() || !registry.client().capabilities.references_provider {
+            return;
+        }
+        let handle = self.editor.active();
+        let Some(path) = &handle.path else { return };
+        let uri = crate::lsp::types::path_to_uri(path);
+        let cursor = handle.buffer.cursors.primary();
+        let pos = crate::lsp::types::byte_offset_to_lsp_position(
+            handle.buffer.rope(),
+            cursor.byte_offset,
+        );
+
+        let _ = registry
+            .client_mut()
+            .request_references(&uri, pos.line, pos.character);
+    }
+
+    fn apply_references_response(&mut self, locations: serde_json::Value) {
+        let locs = parse_locations(&locations);
+        if locs.is_empty() {
+            return;
+        }
+        self.show_references_list(locs);
+    }
+
+    fn show_references_list(&mut self, locs: Vec<(PathBuf, usize, usize)>) {
+        let items: Vec<ReferenceItem> = locs
+            .into_iter()
+            .map(|(path, line, col)| {
+                let context = std::fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|text| text.lines().nth(line).map(|l| l.trim().to_string()))
+                    .unwrap_or_default();
+                ReferenceItem {
+                    path,
+                    line,
+                    col,
+                    context,
+                }
+            })
+            .collect();
+        self.references_list = Some(ReferencesListState { items, selected: 0 });
+    }
+
+    fn handle_references_input(&mut self, action: &EditorAction) -> bool {
+        let num_items = self
+            .references_list
+            .as_ref()
+            .map(|r| r.items.len())
+            .unwrap_or(0);
+        match action {
+            EditorAction::MoveCursor(Direction::Up) => {
+                if let Some(r) = &mut self.references_list {
+                    r.selected = r.selected.saturating_sub(1);
+                }
+                true
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                if let Some(r) = &mut self.references_list {
+                    r.selected = (r.selected + 1).min(num_items.saturating_sub(1));
+                }
+                true
+            }
+            EditorAction::InsertNewline => {
+                if let Some(r) = &self.references_list
+                    && let Some(item) = r.items.get(r.selected)
+                {
+                    let path = item.path.clone();
+                    let line = item.line;
+                    let col = item.col;
+                    self.references_list = None;
+                    self.jump_to_location(&(path, line, col));
+                }
+                true
+            }
+            EditorAction::CloseSearch => {
+                self.references_list = None;
+                true
+            }
+            EditorAction::Quit | EditorAction::ForceQuit => {
+                self.references_list = None;
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn jump_to_location(&mut self, loc: &(PathBuf, usize, usize)) {
+        let (path, line, col) = loc;
+
+        // Check if file is already open in a tab.
+        let existing = self
+            .editor
+            .tabs
+            .iter()
+            .position(|t| t.path.as_ref().is_some_and(|p| same_file(p, path)));
+
+        if let Some(idx) = existing {
+            self.editor.go_to_tab(idx);
+        } else {
+            // Open in new tab.
+            if self.editor.open_tab(path.clone()).is_err() {
+                return;
+            }
+            self.after_file_open_or_save();
+        }
+
+        // Jump cursor to position.
+        let rope = self.editor.active().buffer.rope().clone();
+        let cursor = crate::buffer::cursor::Cursor::from_line_col(&rope, *line, *col);
+        *self.editor.active_mut().buffer.cursors.primary_mut() = cursor;
+    }
+
+    // ── Rename ───────────────────────────────────────────────────────────────
+
+    fn trigger_rename(&mut self) {
+        let Some(registry) = &self.lsp else { return };
+        if !registry.is_ready() || !registry.client().capabilities.rename_provider {
+            return;
+        }
+        // Enter rename modal: prompt for new name.
+        let handle = self.editor.active();
+        let cursor = handle.buffer.cursors.primary();
+        // Extract word under cursor as the default name.
+        let rope = handle.buffer.rope();
+        let byte = cursor.byte_offset;
+        let text = rope.to_string();
+        let word = extract_word_at(&text, byte);
+        self.input_mode = InputMode::Rename(word);
+    }
+
+    /// Send rename request after the user confirms the new name.
+    fn send_rename(&mut self, new_name: &str) {
+        let Some(registry) = &mut self.lsp else {
+            return;
+        };
+        if !registry.is_ready() {
+            return;
+        }
+        let handle = self.editor.active();
+        let Some(path) = &handle.path else { return };
+        let uri = crate::lsp::types::path_to_uri(path);
+        let cursor = handle.buffer.cursors.primary();
+        let pos = crate::lsp::types::byte_offset_to_lsp_position(
+            handle.buffer.rope(),
+            cursor.byte_offset,
+        );
+
+        let _ = registry
+            .client_mut()
+            .request_rename(&uri, pos.line, pos.character, new_name);
+    }
+
+    fn apply_workspace_edit(&mut self, edit: &serde_json::Value) {
+        let changes = match edit.get("changes").and_then(|v| v.as_object()) {
+            Some(c) => c,
+            None => return,
+        };
+
+        for (uri, edits) in changes {
+            let path = match crate::lsp::types::uri_to_path(uri) {
+                Some(p) => p,
+                None => continue,
+            };
+            let edits = match edits.as_array() {
+                Some(e) => e,
+                None => continue,
+            };
+
+            // Find or open the tab.
+            let tab_idx = self
+                .editor
+                .tabs
+                .iter()
+                .position(|t| t.path.as_ref().is_some_and(|p| same_file(p, &path)));
+            let tab_idx = match tab_idx {
+                Some(i) => i,
+                None => continue, // Skip files not open.
+            };
+
+            // Collect and sort edits in reverse order to avoid offset shifting.
+            let mut text_edits: Vec<(usize, usize, String)> = Vec::new();
+            let rope = self.editor.tabs[tab_idx].buffer.rope();
+            for e in edits {
+                let range = match e.get("range") {
+                    Some(r) => r,
+                    None => continue,
+                };
+                let start = match parse_lsp_position(range.get("start")) {
+                    Some(pos) => {
+                        crate::lsp::types::lsp_position_to_byte_offset(rope, pos).unwrap_or(0)
+                    }
+                    None => continue,
+                };
+                let end = match parse_lsp_position(range.get("end")) {
+                    Some(pos) => {
+                        crate::lsp::types::lsp_position_to_byte_offset(rope, pos).unwrap_or(0)
+                    }
+                    None => continue,
+                };
+                let new_text = e
+                    .get("newText")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                text_edits.push((start, end, new_text));
+            }
+
+            // Apply in reverse byte order.
+            text_edits.sort_by(|a, b| b.0.cmp(&a.0));
+            let tab = &mut self.editor.tabs[tab_idx];
+            for (start, end, new_text) in &text_edits {
+                let rope = tab.buffer.rope();
+                let start_char = rope.byte_to_char(*start);
+                let end_char = rope.byte_to_char(*end);
+                tab.buffer.delete_range(start_char, end_char);
+                tab.buffer.insert_str(new_text);
+            }
+        }
+    }
+
+    // ── Code Action ──────────────────────────────────────────────────────────
+
+    fn trigger_code_action(&mut self) {
+        let Some(registry) = &mut self.lsp else {
+            return;
+        };
+        if !registry.is_ready() || !registry.client().capabilities.code_action_provider {
+            return;
+        }
+        let handle = self.editor.active();
+        let Some(path) = &handle.path else { return };
+        let uri = crate::lsp::types::path_to_uri(path);
+        let cursor = handle.buffer.cursors.primary();
+        let pos = crate::lsp::types::byte_offset_to_lsp_position(
+            handle.buffer.rope(),
+            cursor.byte_offset,
+        );
+        let range = serde_json::json!({
+            "start": { "line": pos.line, "character": pos.character },
+            "end": { "line": pos.line, "character": pos.character },
+        });
+
+        let _ = registry.client_mut().request_code_action(&uri, range);
+    }
+
+    // ── Semantic Tokens ──────────────────────────────────────────────────────
+
+    fn apply_semantic_tokens(&mut self, uri: &str, data: &[u32]) {
+        let path = match crate::lsp::types::uri_to_path(uri) {
+            Some(p) => p,
+            None => return,
+        };
+        let tab = self
+            .editor
+            .tabs
+            .iter_mut()
+            .find(|t| t.path.as_ref().is_some_and(|p| same_file(p, &path)));
+        let Some(tab) = tab else { return };
+
+        let rope = tab.buffer.rope();
+        let tokens = crate::lsp::types::decode_semantic_tokens(data, rope);
+        tab.lsp_state.semantic_tokens = Some(tokens);
+    }
+
+    /// Request semantic tokens for the active buffer.
+    fn request_semantic_tokens_for_active(&mut self) {
+        let Some(registry) = &mut self.lsp else {
+            return;
+        };
+        if !registry.is_ready() || !registry.client().capabilities.semantic_tokens_provider {
+            return;
+        }
+        let handle = self.editor.active();
+        let Some(path) = &handle.path else { return };
+        let uri = crate::lsp::types::path_to_uri(path);
+        let _ = registry.client_mut().send_request(
+            "textDocument/semanticTokens/full",
+            Some(serde_json::json!({
+                "textDocument": { "uri": uri }
+            })),
+        );
+    }
+
+    // ── LSP restart/stop ──────────────────────────────────────────────────────
+
+    fn lsp_restart(&mut self) {
+        // Tear down existing connection.
+        self.lsp = None;
+        // Clear stale state from all buffers.
+        for tab in &mut self.editor.tabs {
+            tab.lsp_state.diagnostics.clear();
+            tab.lsp_state.semantic_tokens = None;
+        }
+        // Start fresh if config is active.
+        if self.lsp_config.is_active() {
+            self.lsp = crate::lsp::LspRegistry::start(&self.lsp_config, &self.workspace).ok();
         }
     }
 
@@ -1750,6 +2883,12 @@ impl App {
             // Check for external file changes (non-blocking).
             state.poll_file_watcher();
             state.refresh_memory();
+
+            // Drain pending LSP server updates (non-blocking).
+            state.poll_lsp_updates();
+
+            // Flush debounced LSP notifications (didChange, semantic tokens).
+            state.flush_lsp_debounce();
 
             terminal.draw(|frame| ui::render(&state, frame))?;
 
@@ -1890,4 +3029,103 @@ fn read_rss_kb() -> Option<u64> {
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 fn read_rss_kb() -> Option<u64> {
     None
+}
+
+// ── Free helpers for LSP ─────────────────────────────────────────────────────
+
+/// Parse an LSP `{ line, character }` JSON value into our `LspPosition`.
+fn parse_lsp_position(val: Option<&serde_json::Value>) -> Option<crate::lsp::types::LspPosition> {
+    let obj = val?;
+    Some(crate::lsp::types::LspPosition {
+        line: obj.get("line")?.as_u64()? as u32,
+        character: obj.get("character")?.as_u64()? as u32,
+    })
+}
+
+/// Compare two paths, canonicalizing to handle symlinks / relative paths.
+fn same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => a == b,
+    }
+}
+
+/// Map an LSP completion item kind number to a short label.
+fn completion_kind_label(kind: u64) -> &'static str {
+    match kind {
+        1 => "txt",
+        2 => "fn ",
+        3 => "fn ",
+        4 => "new",
+        5 => "fld",
+        6 => "var",
+        7 => "cls",
+        8 => "ifc",
+        9 => "mod",
+        10 => "prp",
+        14 => "kw ",
+        15 => "snp",
+        21 => "cst",
+        _ => "   ",
+    }
+}
+
+/// Extract plain text from an LSP hover contents value.
+fn extract_hover_text(contents: &serde_json::Value) -> String {
+    // Can be a string, a { kind, value } MarkupContent, or an array.
+    if let Some(s) = contents.as_str() {
+        return s.to_string();
+    }
+    if let Some(value) = contents.get("value").and_then(|v| v.as_str()) {
+        return value.to_string();
+    }
+    if let Some(arr) = contents.as_array() {
+        return arr
+            .iter()
+            .filter_map(|v| {
+                v.as_str()
+                    .map(String::from)
+                    .or_else(|| v.get("value").and_then(|v| v.as_str()).map(String::from))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    String::new()
+}
+
+/// Parse LSP Location or Location[] into (path, line, col) tuples.
+fn parse_locations(value: &serde_json::Value) -> Vec<(PathBuf, usize, usize)> {
+    let locs = if value.is_array() {
+        value.as_array().cloned().unwrap_or_default()
+    } else if value.is_object() {
+        vec![value.clone()]
+    } else {
+        return Vec::new();
+    };
+
+    locs.iter()
+        .filter_map(|loc| {
+            let uri = loc.get("uri")?.as_str()?;
+            let path = crate::lsp::types::uri_to_path(uri)?;
+            let range = loc.get("range")?;
+            let start = range.get("start")?;
+            let line = start.get("line")?.as_u64()? as usize;
+            let col = start.get("character")?.as_u64()? as usize;
+            Some((path, line, col))
+        })
+        .collect()
+}
+
+/// Extract the word under the cursor at a byte offset.
+fn extract_word_at(text: &str, byte_offset: usize) -> String {
+    let bytes = text.as_bytes();
+    let mut start = byte_offset;
+    let mut end = byte_offset;
+    while start > 0 && ((bytes[start - 1] as char).is_alphanumeric() || bytes[start - 1] == b'_') {
+        start -= 1;
+    }
+    while end < bytes.len() && ((bytes[end] as char).is_alphanumeric() || bytes[end] == b'_') {
+        end += 1;
+    }
+    text[start..end].to_string()
 }
