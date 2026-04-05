@@ -92,12 +92,17 @@ fn init_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
 }
 
 fn restore_terminal() -> Result<()> {
+    let mut stdout = io::stdout();
+    // Disable terminal features while still in raw mode.
+    // Calling disable_raw_mode() first leaves a window where mouse tracking
+    // is still active but the tty is in cooked/echo mode — any mouse motion
+    // during that window produces SGR sequences that land in the shell's
+    // stdin and get printed as literal text.
+    // Separate execute! calls ensure DisableMouseCapture is always sent
+    // even if PopKeyboardEnhancementFlags fails on an unsupported terminal.
+    let _ = execute!(stdout, PopKeyboardEnhancementFlags);
+    let _ = execute!(stdout, DisableMouseCapture);
+    let _ = execute!(stdout, LeaveAlternateScreen);
     disable_raw_mode()?;
-    execute!(
-        io::stdout(),
-        PopKeyboardEnhancementFlags,
-        DisableMouseCapture,
-        LeaveAlternateScreen,
-    )?;
     Ok(())
 }
