@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::io::{BufReader, BufWriter};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
 use anyhow::{Context, Result};
@@ -66,11 +67,17 @@ pub enum LspUpdate {
 // ── LspClient ────────────────────────────────────────────────────────────────
 
 /// Manages a single LSP server: child process, reader/writer threads, channels.
+/// Tracks which method each request ID corresponds to, so the reader thread
+/// can correctly dispatch responses (instead of guessing from JSON shape).
+type PendingRequests = Arc<Mutex<HashMap<u64, String>>>;
+
 pub struct LspClient {
     /// Channel to send outbound messages to the writer thread.
     out_tx: mpsc::Sender<OutboundMessage>,
     /// Next request ID (monotonically increasing).
     next_id: u64,
+    /// Map of in-flight request IDs → method names, shared with reader thread.
+    pending: PendingRequests,
     /// The reader thread handle (detached on drop — kept alive as long as client lives).
     _reader_handle: thread::JoinHandle<()>,
     /// The writer thread handle (detached on drop — kept alive as long as client lives).
@@ -125,8 +132,12 @@ impl LspClient {
             })
             .context("failed to spawn LSP writer thread")?;
 
+        // Shared map of pending request IDs → method names.
+        let pending: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
+
         // Reader thread: reads JSON-RPC messages, classifies, sends LspUpdates.
         let reader_update_tx = update_tx.clone();
+        let reader_pending = Arc::clone(&pending);
         let reader_handle = thread::Builder::new()
             .name("lsp-reader".into())
             .spawn(move || {
@@ -143,7 +154,11 @@ impl LspClient {
 
                     let update = match classify_incoming(&value) {
                         Some(IncomingMessage::Response(resp)) => {
-                            dispatch_response(resp.id, resp.result, resp.error)
+                            let method = reader_pending
+                                .lock()
+                                .ok()
+                                .and_then(|mut map| map.remove(&resp.id));
+                            dispatch_response(resp.id, method.as_deref(), resp.result, resp.error)
                         }
                         Some(IncomingMessage::Notification(notif)) => {
                             dispatch_notification(&notif.method, notif.params)
@@ -163,6 +178,7 @@ impl LspClient {
         let mut client = Self {
             out_tx,
             next_id: 1,
+            pending,
             _reader_handle: reader_handle,
             _writer_handle: writer_handle,
             child,
@@ -182,6 +198,10 @@ impl LspClient {
     pub fn send_request(&mut self, method: &str, params: Option<Value>) -> Result<u64> {
         let id = self.next_id;
         self.next_id += 1;
+        // Record the method so the reader thread can dispatch the response correctly.
+        if let Ok(mut map) = self.pending.lock() {
+            map.insert(id, method.to_string());
+        }
         let req = RequestMessage::new(id, method, params);
         self.out_tx
             .send(OutboundMessage::Request(req))
@@ -389,12 +409,10 @@ impl Drop for LspClient {
 
 // ── Response/notification dispatch ───────────────────────────────────────────
 
-/// Map a response to an `LspUpdate` based on the request ID.
-///
-/// The first request (ID 1) is always `initialize`. For other requests, we
-/// inspect the result shape to determine the response type.
+/// Map a response to an `LspUpdate` using the method name from the pending map.
 fn dispatch_response(
     id: u64,
+    method: Option<&str>,
     result: Option<Value>,
     error: Option<super::protocol::RpcError>,
 ) -> Option<LspUpdate> {
@@ -407,65 +425,62 @@ fn dispatch_response(
 
     let result = result?;
 
-    // ID 1 is always the initialize handshake.
-    if id == 1 {
-        return Some(LspUpdate::Initialized(parse_server_capabilities(&result)));
-    }
-
-    // For other responses, we return a generic structure. The caller (LspRegistry)
-    // tracks pending request IDs to know what each response means.
-    // For now, we try to detect the shape:
-    if result.is_null() {
-        return None;
-    }
-
-    // Completion response: items array or { items: [...] }
-    if let Some(items) = result.as_array() {
-        return Some(LspUpdate::Completion {
-            request_id: id,
-            items: items.clone(),
-        });
-    }
-    if let Some(items) = result.get("items").and_then(|v| v.as_array()) {
-        return Some(LspUpdate::Completion {
-            request_id: id,
-            items: items.clone(),
-        });
-    }
-
-    // Hover response: { contents: ... }
-    if result.get("contents").is_some() {
-        return Some(LspUpdate::Hover {
+    match method {
+        Some("initialize") => Some(LspUpdate::Initialized(parse_server_capabilities(&result))),
+        Some("textDocument/completion") => {
+            let items = if let Some(arr) = result.as_array() {
+                arr.clone()
+            } else if let Some(arr) = result.get("items").and_then(|v| v.as_array()) {
+                arr.clone()
+            } else {
+                Vec::new()
+            };
+            Some(LspUpdate::Completion {
+                request_id: id,
+                items,
+            })
+        }
+        Some("textDocument/hover") => Some(LspUpdate::Hover {
             request_id: id,
             contents: result.get("contents").cloned(),
-        });
-    }
-
-    // WorkspaceEdit response (rename): { changes: {...} } or { documentChanges: [...] }
-    if result.get("changes").is_some() || result.get("documentChanges").is_some() {
-        return Some(LspUpdate::Rename {
+        }),
+        Some("textDocument/definition") => Some(LspUpdate::Definition {
+            request_id: id,
+            locations: result,
+        }),
+        Some("textDocument/references") => Some(LspUpdate::References {
+            request_id: id,
+            locations: result,
+        }),
+        Some("textDocument/rename") => Some(LspUpdate::Rename {
             request_id: id,
             edit: Some(result),
-        });
+        }),
+        Some("textDocument/codeAction") => {
+            let actions = result.as_array().cloned().unwrap_or_default();
+            Some(LspUpdate::CodeActions {
+                request_id: id,
+                actions,
+            })
+        }
+        Some("textDocument/semanticTokens/full") => {
+            let data = result
+                .get("data")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_u64().map(|n| n as u32))
+                        .collect()
+                })
+                .unwrap_or_default();
+            Some(LspUpdate::SemanticTokens {
+                uri: String::new(),
+                data,
+            })
+        }
+        Some("shutdown") => None,
+        _ => None, // Unknown method or missing from pending map.
     }
-
-    // Semantic tokens response: { data: [u32...] }
-    if let Some(data) = result.get("data").and_then(|v| v.as_array()) {
-        let nums: Vec<u32> = data
-            .iter()
-            .filter_map(|v| v.as_u64().map(|n| n as u32))
-            .collect();
-        return Some(LspUpdate::SemanticTokens {
-            uri: String::new(), // URI will be matched by the caller
-            data: nums,
-        });
-    }
-
-    // Default: treat as definition/references (Location or Location[])
-    Some(LspUpdate::Definition {
-        request_id: id,
-        locations: result,
-    })
 }
 
 /// Map a server notification to an `LspUpdate`.
