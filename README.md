@@ -119,6 +119,7 @@ All editing and navigation operations apply to every cursor simultaneously.
 | Ctrl+C | Copy selection (or current line if no selection) |
 | Ctrl+X | Cut selection (or current line) |
 | Ctrl+V | Paste |
+| Ctrl+Shift+C | Copy file reference |
 
 ### Undo / Redo
 
@@ -136,7 +137,6 @@ All editing and navigation operations apply to every cursor simultaneously.
 | Ctrl+N | New file |
 | Ctrl+T | New tab |
 | Ctrl+O | Open file (path prompt) |
-| Ctrl+W | Close tab |
 | Ctrl+] / Ctrl+PgDn | Next tab |
 | Ctrl+[ / Ctrl+PgUp | Previous tab |
 | Ctrl+1 – Ctrl+9 | Jump to tab by index |
@@ -148,7 +148,8 @@ All editing and navigation operations apply to every cursor simultaneously.
 |-----|--------|
 | Ctrl+P | Fuzzy file picker |
 | Ctrl+R | Recent files picker |
-| Ctrl+B | Toggle file sidebar |
+| Ctrl+B | Focus / open sidebar |
+| Ctrl+Shift+B | Toggle sidebar (show/hide) |
 | Ctrl+Shift+P | Command palette |
 | Ctrl+Shift+E | Buffer switcher |
 
@@ -160,6 +161,12 @@ All editing and navigation operations apply to every cursor simultaneously.
 | Space / Right | Open file or expand/collapse directory (stays in sidebar) |
 | Left | Collapse current directory and move to its parent |
 | Enter | Open file or toggle directory |
+| Ctrl+C | Copy file |
+| Ctrl+X | Cut file/directory |
+| Ctrl+V | Paste |
+| F2 | Rename file/directory |
+| Delete | Delete file/directory |
+| Ctrl+Shift+N | New folder |
 
 ### Search & replace
 
@@ -176,6 +183,17 @@ All editing and navigation operations apply to every cursor simultaneously.
 | Ctrl+A (in replace field) | Replace all matches |
 | Esc | Close search bar |
 
+### LSP (when active)
+
+| Key | Action |
+|-----|--------|
+| Ctrl+Space | Code completion |
+| Ctrl+K | Hover info |
+| F12 | Go to definition |
+| Shift+F12 | Find references |
+| F2 | Rename symbol |
+| Ctrl+. | Code action / quick fix |
+
 ### View & app
 
 | Key | Action |
@@ -183,6 +201,7 @@ All editing and navigation operations apply to every cursor simultaneously.
 | Alt+Z | Toggle word wrap |
 | F1 | Toggle help overlay |
 | Ctrl+, | Open settings |
+| Ctrl+L | Configure LSP server |
 | Ctrl+Q | Quit |
 
 ### Mouse
@@ -230,7 +249,7 @@ Ctrl+Shift+P opens a searchable list of all editor commands with their shortcuts
 
 ### File sidebar
 
-Ctrl+B opens an expandable file tree. Navigating the sidebar does not disturb the editor — the active pane is always shown in the status bar mode badge. Space or Right opens a file while keeping sidebar focus; Left collapses the current directory and moves to its parent.
+Ctrl+B focuses or opens the sidebar. Ctrl+Shift+B toggles it closed entirely. Navigating the sidebar does not disturb the editor — the active pane is always shown in the status bar mode badge. Space or Right opens a file while keeping sidebar focus; Left collapses the current directory and moves to its parent.
 
 ### File watching
 
