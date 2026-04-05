@@ -1,5 +1,9 @@
 # txt
 
+[![CI](https://github.com/ErikHellman/txt/actions/workflows/ci.yml/badge.svg)](https://github.com/ErikHellman/txt/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ErikHellman/txt)](https://github.com/ErikHellman/txt/releases/latest)
+[![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue)](https://github.com/ErikHellman/txt#license)
+
 A fast terminal text editor for engineers who want to make quick, precise edits without leaving the terminal.
 
 ## Why txt
