@@ -28,6 +28,28 @@ impl Theme {
     }
 }
 
+/// Predefined keybinding presets. Serialises as snake_case strings in TOML.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum KeymapPreset {
+    #[default]
+    Default,
+    IntellijIdea,
+    VsCode,
+}
+
+impl KeymapPreset {
+    pub const ALL: &'static [Self] = &[Self::Default, Self::IntellijIdea, Self::VsCode];
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            KeymapPreset::Default => "Default",
+            KeymapPreset::IntellijIdea => "IntelliJ IDEA",
+            KeymapPreset::VsCode => "VS Code",
+        }
+    }
+}
+
 /// Editor configuration. All fields have defaults so partial TOML is fine.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
@@ -49,6 +71,9 @@ pub struct Config {
     /// Active colour theme.
     #[serde(default)]
     pub theme: Theme,
+    /// Active keybinding preset.
+    #[serde(default)]
+    pub keymap_preset: KeymapPreset,
 }
 
 fn default_tab_size() -> usize {
@@ -64,6 +89,7 @@ impl Default for Config {
             auto_save: false,
             show_whitespace: false,
             theme: Theme::Default,
+            keymap_preset: KeymapPreset::Default,
         }
     }
 }
@@ -165,6 +191,7 @@ mod tests {
         assert!(!c.confirm_exit);
         assert!(!c.auto_save);
         assert!(!c.show_whitespace);
+        assert_eq!(c.keymap_preset, KeymapPreset::Default);
     }
 
     #[test]
@@ -198,6 +225,7 @@ mod tests {
             confirm_exit: true,
             auto_save: false,
             show_whitespace: true,
+            keymap_preset: KeymapPreset::IntellijIdea,
         };
         let serialized = toml::to_string(&original).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();
@@ -245,5 +273,17 @@ mod tests {
     #[test]
     fn theme_all_covers_all_variants() {
         assert_eq!(Theme::ALL.len(), 4);
+    }
+
+    #[test]
+    fn keymap_preset_display_names() {
+        assert_eq!(KeymapPreset::Default.display_name(), "Default");
+        assert_eq!(KeymapPreset::IntellijIdea.display_name(), "IntelliJ IDEA");
+        assert_eq!(KeymapPreset::VsCode.display_name(), "VS Code");
+    }
+
+    #[test]
+    fn keymap_preset_all_covers_all_variants() {
+        assert_eq!(KeymapPreset::ALL.len(), 3);
     }
 }

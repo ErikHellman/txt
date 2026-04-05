@@ -8,13 +8,14 @@ use ratatui::backend::CrosstermBackend;
 
 use crate::{
     clipboard::ClipboardManager,
-    config::{Config, Theme, add_to_recent_files, load_recent_files},
+    config::{Config, KeymapPreset, Theme, add_to_recent_files, load_recent_files},
     editor::Editor,
     editor::viewport::screen_pos_to_byte_offset,
     git::GitGutter,
     input::{
         InputHandler,
         action::{Direction, EditorAction, ScrollDir},
+        keybinding::KeyBindings,
     },
     search::SearchState,
     ui,
@@ -634,6 +635,7 @@ pub struct AppState {
     pub references_list: Option<ReferencesListState>,
     pub git_gutter: Option<GitGutter>,
     pub config: Config,
+    pub input: InputHandler,
     pub workspace: PathBuf,
     pub should_quit: bool,
     pub confirm_quit: bool,
@@ -690,6 +692,7 @@ impl AppState {
             references_list: None,
             git_gutter: None,
             config,
+            input: InputHandler::new(),
             workspace,
             should_quit: false,
             confirm_quit: false,
@@ -1262,6 +1265,7 @@ impl AppState {
             }
             EditorAction::ReloadConfig => {
                 self.config = Config::load();
+                self.input.reload_keybindings();
                 for tab in &mut self.editor.tabs {
                     tab.viewport.word_wrap = self.config.word_wrap;
                 }
@@ -1776,7 +1780,7 @@ impl AppState {
     /// Handle input while the settings overlay is open.
     /// Returns `true` if the action was consumed, `false` to let it fall through.
     fn handle_settings(&mut self, action: &EditorAction) -> bool {
-        const NUM_ROWS: usize = 4;
+        const NUM_ROWS: usize = 5;
         match action {
             EditorAction::MoveCursor(Direction::Up) => {
                 self.settings_cursor = self.settings_cursor.saturating_sub(1);
@@ -1830,6 +1834,21 @@ impl AppState {
                     (idx + all.len() - 1) % all.len()
                 };
                 self.config.theme = all[next].clone();
+            }
+            4 => {
+                let all = KeymapPreset::ALL;
+                let idx = all
+                    .iter()
+                    .position(|p| p == &self.config.keymap_preset)
+                    .unwrap_or(0);
+                let next = if forward {
+                    (idx + 1) % all.len()
+                } else {
+                    (idx + all.len() - 1) % all.len()
+                };
+                self.config.keymap_preset = all[next].clone();
+                KeyBindings::apply_preset(&self.config.keymap_preset);
+                self.input.reload_keybindings();
             }
             _ => {}
         }
@@ -3208,15 +3227,11 @@ impl AppState {
 
 // ── App (top-level runner) ────────────────────────────────────────────────────
 
-pub struct App {
-    input: InputHandler,
-}
+pub struct App;
 
 impl App {
     pub fn new() -> Self {
-        Self {
-            input: InputHandler::new(),
-        }
+        Self
     }
 
     pub fn run(
@@ -3274,8 +3289,8 @@ impl App {
             }
 
             let action = match event::read()? {
-                Event::Key(k) if k.kind == KeyEventKind::Press => self.input.handle_key(k),
-                Event::Mouse(m) => self.input.handle_mouse(m),
+                Event::Key(k) if k.kind == KeyEventKind::Press => state.input.handle_key(k),
+                Event::Mouse(m) => state.input.handle_mouse(m),
                 Event::Resize(_, _) => EditorAction::Unhandled,
                 _ => EditorAction::Unhandled,
             };

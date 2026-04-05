@@ -238,7 +238,7 @@ pub fn render(state: &AppState, frame: &mut Frame) {
 
     // ── Help overlay ─────────────────────────────────────────────────────────
     if state.show_help {
-        help_overlay::render(area, buf, state.help_scroll);
+        help_overlay::render(area, buf, state.help_scroll, state.input.keybindings());
     }
 
     // ── Settings overlay ──────────────────────────────────────────────────────
