@@ -39,6 +39,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 regex = "1"
 serde_json = "1"
 notify = "8"
+url = "2"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
