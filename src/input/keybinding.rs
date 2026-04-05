@@ -6,6 +6,7 @@ use std::str::FromStr;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::action::{EditorAction, action_from_name, action_to_name};
+use crate::config::KeymapPreset;
 
 // ── KeyCodeRepr ──────────────────────────────────────────────────────────────
 
@@ -215,10 +216,13 @@ pub struct KeyBindings {
 impl KeyBindings {
     /// Load keybindings from `~/.config/txt/keybindings.toml`.
     ///
-    /// If the file does not exist, writes the defaults and returns them.
+    /// If the file does not exist, writes the defaults and all preset files.
     /// On any error, silently falls back to defaults.
     pub fn load() -> Self {
-        Self::load_from_path(Self::keybindings_path().as_deref())
+        let result = Self::load_from_path(Self::keybindings_path().as_deref());
+        // Ensure all preset files exist alongside the main keybindings file.
+        Self::ensure_preset_files();
+        result
     }
 
     /// Load from a specific path.  `None` → return defaults.
@@ -251,16 +255,9 @@ impl KeyBindings {
 
     /// Build keybindings from a parsed TOML table, merging with defaults.
     fn from_table(table: &HashMap<String, String>, defaults: &KeyBindings) -> Self {
-        let mut map = HashMap::new();
-        let mut reverse = HashMap::new();
-
-        // Start with all defaults.
-        for (combo, action) in &defaults.map {
-            if let Some(name) = action_to_name(action) {
-                map.insert(combo.clone(), action.clone());
-                reverse.insert(name.to_string(), combo.to_string());
-            }
-        }
+        // Start with a full copy of the defaults (preserves multi-key actions).
+        let mut map = defaults.map.clone();
+        let mut reverse = defaults.reverse.clone();
 
         // Override with user bindings.
         for (action_name, key_str) in table {
@@ -513,6 +510,124 @@ impl KeyBindings {
     pub fn entry_count(&self) -> usize {
         self.reverse.len()
     }
+
+    // ── Preset support ──────────────────────────────────────────────────────
+
+    /// Path to the preset file for the given preset.
+    pub fn preset_path(preset: &KeymapPreset) -> Option<PathBuf> {
+        let filename = match preset {
+            KeymapPreset::Default => "keybindings-default.toml",
+            KeymapPreset::IntellijIdea => "keybindings-intellij.toml",
+            KeymapPreset::VsCode => "keybindings-vscode.toml",
+        };
+        dirs::home_dir().map(|h| h.join(".config").join("txt").join(filename))
+    }
+
+    /// Write all preset files if they don't already exist.
+    fn ensure_preset_files() {
+        for preset in KeymapPreset::ALL {
+            if let Some(path) = Self::preset_path(preset)
+                && !path.exists()
+            {
+                let bindings = Self::for_preset(preset);
+                bindings.save_to(&path);
+            }
+        }
+    }
+
+    /// Get the keybindings for a given preset.
+    pub fn for_preset(preset: &KeymapPreset) -> Self {
+        match preset {
+            KeymapPreset::Default => Self::defaults(),
+            KeymapPreset::IntellijIdea => Self::intellij_defaults(),
+            KeymapPreset::VsCode => Self::vscode_defaults(),
+        }
+    }
+
+    /// Copy the selected preset file to `keybindings.toml`.
+    pub fn apply_preset(preset: &KeymapPreset) {
+        let Some(main_path) = Self::keybindings_path() else {
+            return;
+        };
+        let Some(preset_path) = Self::preset_path(preset) else {
+            return;
+        };
+        // If the preset file doesn't exist, generate it first.
+        if !preset_path.exists() {
+            let bindings = Self::for_preset(preset);
+            bindings.save_to(&preset_path);
+        }
+        let _ = std::fs::copy(&preset_path, &main_path);
+    }
+
+    /// Build IntelliJ IDEA macOS-style keybindings (Cmd→Ctrl, Opt→Alt for terminal).
+    fn intellij_defaults() -> Self {
+        let mut kb = Self::defaults();
+
+        // IntelliJ uses Opt+Arrow for word navigation (not Ctrl+Arrow).
+        kb.rebind("move_cursor_word_left", "alt+left");
+        kb.rebind("move_cursor_word_right", "alt+right");
+        kb.rebind("extend_selection_word_left", "alt+shift+left");
+        kb.rebind("extend_selection_word_right", "alt+shift+right");
+
+        // IntelliJ uses Opt+Backspace/Delete for word deletion.
+        kb.rebind("delete_word_backward", "alt+backspace");
+        kb.rebind("delete_word_forward", "alt+delete");
+
+        // Find & Replace: Cmd+R → ctrl+r (instead of ctrl+h).
+        kb.rebind("open_replace", "ctrl+r");
+
+        // Find Action: Cmd+Shift+A → ctrl+shift+a (instead of ctrl+shift+p).
+        kb.rebind("open_command_palette", "ctrl+shift+a");
+
+        // Show Intention Actions / Quick Fix: Alt+Enter (instead of ctrl+.).
+        kb.rebind("code_action", "alt+enter");
+
+        // Quick Documentation: Ctrl+J (ctrl+q conflicts with quit).
+        kb.rebind("show_hover", "ctrl+j");
+
+        // Quit: Ctrl+Shift+Q (ctrl+q is taken by show_hover in IntelliJ style).
+        // Actually let's keep ctrl+q for quit since we moved hover to ctrl+j.
+
+        kb
+    }
+
+    /// Build VS Code macOS-style keybindings (Cmd→Ctrl for terminal).
+    fn vscode_defaults() -> Self {
+        let mut kb = Self::defaults();
+
+        // VS Code uses Cmd+Opt+F → ctrl+alt+f for Find & Replace.
+        kb.rebind("open_replace", "ctrl+alt+f");
+
+        // VS Code uses Ctrl+Shift+D for duplicate line (Opt+Shift+Down copies line
+        // down but conflicts with spawn_cursor_down).
+        kb.rebind("duplicate_line", "ctrl+shift+d");
+
+        kb
+    }
+
+    /// Rebind an action to a new key combo, removing the old binding.
+    fn rebind(&mut self, action_name: &str, new_key: &str) {
+        let action = match action_from_name(action_name) {
+            Some(a) => a,
+            None => return,
+        };
+        let new_combo = match KeyCombo::from_str(new_key) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        // Remove old combo for this action.
+        if let Some(old_display) = self.reverse.get(action_name)
+            && let Ok(old_combo) = KeyCombo::from_str(old_display)
+        {
+            self.map.remove(&old_combo);
+        }
+
+        self.reverse
+            .insert(action_name.to_string(), new_combo.to_string());
+        self.map.insert(new_combo, action);
+    }
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -676,5 +791,66 @@ mod tests {
             let roundtripped = action_from_name(name).unwrap();
             assert_eq!(*action, roundtripped, "roundtrip failed for {name}");
         }
+    }
+
+    #[test]
+    fn intellij_defaults_word_nav_uses_alt() {
+        let kb = KeyBindings::intellij_defaults();
+        let alt_left: KeyCombo = "alt+left".parse().unwrap();
+        assert_eq!(
+            kb.lookup(&alt_left),
+            Some(&EditorAction::MoveCursorWord(
+                super::super::action::Direction::Left
+            ))
+        );
+        // ctrl+left should NOT be bound to word nav in IntelliJ preset
+        let ctrl_left: KeyCombo = "ctrl+left".parse().unwrap();
+        assert_ne!(
+            kb.lookup(&ctrl_left),
+            Some(&EditorAction::MoveCursorWord(
+                super::super::action::Direction::Left
+            ))
+        );
+    }
+
+    #[test]
+    fn intellij_defaults_replace_is_ctrl_r() {
+        let kb = KeyBindings::intellij_defaults();
+        let combo: KeyCombo = "ctrl+r".parse().unwrap();
+        assert_eq!(kb.lookup(&combo), Some(&EditorAction::OpenReplace));
+    }
+
+    #[test]
+    fn vscode_defaults_replace_is_ctrl_alt_f() {
+        let kb = KeyBindings::vscode_defaults();
+        let combo: KeyCombo = "ctrl+alt+f".parse().unwrap();
+        assert_eq!(kb.lookup(&combo), Some(&EditorAction::OpenReplace));
+    }
+
+    #[test]
+    fn vscode_defaults_duplicate_is_ctrl_shift_d() {
+        let kb = KeyBindings::vscode_defaults();
+        let combo: KeyCombo = "ctrl+shift+d".parse().unwrap();
+        assert_eq!(kb.lookup(&combo), Some(&EditorAction::DuplicateLine));
+    }
+
+    #[test]
+    fn preset_path_returns_distinct_files() {
+        let p1 = KeyBindings::preset_path(&KeymapPreset::Default);
+        let p2 = KeyBindings::preset_path(&KeymapPreset::IntellijIdea);
+        let p3 = KeyBindings::preset_path(&KeymapPreset::VsCode);
+        assert_ne!(p1, p2);
+        assert_ne!(p2, p3);
+        assert_ne!(p1, p3);
+    }
+
+    #[test]
+    fn for_preset_returns_correct_type() {
+        let default = KeyBindings::for_preset(&KeymapPreset::Default);
+        let intellij = KeyBindings::for_preset(&KeymapPreset::IntellijIdea);
+        // IntelliJ should differ from default (word nav)
+        let alt_left: KeyCombo = "alt+left".parse().unwrap();
+        assert!(intellij.lookup(&alt_left).is_some());
+        assert!(default.lookup(&alt_left).is_none());
     }
 }

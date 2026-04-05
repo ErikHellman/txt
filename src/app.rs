@@ -8,13 +8,14 @@ use ratatui::backend::CrosstermBackend;
 
 use crate::{
     clipboard::ClipboardManager,
-    config::{Config, Theme, add_to_recent_files, load_recent_files},
+    config::{Config, KeymapPreset, Theme, add_to_recent_files, load_recent_files},
     editor::Editor,
     editor::viewport::screen_pos_to_byte_offset,
     git::GitGutter,
     input::{
         InputHandler,
         action::{Direction, EditorAction, ScrollDir},
+        keybinding::KeyBindings,
     },
     search::SearchState,
     ui,
@@ -1779,7 +1780,7 @@ impl AppState {
     /// Handle input while the settings overlay is open.
     /// Returns `true` if the action was consumed, `false` to let it fall through.
     fn handle_settings(&mut self, action: &EditorAction) -> bool {
-        const NUM_ROWS: usize = 4;
+        const NUM_ROWS: usize = 5;
         match action {
             EditorAction::MoveCursor(Direction::Up) => {
                 self.settings_cursor = self.settings_cursor.saturating_sub(1);
@@ -1833,6 +1834,21 @@ impl AppState {
                     (idx + all.len() - 1) % all.len()
                 };
                 self.config.theme = all[next].clone();
+            }
+            4 => {
+                let all = KeymapPreset::ALL;
+                let idx = all
+                    .iter()
+                    .position(|p| p == &self.config.keymap_preset)
+                    .unwrap_or(0);
+                let next = if forward {
+                    (idx + 1) % all.len()
+                } else {
+                    (idx + all.len() - 1) % all.len()
+                };
+                self.config.keymap_preset = all[next].clone();
+                KeyBindings::apply_preset(&self.config.keymap_preset);
+                self.input.reload_keybindings();
             }
             _ => {}
         }
