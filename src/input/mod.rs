@@ -116,7 +116,7 @@ impl InputHandler {
             'o' | 'O' => EditorAction::OpenFile,
             't' | 'T' => EditorAction::NewTab,
             'g' | 'G' => EditorAction::JumpToLine,
-            'b' | 'B' => EditorAction::ToggleSidebar,
+            'b' | 'B' => EditorAction::FocusSidebar,
             'p' | 'P' => EditorAction::OpenFuzzyPicker,
             'f' | 'F' => EditorAction::OpenSearch,
             'h' | 'H' => EditorAction::OpenReplace,
@@ -151,6 +151,7 @@ impl InputHandler {
             'p' => EditorAction::OpenCommandPalette,
             'e' => EditorAction::OpenBufferSwitcher,
             'c' => EditorAction::CopyFileReference,
+            'b' => EditorAction::ToggleSidebar,
             _ => EditorAction::Unhandled,
         }
     }
