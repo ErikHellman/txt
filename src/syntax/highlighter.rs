@@ -220,6 +220,12 @@ fn atomic_kind(node_kind: &str, lang: Lang) -> Option<HighlightKind> {
             "string" => Some(HighlightKind::String),
             _ => None,
         },
+        Lang::Kotlin => match node_kind {
+            "string_literal" => Some(HighlightKind::String),
+            "line_comment" | "block_comment" => Some(HighlightKind::Comment),
+            "annotation" => Some(HighlightKind::Attribute),
+            _ => None,
+        },
         Lang::Unknown => None,
     }
 }
@@ -231,6 +237,7 @@ fn leaf_kind(node_kind: &str, parent_kind: &str, lang: Lang) -> Option<Highlight
         Lang::Python => python_leaf(node_kind, parent_kind),
         Lang::JavaScript => js_leaf(node_kind, parent_kind),
         Lang::Json => json_leaf(node_kind),
+        Lang::Kotlin => kotlin_leaf(node_kind, parent_kind),
         Lang::Unknown => None,
     }
 }
@@ -307,6 +314,32 @@ fn json_leaf(kind: &str) -> Option<HighlightKind> {
     }
 }
 
+fn kotlin_leaf(kind: &str, parent: &str) -> Option<HighlightKind> {
+    match kind {
+        // Keywords
+        "fun" | "val" | "var" | "class" | "interface" | "object" | "when" | "if" | "else"
+        | "for" | "while" | "do" | "return" | "import" | "package" | "in" | "is" | "as"
+        | "throw" | "try" | "catch" | "finally" | "break" | "continue" | "data" | "enum"
+        | "sealed" | "open" | "abstract" | "override" | "suspend" | "companion" | "const"
+        | "typealias" | "private" | "protected" | "public" | "internal" | "inline"
+        | "crossinline" | "noinline" | "reified" | "out" | "vararg" | "lateinit" | "by"
+        | "where" | "this" | "super" | "null" | "true" | "false" => Some(HighlightKind::Keyword),
+
+        // Numbers
+        "number_literal" | "float_literal" => Some(HighlightKind::Number),
+
+        // Function calls
+        "identifier" if parent == "call_expression" => Some(HighlightKind::Function),
+
+        // Punctuation
+        "{" | "}" | "(" | ")" | "[" | "]" | ":" | "." | "," | ";" | "->" => {
+            Some(HighlightKind::Punctuation)
+        }
+
+        _ => None,
+    }
+}
+
 /// True if a node of kind `ctx` is a context where the `name` child is a function name.
 fn is_function_context(ctx: &str, lang: Lang) -> bool {
     match lang {
@@ -319,6 +352,7 @@ fn is_function_context(ctx: &str, lang: Lang) -> bool {
             ctx,
             "function_declaration" | "method_definition" | "function"
         ),
+        Lang::Kotlin => matches!(ctx, "function_declaration"),
         _ => false,
     }
 }
@@ -621,6 +655,121 @@ mod tests {
         let tree = parse_rust(src);
         let spans = highlight(&tree, src.as_bytes(), Lang::Unknown, 0, src.len());
         assert!(spans.is_empty(), "expected empty spans for Unknown lang");
+    }
+
+    // ── Kotlin ────────────────────────────────────────────────────────
+
+    fn parse_kotlin(source: &str) -> Tree {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_kotlin_ng::LANGUAGE.into())
+            .unwrap();
+        parser.parse(source, None).unwrap()
+    }
+
+    #[test]
+    fn kotlin_fun_keyword() {
+        let src = "fun main() {}";
+        let tree = parse_kotlin(src);
+        let spans = spans_for(src, &tree, Lang::Kotlin);
+        assert!(
+            has_span_of_kind(&spans, 0, 3, HighlightKind::Keyword),
+            "expected 'fun' as Keyword at 0..3, got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn kotlin_val_var_keywords() {
+        let src = "val x = 1\nvar y = 2";
+        let tree = parse_kotlin(src);
+        let spans = spans_for(src, &tree, Lang::Kotlin);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "val"),
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "var"),
+        );
+    }
+
+    #[test]
+    fn kotlin_string_literal() {
+        let src = r#"val x = "hello""#;
+        let tree = parse_kotlin(src);
+        let spans = spans_for(src, &tree, Lang::Kotlin);
+        assert!(
+            spans.iter().any(|s| s.kind == HighlightKind::String),
+            "expected String span, got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn kotlin_line_comment() {
+        let src = "// a comment\nfun foo() {}";
+        let tree = parse_kotlin(src);
+        let spans = spans_for(src, &tree, Lang::Kotlin);
+        assert!(
+            has_span_of_kind(&spans, 0, 12, HighlightKind::Comment),
+            "expected Comment span at 0..12, got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn kotlin_block_comment() {
+        let src = "/* block */\nfun foo() {}";
+        let tree = parse_kotlin(src);
+        let spans = spans_for(src, &tree, Lang::Kotlin);
+        assert!(
+            has_span_of_kind(&spans, 0, 11, HighlightKind::Comment),
+            "expected Comment span at 0..11, got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn kotlin_number_literal() {
+        let src = "val x = 42";
+        let tree = parse_kotlin(src);
+        let spans = spans_for(src, &tree, Lang::Kotlin);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Number && &src[s.start..s.end] == "42"),
+            "expected Number span for 42, got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn kotlin_function_name() {
+        let src = "fun greet(name: String) {}";
+        let tree = parse_kotlin(src);
+        let spans = spans_for(src, &tree, Lang::Kotlin);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Function && &src[s.start..s.end] == "greet"),
+            "expected Function span for 'greet', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn kotlin_annotation() {
+        let src = "@Deprecated(\"old\")\nfun foo() {}";
+        let tree = parse_kotlin(src);
+        let spans = spans_for(src, &tree, Lang::Kotlin);
+        assert!(
+            spans.iter().any(|s| s.kind == HighlightKind::Attribute),
+            "expected Attribute span for annotation, got: {:?}",
+            spans
+        );
     }
 
     #[test]
