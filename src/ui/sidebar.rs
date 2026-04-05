@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::app::{SidebarClipboard, SidebarState};
+use crate::theme::ThemeColors;
 
 /// Render the file tree sidebar.
 /// `focused` controls whether the header is highlighted to indicate keyboard focus.
@@ -15,6 +16,7 @@ pub fn render(
     sidebar: &SidebarState,
     clipboard: Option<&SidebarClipboard>,
     focused: bool,
+    theme: &ThemeColors,
     area: Rect,
     buf: &mut TermBuffer,
 ) {
@@ -29,19 +31,15 @@ pub fn render(
             .add_modifier(Modifier::BOLD)
     } else {
         Style::default()
-            .bg(Color::Rgb(30, 30, 50))
+            .bg(theme.sidebar_bg)
             .fg(Color::Rgb(180, 180, 200))
             .add_modifier(Modifier::BOLD)
     };
-    let selected_style = Style::default()
-        .bg(Color::Rgb(60, 60, 100))
-        .fg(Color::White);
+    let selected_style = Style::default().bg(theme.sidebar_sel_bg).fg(Color::White);
     let dir_style = Style::default()
-        .bg(Color::Rgb(20, 20, 35))
-        .fg(Color::Rgb(130, 170, 230));
-    let file_style = Style::default()
-        .bg(Color::Rgb(20, 20, 35))
-        .fg(Color::Rgb(200, 200, 200));
+        .bg(theme.sidebar_bg)
+        .fg(theme.sidebar_dir_fg);
+    let file_style = Style::default().bg(theme.sidebar_bg).fg(theme.sidebar_fg);
 
     let visible_rows = area.height as usize;
 

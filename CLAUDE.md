@@ -81,4 +81,4 @@ Add to `src/input/mod.rs` (`handle_key`, `handle_ctrl_char`, or `handle_ctrl_shi
 
 **Config & data files** (runtime, not source):
 - Config: `~/.config/txt/config.toml`
-- Recent files: `~/.config/txt/recent.json`
+- Recent files: `<workspace>/.txt/recents.json`

@@ -5,6 +5,7 @@ use ratatui::{
 };
 
 use crate::app::AppState;
+use crate::config::Config;
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 
@@ -38,6 +39,7 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
         .fg(Color::Rgb(255, 200, 80))
         .add_modifier(Modifier::BOLD);
     let hint_style = Style::default().bg(bg).fg(Color::Rgb(100, 110, 150));
+    let path_style = Style::default().bg(bg).fg(Color::Rgb(110, 115, 145));
 
     // ── Dimensions ────────────────────────────────────────────────────────────
     let ow = OVERLAY_W.min(area.width);
@@ -60,6 +62,28 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
     let header = " Settings ";
     let hx = overlay.x + overlay.width.saturating_sub(header.len() as u16) / 2;
     buf.set_string(hx, overlay.y, header, header_style);
+
+    // ── Path subtitle (row 1, y+1) ────────────────────────────────────────────
+    let inner_w_u16 = overlay.width.saturating_sub(4);
+    let path_str = Config::config_path()
+        .map(|p| {
+            // Shorten home directory to ~
+            if let Some(home) = dirs::home_dir()
+                && let Ok(rel) = p.strip_prefix(&home)
+            {
+                return format!("~/{}", rel.display());
+            }
+            p.display().to_string()
+        })
+        .unwrap_or_else(|| "(unavailable)".to_string());
+    let truncated_path: String = path_str.chars().take(inner_w_u16 as usize).collect();
+    let px = overlay.x
+        + overlay
+            .width
+            .saturating_sub(truncated_path.len() as u16 + 4)
+            / 2
+        + 2;
+    buf.set_string(px, overlay.y + 1, &truncated_path, path_style);
 
     // Separator after header (row 2, y+2)
     draw_h_separator(buf, overlay, overlay.y + 2, border_style);

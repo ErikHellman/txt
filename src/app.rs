@@ -638,6 +638,8 @@ pub struct AppState {
     pub should_quit: bool,
     pub confirm_quit: bool,
     pub confirm_delete: Option<ConfirmDelete>,
+    /// Debounce timer for auto-save: reset on every edit, fires after 1 s of inactivity.
+    auto_save_timer: Option<std::time::Instant>,
     /// Active file watcher for the current buffer (replaced on each file open/save).
     file_watcher: Option<FileWatcher>,
     /// Per-workspace LSP configuration (loaded from `<workspace>/.txt/lsp.toml`).
@@ -692,6 +694,7 @@ impl AppState {
             should_quit: false,
             confirm_quit: false,
             confirm_delete: None,
+            auto_save_timer: None,
             file_watcher: None,
             lsp_config,
             lsp,
@@ -719,6 +722,9 @@ impl AppState {
 
         // Clear transient status error on any user interaction.
         self.status_error = None;
+
+        // Capture undo depth before dispatch so we can detect actual buffer edits below.
+        let pre_undo_depth = self.editor.active().buffer.undo_depth();
 
         // Quit confirmation mode
         if self.confirm_quit {
@@ -1286,7 +1292,7 @@ impl AppState {
 
             // ── App lifecycle ─────────────────────────────────────────
             EditorAction::Quit => {
-                if self.editor.active().buffer.modified {
+                if self.editor.active().buffer.modified && self.config.confirm_exit {
                     self.confirm_quit = true;
                 } else {
                     self.should_quit = true;
@@ -1317,6 +1323,17 @@ impl AppState {
             // Re-filter completion popup if open.
             if self.completion.is_some() {
                 self.refilter_completion();
+            }
+        }
+
+        // Reset the auto-save debounce timer only when buffer content actually changed.
+        if self.config.auto_save {
+            let post_undo_depth = self.editor.active().buffer.undo_depth();
+            if self.editor.active().buffer.modified && pre_undo_depth != post_undo_depth {
+                self.auto_save_timer = Some(std::time::Instant::now());
+            } else if !self.editor.active().buffer.modified {
+                // Undo back to saved state — nothing left to auto-save.
+                self.auto_save_timer = None;
             }
         }
     }
@@ -2246,7 +2263,7 @@ impl AppState {
     // ── File helpers ─────────────────────────────────────────────────────────
 
     fn close_tab(&mut self) {
-        if self.editor.active().buffer.modified {
+        if self.editor.active().buffer.modified && self.config.confirm_exit {
             self.confirm_quit = true; // reuse confirm for "discard changes?"
         } else {
             // Notify LSP before closing.
@@ -2314,6 +2331,22 @@ impl AppState {
             && watcher.poll()
         {
             self.reload_active_file();
+        }
+    }
+
+    /// Save the active buffer automatically after 1 second of inactivity (debounced).
+    ///
+    /// Only saves when `config.auto_save` is enabled and the buffer has a path.
+    pub fn poll_auto_save(&mut self) {
+        if !self.config.auto_save {
+            return;
+        }
+        if let Some(t) = self.auto_save_timer
+            && t.elapsed() >= std::time::Duration::from_secs(1)
+            && self.editor.active().path.is_some()
+        {
+            self.save_active();
+            self.auto_save_timer = None;
         }
     }
 
@@ -3225,6 +3258,7 @@ impl App {
 
             // Check for external file changes (non-blocking).
             state.poll_file_watcher();
+            state.poll_auto_save();
             state.refresh_memory();
 
             // Drain pending LSP server updates (non-blocking).

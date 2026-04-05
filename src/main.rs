@@ -9,6 +9,7 @@ mod input;
 mod lsp;
 mod search;
 mod syntax;
+mod theme;
 mod ui;
 mod watcher;
 
