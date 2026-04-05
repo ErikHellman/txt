@@ -75,7 +75,7 @@ txt file.txt
 txt .
 ```
 
-Opening a directory brings up the file sidebar automatically. Press `?` at any time to see the full list of key bindings.
+Opening a directory brings up the file sidebar automatically. Press `F1` at any time to see the full list of key bindings.
 
 ### Key bindings
 
@@ -85,13 +85,15 @@ Opening a directory brings up the file sidebar automatically. Press `?` at any t
 | `Ctrl+Q` | Quit |
 | `Ctrl+P` | Fuzzy file picker |
 | `Ctrl+Shift+P` | Command palette |
-| `Ctrl+F` | Find / replace |
+| `Ctrl+F` | Find |
+| `Ctrl+H` | Find & replace |
 | `Ctrl+W` | Expand selection to enclosing AST node |
 | `Ctrl+Shift+W` | Shrink selection |
 | `Alt+Shift+Up/Down` | Add cursor above / below |
-| `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo |
+| `Ctrl+Z` | Undo |
+| `Ctrl+Y` / `Ctrl+Shift+Z` | Redo |
 | `Ctrl+,` | Open settings |
-| `?` | Show all key bindings |
+| `F1` | Show all key bindings |
 
 ## License
 
