@@ -4,103 +4,374 @@ use ratatui::{
     style::{Color, Modifier, Style},
 };
 
-/// Every entry in the help table.
-/// An entry whose `key` is `""` is rendered as a category section header.
-const ENTRIES: &[(&str, &str)] = &[
+use crate::input::keybinding::KeyBindings;
+
+/// Help template entry.  `Section` headers separate groups of bindings.
+enum HelpEntry {
+    Section(&'static str),
+    /// One or two action names mapped to a description.
+    /// When two action names are given, their keys are joined with ` / `.
+    Binding {
+        actions: &'static [&'static str],
+        desc: &'static str,
+    },
+    /// A static key label (for non-remappable or compound entries).
+    Static {
+        key: &'static str,
+        desc: &'static str,
+    },
+}
+
+/// Template defining the help overlay layout.  Key combos are looked up
+/// dynamically from `KeyBindings` at render time.
+const TEMPLATE: &[HelpEntry] = &[
     // ── Navigation ────────────────────────────────────────────────────
-    ("", "Navigation"),
-    ("Arrows", "Move cursor"),
-    ("Ctrl+Left/Right", "Word jump"),
-    ("Shift+Arrows", "Extend selection"),
-    ("Ctrl+Shift+Left/Right", "Extend by word"),
-    ("Home / End", "Line start / end"),
-    ("Ctrl+Home/End", "File start / end"),
-    ("PgUp / PgDn", "Page up / down"),
+    HelpEntry::Section("Navigation"),
+    HelpEntry::Binding {
+        actions: &[
+            "move_cursor_up",
+            "move_cursor_down",
+            "move_cursor_left",
+            "move_cursor_right",
+        ],
+        desc: "Move cursor",
+    },
+    HelpEntry::Binding {
+        actions: &["move_cursor_word_left", "move_cursor_word_right"],
+        desc: "Word jump",
+    },
+    HelpEntry::Binding {
+        actions: &[
+            "extend_selection_up",
+            "extend_selection_down",
+            "extend_selection_left",
+            "extend_selection_right",
+        ],
+        desc: "Extend selection",
+    },
+    HelpEntry::Binding {
+        actions: &["extend_selection_word_left", "extend_selection_word_right"],
+        desc: "Extend by word",
+    },
+    HelpEntry::Binding {
+        actions: &["move_cursor_home", "move_cursor_end"],
+        desc: "Line start / end",
+    },
+    HelpEntry::Binding {
+        actions: &["move_cursor_file_start", "move_cursor_file_end"],
+        desc: "File start / end",
+    },
+    HelpEntry::Binding {
+        actions: &["move_cursor_page_up", "move_cursor_page_down"],
+        desc: "Page up / down",
+    },
     // ── Selection ────────────────────────────────────────────────────
-    ("", "Selection"),
-    ("Ctrl+A", "Select all"),
-    ("Ctrl+W", "Expand selection (AST)"),
-    ("Ctrl+Shift+W", "Contract selection (AST)"),
-    ("Ctrl+Shift+L", "Select all occurrences"),
+    HelpEntry::Section("Selection"),
+    HelpEntry::Binding {
+        actions: &["select_all"],
+        desc: "Select all",
+    },
+    HelpEntry::Binding {
+        actions: &["ast_expand_selection"],
+        desc: "Expand selection (AST)",
+    },
+    HelpEntry::Binding {
+        actions: &["ast_contract_selection"],
+        desc: "Contract selection (AST)",
+    },
+    HelpEntry::Binding {
+        actions: &["select_all_occurrences"],
+        desc: "Select all occurrences",
+    },
     // ── Multi-cursor ─────────────────────────────────────────────────
-    ("", "Multi-cursor"),
-    ("Alt+Shift+Up", "Add cursor above"),
-    ("Alt+Shift+Down", "Add cursor below"),
+    HelpEntry::Section("Multi-cursor"),
+    HelpEntry::Binding {
+        actions: &["spawn_cursor_up"],
+        desc: "Add cursor above",
+    },
+    HelpEntry::Binding {
+        actions: &["spawn_cursor_down"],
+        desc: "Add cursor below",
+    },
     // ── Editing ──────────────────────────────────────────────────────
-    ("", "Editing"),
-    ("Backspace / Delete", "Delete backward / forward"),
-    ("Ctrl+Backspace", "Delete word backward"),
-    ("Ctrl+Delete", "Delete word forward"),
-    ("Ctrl+Z / Ctrl+Y", "Undo / Redo"),
-    ("Ctrl+Shift+Z", "Redo (alternate)"),
-    ("Ctrl+D", "Duplicate line"),
-    ("Alt+Up/Down", "Move line up / down"),
-    ("Ctrl+/", "Toggle line comment"),
+    HelpEntry::Section("Editing"),
+    HelpEntry::Binding {
+        actions: &["delete_backward", "delete_forward"],
+        desc: "Delete backward / forward",
+    },
+    HelpEntry::Binding {
+        actions: &["delete_word_backward"],
+        desc: "Delete word backward",
+    },
+    HelpEntry::Binding {
+        actions: &["delete_word_forward"],
+        desc: "Delete word forward",
+    },
+    HelpEntry::Binding {
+        actions: &["undo", "redo"],
+        desc: "Undo / Redo",
+    },
+    HelpEntry::Binding {
+        actions: &["duplicate_line"],
+        desc: "Duplicate line",
+    },
+    HelpEntry::Binding {
+        actions: &["move_line_up", "move_line_down"],
+        desc: "Move line up / down",
+    },
+    HelpEntry::Binding {
+        actions: &["toggle_line_comment"],
+        desc: "Toggle line comment",
+    },
     // ── Clipboard ────────────────────────────────────────────────────
-    ("", "Clipboard"),
-    ("Ctrl+C", "Copy"),
-    ("Ctrl+X", "Cut"),
-    ("Ctrl+V", "Paste"),
-    ("Ctrl+Shift+C", "Copy file reference"),
+    HelpEntry::Section("Clipboard"),
+    HelpEntry::Binding {
+        actions: &["copy"],
+        desc: "Copy",
+    },
+    HelpEntry::Binding {
+        actions: &["cut"],
+        desc: "Cut",
+    },
+    HelpEntry::Binding {
+        actions: &["paste"],
+        desc: "Paste",
+    },
+    HelpEntry::Binding {
+        actions: &["copy_file_reference"],
+        desc: "Copy file reference",
+    },
     // ── File & Tabs ──────────────────────────────────────────────────
-    ("", "File & Tabs"),
-    ("Ctrl+S", "Save"),
-    ("Ctrl+Shift+S", "Save As"),
-    ("Ctrl+N", "New file / tab"),
-    ("Ctrl+O", "Open file"),
-    ("Ctrl+G", "Jump to line[:col]"),
-    ("Ctrl+T", "New tab"),
-    ("Ctrl+] / Ctrl+PgDn", "Next tab"),
-    ("Ctrl+[ / Ctrl+PgUp", "Prev tab"),
-    ("Ctrl+1..9", "Go to tab N"),
+    HelpEntry::Section("File & Tabs"),
+    HelpEntry::Binding {
+        actions: &["save_file"],
+        desc: "Save",
+    },
+    HelpEntry::Binding {
+        actions: &["save_file_as"],
+        desc: "Save As",
+    },
+    HelpEntry::Binding {
+        actions: &["new_file"],
+        desc: "New file / tab",
+    },
+    HelpEntry::Binding {
+        actions: &["open_file"],
+        desc: "Open file",
+    },
+    HelpEntry::Binding {
+        actions: &["jump_to_line"],
+        desc: "Jump to line[:col]",
+    },
+    HelpEntry::Binding {
+        actions: &["new_tab"],
+        desc: "New tab",
+    },
+    HelpEntry::Binding {
+        actions: &["next_tab", "prev_tab"],
+        desc: "Next / Prev tab",
+    },
+    HelpEntry::Static {
+        key: "Ctrl+1..9",
+        desc: "Go to tab N",
+    },
     // ── Panels & Pickers ─────────────────────────────────────────────
-    ("", "Panels & Pickers"),
-    ("Ctrl+B", "Focus / open sidebar"),
-    ("Ctrl+Shift+B", "Toggle sidebar (show/hide)"),
-    ("Ctrl+P", "Fuzzy file picker"),
-    ("Ctrl+R", "Recent files"),
-    ("Ctrl+Shift+P", "Command palette"),
-    ("Ctrl+Shift+E", "Buffer switcher"),
+    HelpEntry::Section("Panels & Pickers"),
+    HelpEntry::Binding {
+        actions: &["focus_sidebar"],
+        desc: "Focus / open sidebar",
+    },
+    HelpEntry::Binding {
+        actions: &["toggle_sidebar"],
+        desc: "Toggle sidebar (show/hide)",
+    },
+    HelpEntry::Binding {
+        actions: &["open_fuzzy_picker"],
+        desc: "Fuzzy file picker",
+    },
+    HelpEntry::Binding {
+        actions: &["open_recent_files"],
+        desc: "Recent files",
+    },
+    HelpEntry::Binding {
+        actions: &["open_command_palette"],
+        desc: "Command palette",
+    },
+    HelpEntry::Binding {
+        actions: &["open_buffer_switcher"],
+        desc: "Buffer switcher",
+    },
     // ── Search ───────────────────────────────────────────────────────
-    ("", "Search"),
-    ("Ctrl+F", "Find"),
-    ("Ctrl+H", "Find & Replace"),
-    ("F3 / Shift+F3", "Next / Prev match"),
-    ("Alt+R", "Toggle regex"),
-    ("Alt+C", "Toggle case-sensitive"),
+    HelpEntry::Section("Search"),
+    HelpEntry::Binding {
+        actions: &["open_search"],
+        desc: "Find",
+    },
+    HelpEntry::Binding {
+        actions: &["open_replace"],
+        desc: "Find & Replace",
+    },
+    HelpEntry::Binding {
+        actions: &["search_next", "search_prev"],
+        desc: "Next / Prev match",
+    },
+    HelpEntry::Binding {
+        actions: &["search_toggle_regex"],
+        desc: "Toggle regex",
+    },
+    HelpEntry::Binding {
+        actions: &["search_toggle_case_sensitive"],
+        desc: "Toggle case-sensitive",
+    },
     // ── LSP ──────────────────────────────────────────────────────────
-    ("", "LSP (when active)"),
-    ("Ctrl+Space", "Code completion"),
-    ("Ctrl+K", "Hover info"),
-    ("F12", "Go to definition"),
-    ("Shift+F12", "Find references"),
-    ("F2", "Rename symbol"),
-    ("Ctrl+.", "Code action / quick fix"),
+    HelpEntry::Section("LSP (when active)"),
+    HelpEntry::Binding {
+        actions: &["trigger_completion"],
+        desc: "Code completion",
+    },
+    HelpEntry::Binding {
+        actions: &["show_hover"],
+        desc: "Hover info",
+    },
+    HelpEntry::Binding {
+        actions: &["go_to_definition"],
+        desc: "Go to definition",
+    },
+    HelpEntry::Binding {
+        actions: &["find_references"],
+        desc: "Find references",
+    },
+    HelpEntry::Binding {
+        actions: &["rename_symbol"],
+        desc: "Rename symbol",
+    },
+    HelpEntry::Binding {
+        actions: &["code_action"],
+        desc: "Code action / quick fix",
+    },
     // ── Sidebar ──────────────────────────────────────────────────────
-    ("", "Sidebar"),
-    ("Ctrl+C", "Copy file only (sidebar)"),
-    ("Ctrl+X", "Cut file/dir (sidebar)"),
-    ("Ctrl+V", "Paste (sidebar)"),
-    ("F2", "Rename file/dir (sidebar)"),
-    ("Delete", "Delete file/dir (sidebar)"),
-    ("Ctrl+Shift+N", "New folder (sidebar)"),
+    HelpEntry::Section("Sidebar"),
+    HelpEntry::Static {
+        key: "Ctrl+C",
+        desc: "Copy file only (sidebar)",
+    },
+    HelpEntry::Static {
+        key: "Ctrl+X",
+        desc: "Cut file/dir (sidebar)",
+    },
+    HelpEntry::Static {
+        key: "Ctrl+V",
+        desc: "Paste (sidebar)",
+    },
+    HelpEntry::Static {
+        key: "F2",
+        desc: "Rename file/dir (sidebar)",
+    },
+    HelpEntry::Static {
+        key: "Delete",
+        desc: "Delete file/dir (sidebar)",
+    },
+    HelpEntry::Binding {
+        actions: &["sidebar_new_folder"],
+        desc: "New folder (sidebar)",
+    },
     // ── View & App ───────────────────────────────────────────────────
-    ("", "View & App"),
-    ("Alt+Z", "Toggle word wrap"),
-    ("F1", "Toggle this help  (↑↓ to scroll)"),
-    ("Ctrl+,", "Settings"),
-    ("Ctrl+L", "Configure LSP server"),
-    ("Ctrl+Q", "Quit"),
+    HelpEntry::Section("View & App"),
+    HelpEntry::Binding {
+        actions: &["toggle_word_wrap"],
+        desc: "Toggle word wrap",
+    },
+    HelpEntry::Binding {
+        actions: &["toggle_help"],
+        desc: "Toggle this help  (\u{2191}\u{2193} to scroll)",
+    },
+    HelpEntry::Binding {
+        actions: &["open_settings"],
+        desc: "Settings",
+    },
+    HelpEntry::Binding {
+        actions: &["open_lsp_config"],
+        desc: "Configure LSP server",
+    },
+    HelpEntry::Binding {
+        actions: &["quit"],
+        desc: "Quit",
+    },
 ];
+
+/// Build a flat list of `(key_display, description)` entries from the template,
+/// resolving dynamic bindings via `KeyBindings`.
+fn build_entries(bindings: &KeyBindings) -> Vec<(String, &'static str)> {
+    let mut entries = Vec::new();
+
+    for entry in TEMPLATE {
+        match entry {
+            HelpEntry::Section(name) => {
+                entries.push((String::new(), *name));
+            }
+            HelpEntry::Static { key, desc } => {
+                entries.push(((*key).to_string(), *desc));
+            }
+            HelpEntry::Binding { actions, desc } => {
+                let keys: Vec<String> = actions
+                    .iter()
+                    .filter_map(|a| bindings.display_key_for_action(a))
+                    .map(format_key_display)
+                    .collect();
+
+                let key_str = if keys.is_empty() {
+                    "(unbound)".to_string()
+                } else {
+                    dedup_and_join(&keys)
+                };
+
+                entries.push((key_str, *desc));
+            }
+        }
+    }
+
+    entries
+}
+
+/// Capitalize a key combo display string for the help overlay.
+/// E.g. `"ctrl+shift+s"` → `"Ctrl+Shift+S"`.
+fn format_key_display(s: &str) -> String {
+    s.split('+')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(c) => {
+                    let upper: String = c.to_uppercase().collect();
+                    format!("{upper}{}", chars.as_str())
+                }
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
+/// Join key strings with ` / `, collapsing duplicates.
+fn dedup_and_join(keys: &[String]) -> String {
+    let mut seen = Vec::new();
+    for k in keys {
+        if !seen.contains(k) {
+            seen.push(k.clone());
+        }
+    }
+    seen.join(" / ")
+}
 
 /// Render a scrollable keybinding cheat-sheet as a centered floating overlay.
 ///
 /// `scroll` is the number of rows to skip from the top of the entry list.
 /// The render function clamps it so it can never scroll past the last entry.
-pub fn render(area: Rect, buf: &mut TermBuffer, scroll: usize) {
+pub fn render(area: Rect, buf: &mut TermBuffer, scroll: usize, bindings: &KeyBindings) {
     if area.width < 20 || area.height < 6 {
         return;
     }
+
+    let entries = build_entries(bindings);
 
     let bg = Color::Rgb(18, 22, 40);
     let border_col = Color::Rgb(80, 100, 160);
@@ -155,12 +426,12 @@ pub fn render(area: Rect, buf: &mut TermBuffer, scroll: usize) {
     // Separator line beneath header.
     let sep_y = overlay_area.y + 2;
     for x in overlay_area.x + 1..overlay_area.x + overlay_area.width.saturating_sub(1) {
-        buf.set_string(x, sep_y, "─", border_style);
+        buf.set_string(x, sep_y, "\u{2500}", border_style);
     }
 
     // ── Scroll clamping ───────────────────────────────────────────────────────
     let visible_rows = overlay_h.saturating_sub(CHROME_ROWS + 1) as usize; // +1 for sep row
-    let max_scroll = ENTRIES.len().saturating_sub(visible_rows);
+    let max_scroll = entries.len().saturating_sub(visible_rows);
     let scroll = scroll.min(max_scroll);
 
     // ── Content rows ─────────────────────────────────────────────────────────
@@ -168,25 +439,24 @@ pub fn render(area: Rect, buf: &mut TermBuffer, scroll: usize) {
     let content_start_y = overlay_area.y + 3; // below top-border + header + sep
     let content_end_y = overlay_area.y + overlay_area.height.saturating_sub(1);
 
-    for (row_idx, entry) in ENTRIES.iter().skip(scroll).enumerate() {
+    for (row_idx, (key, desc)) in entries.iter().skip(scroll).enumerate() {
         let cy = content_start_y + row_idx as u16;
         if cy >= content_end_y {
             break;
         }
 
-        let (key, desc) = *entry;
         let avail_w = overlay_w.saturating_sub(2) as usize; // subtract borders
 
         if key.is_empty() {
             // Category header: "─── Section Name ───────"
-            let label = format!(" {} ", desc);
+            let label = format!(" {desc} ");
             let dashes_left = 1usize;
             let dashes_right = avail_w.saturating_sub(dashes_left + label.len());
             let header_str = format!(
                 "{}{}{}",
-                "─".repeat(dashes_left),
+                "\u{2500}".repeat(dashes_left),
                 label,
-                "─".repeat(dashes_right),
+                "\u{2500}".repeat(dashes_right),
             );
             let display: String = header_str.chars().take(avail_w).collect();
             buf.set_string(content_x, cy, &display, section_style);
@@ -210,16 +480,16 @@ pub fn render(area: Rect, buf: &mut TermBuffer, scroll: usize) {
     if scroll > 0 {
         // "↑" near top-right of border
         let ind_x = overlay_area.x + overlay_area.width.saturating_sub(5);
-        buf.set_string(ind_x, overlay_area.y, " ↑ ", border_style);
+        buf.set_string(ind_x, overlay_area.y, " \u{2191} ", border_style);
     }
-    let entries_shown = visible_rows.min(ENTRIES.len().saturating_sub(scroll));
-    if scroll + entries_shown < ENTRIES.len() {
+    let entries_shown = visible_rows.min(entries.len().saturating_sub(scroll));
+    if scroll + entries_shown < entries.len() {
         // "↓" near bottom-right of border
         let ind_x = overlay_area.x + overlay_area.width.saturating_sub(5);
         buf.set_string(
             ind_x,
             overlay_area.y + overlay_area.height.saturating_sub(1),
-            " ↓ ",
+            " \u{2193} ",
             border_style,
         );
     }
@@ -234,18 +504,18 @@ fn draw_border(buf: &mut TermBuffer, area: Rect, style: Style) {
     let x1 = area.x + area.width - 1;
     let y1 = area.y + area.height - 1;
 
-    buf.set_string(x0, y0, "╭", style);
-    buf.set_string(x1, y0, "╮", style);
-    buf.set_string(x0, y1, "╰", style);
-    buf.set_string(x1, y1, "╯", style);
+    buf.set_string(x0, y0, "\u{256d}", style);
+    buf.set_string(x1, y0, "\u{256e}", style);
+    buf.set_string(x0, y1, "\u{2570}", style);
+    buf.set_string(x1, y1, "\u{256f}", style);
 
     for x in x0 + 1..x1 {
-        buf.set_string(x, y0, "─", style);
-        buf.set_string(x, y1, "─", style);
+        buf.set_string(x, y0, "\u{2500}", style);
+        buf.set_string(x, y1, "\u{2500}", style);
     }
     for y in y0 + 1..y1 {
-        buf.set_string(x0, y, "│", style);
-        buf.set_string(x1, y, "│", style);
+        buf.set_string(x0, y, "\u{2502}", style);
+        buf.set_string(x1, y, "\u{2502}", style);
     }
 }
 
@@ -259,10 +529,15 @@ mod tests {
         (buf, area)
     }
 
+    fn default_bindings() -> KeyBindings {
+        KeyBindings::defaults()
+    }
+
     #[test]
     fn render_does_not_panic_on_normal_area() {
         let (mut buf, area) = make_buf(120, 40);
-        render(area, &mut buf, 0);
+        let bindings = default_bindings();
+        render(area, &mut buf, 0, &bindings);
         let content: String = (0..120)
             .map(|x| {
                 buf.cell((x, 2))
@@ -279,7 +554,8 @@ mod tests {
     #[test]
     fn render_skips_tiny_area() {
         let (mut buf, area) = make_buf(10, 5);
-        render(area, &mut buf, 0);
+        let bindings = default_bindings();
+        render(area, &mut buf, 0, &bindings);
         let all_spaces = buf.content().iter().all(|c| c.symbol() == " ");
         assert!(all_spaces, "tiny area should produce no output");
     }
@@ -287,25 +563,37 @@ mod tests {
     #[test]
     fn render_large_area_has_border_chars() {
         let (mut buf, area) = make_buf(100, 40);
-        render(area, &mut buf, 0);
+        let bindings = default_bindings();
+        render(area, &mut buf, 0, &bindings);
         let has_border = buf
             .content()
             .iter()
-            .any(|c| c.symbol() == "╭" || c.symbol() == "─");
+            .any(|c| c.symbol() == "\u{256d}" || c.symbol() == "\u{2500}");
         assert!(has_border, "border characters should be present");
     }
 
     #[test]
     fn render_with_scroll_does_not_panic() {
         let (mut buf, area) = make_buf(100, 40);
-        render(area, &mut buf, 5);
-        render(area, &mut buf, 9999); // clamped, should not panic
+        let bindings = default_bindings();
+        render(area, &mut buf, 5, &bindings);
+        render(area, &mut buf, 9999, &bindings); // clamped, should not panic
     }
 
     #[test]
-    fn all_entries_have_nonempty_desc() {
-        for (key, desc) in ENTRIES {
-            assert!(!desc.is_empty(), "entry key={key:?} has empty description");
-        }
+    fn format_key_display_capitalises() {
+        assert_eq!(format_key_display("ctrl+shift+s"), "Ctrl+Shift+S");
+        assert_eq!(format_key_display("f1"), "F1");
+        assert_eq!(format_key_display("alt+z"), "Alt+Z");
+    }
+
+    #[test]
+    fn build_entries_produces_output() {
+        let bindings = default_bindings();
+        let entries = build_entries(&bindings);
+        assert!(!entries.is_empty());
+        // First entry should be a section header
+        assert!(entries[0].0.is_empty());
+        assert_eq!(entries[0].1, "Navigation");
     }
 }

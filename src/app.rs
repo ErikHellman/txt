@@ -634,6 +634,7 @@ pub struct AppState {
     pub references_list: Option<ReferencesListState>,
     pub git_gutter: Option<GitGutter>,
     pub config: Config,
+    pub input: InputHandler,
     pub workspace: PathBuf,
     pub should_quit: bool,
     pub confirm_quit: bool,
@@ -690,6 +691,7 @@ impl AppState {
             references_list: None,
             git_gutter: None,
             config,
+            input: InputHandler::new(),
             workspace,
             should_quit: false,
             confirm_quit: false,
@@ -1262,6 +1264,7 @@ impl AppState {
             }
             EditorAction::ReloadConfig => {
                 self.config = Config::load();
+                self.input.reload_keybindings();
                 for tab in &mut self.editor.tabs {
                     tab.viewport.word_wrap = self.config.word_wrap;
                 }
@@ -3208,15 +3211,11 @@ impl AppState {
 
 // ── App (top-level runner) ────────────────────────────────────────────────────
 
-pub struct App {
-    input: InputHandler,
-}
+pub struct App;
 
 impl App {
     pub fn new() -> Self {
-        Self {
-            input: InputHandler::new(),
-        }
+        Self
     }
 
     pub fn run(
@@ -3274,8 +3273,8 @@ impl App {
             }
 
             let action = match event::read()? {
-                Event::Key(k) if k.kind == KeyEventKind::Press => self.input.handle_key(k),
-                Event::Mouse(m) => self.input.handle_mouse(m),
+                Event::Key(k) if k.kind == KeyEventKind::Press => state.input.handle_key(k),
+                Event::Mouse(m) => state.input.handle_mouse(m),
                 Event::Resize(_, _) => EditorAction::Unhandled,
                 _ => EditorAction::Unhandled,
             };
