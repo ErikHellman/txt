@@ -12,6 +12,8 @@ title: txt — fast terminal text editor
   </div>
 </div>
 
+<video src="{{ site.baseurl }}/txt-editor-demo.mp4" autoplay loop muted playsinline style="width:100%;border-radius:8px;border:1px solid var(--border);margin-bottom:3rem;display:block;"></video>
+
 ## Why txt
 
 Most terminal editors demand a ceremony before you can edit: configuring plugins, learning a modal system, or fighting with a setup that takes hours to get right. GUI editors are the opposite problem — they are powerful, but reaching for the mouse to edit a config file or fix a typo breaks your flow.
