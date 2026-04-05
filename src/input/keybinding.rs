@@ -278,6 +278,15 @@ impl KeyBindings {
                 map.remove(&old_combo);
             }
 
+            // If this combo is currently bound to a different action, clear that
+            // action's reverse entry before overwriting the forward mapping.
+            if let Some(existing_action) = map.get(&combo)
+                && existing_action != &action
+                && let Some(existing_action_name) = action_to_name(existing_action)
+            {
+                reverse.remove(existing_action_name);
+            }
+
             reverse.insert(action_name.clone(), combo.to_string());
             map.insert(combo, action);
         }
@@ -418,6 +427,9 @@ impl KeyBindings {
             "pagedown",
             EditorAction::MoveCursorPage(super::action::Direction::Down),
         );
+
+        // ── Close tab ──────────────────────────────────────────────
+        bind("ctrl+f4", EditorAction::CloseTab);
 
         // ── Ctrl+letter shortcuts ──────────────────────────────────
         bind("ctrl+q", EditorAction::Quit);
@@ -684,6 +696,15 @@ impl KeyBindings {
             && let Ok(old_combo) = KeyCombo::from_str(old_display)
         {
             self.map.remove(&old_combo);
+        }
+
+        // If the new combo is currently bound to a different action, clear that
+        // action's reverse entry before overwriting the forward mapping.
+        if let Some(existing_action) = self.map.get(&new_combo)
+            && existing_action != &action
+            && let Some(existing_action_name) = action_to_name(existing_action)
+        {
+            self.reverse.remove(existing_action_name);
         }
 
         self.reverse

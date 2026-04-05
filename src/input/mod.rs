@@ -22,6 +22,12 @@ impl InputHandler {
         }
     }
 
+    /// Build an `InputHandler` with explicit keybindings (for testing).
+    #[cfg(test)]
+    pub fn with_bindings(bindings: KeyBindings) -> Self {
+        Self { bindings }
+    }
+
     /// Reload keybindings from disk (called on `ReloadConfig`).
     pub fn reload_keybindings(&mut self) {
         self.bindings = KeyBindings::load();
@@ -133,7 +139,7 @@ mod tests {
     }
 
     fn handler() -> InputHandler {
-        InputHandler::new()
+        InputHandler::with_bindings(KeyBindings::defaults())
     }
 
     #[test]
