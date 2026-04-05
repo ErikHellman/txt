@@ -42,7 +42,7 @@ fn main() -> Result<()> {
         println!("KEYS (press F1 inside the editor for the full list):");
         println!("  Ctrl+S      Save          Ctrl+O      Open file");
         println!("  Ctrl+Q      Quit          Ctrl+,      Settings");
-        println!("  Ctrl+P      File picker   Ctrl+B      Toggle sidebar");
+        println!("  Ctrl+P      File picker   Ctrl+B      Focus sidebar");
         println!("  Ctrl+F      Find          F1          Help");
         return Ok(());
     }

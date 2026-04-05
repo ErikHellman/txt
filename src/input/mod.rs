@@ -447,6 +447,18 @@ mod tests {
     }
 
     #[test]
+    fn sidebar_shortcuts() {
+        assert_eq!(
+            IH.handle_key(ctrl(KeyCode::Char('b'))),
+            EditorAction::FocusSidebar
+        );
+        assert_eq!(
+            IH.handle_key(ctrl_shift(KeyCode::Char('B'))),
+            EditorAction::ToggleSidebar
+        );
+    }
+
+    #[test]
     fn save_file_shortcuts() {
         assert_eq!(
             IH.handle_key(ctrl(KeyCode::Char('s'))),

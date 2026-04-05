@@ -66,8 +66,13 @@ pub static COMMANDS: &[CommandEntry] = &[
         action: || EditorAction::OpenBufferSwitcher,
     },
     CommandEntry {
-        name: "Toggle Sidebar",
+        name: "Focus Sidebar",
         key_hint: "Ctrl+B",
+        action: || EditorAction::FocusSidebar,
+    },
+    CommandEntry {
+        name: "Toggle Sidebar",
+        key_hint: "Ctrl+Shift+B",
         action: || EditorAction::ToggleSidebar,
     },
     CommandEntry {
