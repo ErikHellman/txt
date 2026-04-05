@@ -175,10 +175,11 @@ fn visit(
             if matches!(child.kind(), "identifier" | "simple_identifier")
                 && is_function_context(ctx, lang)
             {
-                // Only the first named identifier child is the function name.
-                // Check field_name to be sure.
+                // The function name is typically the first identifier child.
+                // Some grammars use a "name" field (Rust, Python, JS); others
+                // (e.g. Kotlin) have no field name on the identifier child.
                 let field = node.field_name_for_child(i as u32);
-                if matches!(field, Some("name")) {
+                if field == Some("name") || (field.is_none() && child.is_named()) {
                     let s = child.start_byte().max(start_byte);
                     let e = child.end_byte().min(end_byte);
                     if s < e && child.end_byte() > start_byte && child.start_byte() < end_byte {
@@ -686,6 +687,21 @@ mod tests {
         assert!(
             spans.iter().any(|s| s.kind == HighlightKind::Number),
             "expected Number span, got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn kotlin_function_name() {
+        let src = "fun main() {}";
+        let tree = parse_kotlin(src);
+        let spans = spans_for(src, &tree, Lang::Kotlin);
+        // "main" should be highlighted as Function
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Function && &src[s.start..s.end] == "main"),
+            "expected Function span for 'main', got: {:?}",
             spans
         );
     }
