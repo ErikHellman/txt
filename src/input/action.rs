@@ -118,8 +118,12 @@ pub enum EditorAction {
     JumpToLine,
     /// Open the fuzzy file picker overlay (Ctrl+P).
     OpenFuzzyPicker,
-    /// Toggle the file tree sidebar (Ctrl+B).
+    /// Toggle the file tree sidebar visibility (Ctrl+Shift+B).
     ToggleSidebar,
+    /// Focus-jump between the editor and the sidebar (Ctrl+B).
+    /// Opens the sidebar if it is closed, then focuses it.
+    /// If the sidebar is already focused, returns focus to the editor.
+    FocusSidebar,
 
     // ── View / UI toggles ─────────────────────────────────────────────
     /// Open the recent-files picker (Ctrl+R).

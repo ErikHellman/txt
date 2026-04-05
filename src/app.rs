@@ -1148,6 +1148,17 @@ impl AppState {
                     self.sidebar_focused = false;
                 }
             }
+            EditorAction::FocusSidebar => {
+                if self.sidebar.is_none() {
+                    // Open and focus.
+                    let mut sb = self.saved_sidebar.take().unwrap_or_else(SidebarState::new);
+                    if let Some(path) = self.editor.active().path.clone() {
+                        sb.expand_to_path(&path);
+                    }
+                    self.sidebar = Some(sb);
+                }
+                self.sidebar_focused = true;
+            }
             EditorAction::ToggleHelp => {
                 self.show_help = !self.show_help;
                 if self.show_help {
@@ -1963,9 +1974,8 @@ impl AppState {
                 }
                 true
             }
-            EditorAction::ToggleSidebar => {
-                // Ctrl+B: save state and close.
-                self.saved_sidebar = self.sidebar.take();
+            EditorAction::FocusSidebar => {
+                // Ctrl+B while sidebar focused: jump back to editor, sidebar stays open.
                 self.sidebar_focused = false;
                 true
             }

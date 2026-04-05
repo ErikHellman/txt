@@ -55,7 +55,8 @@ const ENTRIES: &[(&str, &str)] = &[
     ("Ctrl+1..9", "Go to tab N"),
     // ── Panels & Pickers ─────────────────────────────────────────────
     ("", "Panels & Pickers"),
-    ("Ctrl+B", "Toggle sidebar"),
+    ("Ctrl+B", "Focus / open sidebar"),
+    ("Ctrl+Shift+B", "Toggle sidebar (show/hide)"),
     ("Ctrl+P", "Fuzzy file picker"),
     ("Ctrl+R", "Recent files"),
     ("Ctrl+Shift+P", "Command palette"),
