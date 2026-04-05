@@ -798,6 +798,23 @@ impl AppState {
                     self.clipboard.set(text);
                 }
             }
+            EditorAction::CopyFileReference => {
+                if let Some(path) = self.editor.active().path.as_ref() {
+                    let buf = &self.editor.active().buffer;
+                    let cursor = buf.cursors.primary();
+                    let rope = buf.rope();
+                    let line_start_byte = rope.char_to_byte(rope.line_to_char(cursor.line));
+                    let char_col = rope.byte_to_char(line_start_byte + cursor.col)
+                        - rope.line_to_char(cursor.line);
+                    let relative = path
+                        .strip_prefix(&self.workspace)
+                        .unwrap_or(path)
+                        .display()
+                        .to_string();
+                    let reference = format!("{}:{},{}", relative, cursor.line + 1, char_col + 1);
+                    self.clipboard.set(reference);
+                }
+            }
             EditorAction::Cut => {
                 if let Some(text) = self.selected_text() {
                     self.clipboard.set(text);
@@ -1803,6 +1820,22 @@ impl AppState {
                 // Ctrl+B: save state and close.
                 self.saved_sidebar = self.sidebar.take();
                 self.sidebar_focused = false;
+                true
+            }
+            EditorAction::CopyFileReference => {
+                // Copy just the file path (no cursor location) when in sidebar.
+                let selected_path = self
+                    .sidebar
+                    .as_ref()
+                    .and_then(|sb| sb.selected_path().cloned());
+                if let Some(path) = selected_path {
+                    let reference = path
+                        .strip_prefix(&self.workspace)
+                        .unwrap_or(&path)
+                        .display()
+                        .to_string();
+                    self.clipboard.set(reference);
+                }
                 true
             }
             EditorAction::CloseSearch => {

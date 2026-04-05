@@ -41,6 +41,7 @@ const ENTRIES: &[(&str, &str)] = &[
     ("Ctrl+C", "Copy"),
     ("Ctrl+X", "Cut"),
     ("Ctrl+V", "Paste"),
+    ("Ctrl+Shift+C", "Copy file reference"),
     // ── File & Tabs ──────────────────────────────────────────────────
     ("", "File & Tabs"),
     ("Ctrl+S", "Save"),
