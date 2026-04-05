@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -106,71 +105,48 @@ impl Config {
     pub fn config_path() -> Option<PathBuf> {
         dirs::home_dir().map(|h| h.join(".config").join("txt").join("config.toml"))
     }
-
-    /// Path to the recent-files list (`~/.config/txt/recent.json`).
-    pub fn recent_files_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".config").join("txt").join("recent.json"))
-    }
 }
 
-/// Load the recent-files list for `workspace`.
+/// Returns the path to the project-local recent-files list: `<workspace>/.txt/recents.json`.
+fn recents_path(workspace: &Path) -> PathBuf {
+    workspace.join(".txt").join("recents.json")
+}
+
+/// Load the recent-files list for `workspace` from `<workspace>/.txt/recents.json`.
 ///
-/// Returns an empty list on any error (missing file, parse error, unknown workspace).
+/// Returns an empty list on any error (missing file, parse error).
 pub fn load_recent_files(workspace: &Path) -> Vec<PathBuf> {
-    let map = read_recent_map();
-    let key = canonical_str(workspace);
-    map.get(&key)
-        .map(|files| files.iter().map(PathBuf::from).collect())
-        .unwrap_or_default()
+    let path = recents_path(workspace);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    let entries: Vec<String> = serde_json::from_str(&text).unwrap_or_default();
+    entries.into_iter().map(PathBuf::from).collect()
 }
 
 /// Prepend `path` to the recent-files list for `workspace` and persist it.
 ///
 /// Deduplicates and truncates to `MAX_RECENT`. Silently ignores I/O errors.
 pub fn add_to_recent_files(path: &Path, workspace: &Path) {
-    let mut map = read_recent_map();
-    let workspace_key = canonical_str(workspace);
-    let canonical = match path.canonicalize() {
-        Ok(p) => p,
-        Err(_) => path.to_path_buf(),
-    };
-    let entry = map.entry(workspace_key).or_default();
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let canonical_str = canonical.to_string_lossy().into_owned();
-    entry.retain(|p| p != &canonical_str);
-    entry.insert(0, canonical_str);
-    entry.truncate(MAX_RECENT);
-    write_recent_map(&map);
-}
 
-fn canonical_str(path: &Path) -> String {
-    path.canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf())
-        .to_string_lossy()
-        .into_owned()
-}
+    let recents_file = recents_path(workspace);
+    let mut entries: Vec<String> = std::fs::read_to_string(&recents_file)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
 
-fn read_recent_map() -> HashMap<String, Vec<String>> {
-    let path = match Config::recent_files_path() {
-        Some(p) => p,
-        None => return HashMap::new(),
-    };
-    let text = match std::fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(_) => return HashMap::new(),
-    };
-    serde_json::from_str(&text).unwrap_or_default()
-}
+    entries.retain(|p| p != &canonical_str);
+    entries.insert(0, canonical_str);
+    entries.truncate(MAX_RECENT);
 
-fn write_recent_map(map: &HashMap<String, Vec<String>>) {
-    let path = match Config::recent_files_path() {
-        Some(p) => p,
-        None => return,
-    };
-    if let Some(parent) = path.parent() {
+    if let Some(parent) = recents_file.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Ok(json) = serde_json::to_string(map) {
-        let _ = std::fs::write(&path, json);
+    if let Ok(json) = serde_json::to_string(&entries) {
+        let _ = std::fs::write(&recents_file, json);
     }
 }
 
@@ -246,17 +222,16 @@ mod tests {
     }
 
     #[test]
-    fn recent_files_path_returns_different_path() {
-        if let (Some(cp), Some(rp)) = (Config::config_path(), Config::recent_files_path()) {
-            assert_ne!(cp, rp);
-        }
+    fn recents_path_is_inside_workspace() {
+        let ws = std::path::Path::new("/tmp/myproject");
+        let p = super::recents_path(ws);
+        assert_eq!(p, ws.join(".txt").join("recents.json"));
     }
 
     #[test]
     fn load_recent_files_missing_returns_empty() {
-        // The real file may not exist; this should not panic.
-        // We just verify it returns a Vec (possibly empty) without panicking.
-        let _ = super::load_recent_files(std::path::Path::new("/tmp"));
+        // No .txt/recents.json under /tmp/no_such_workspace — must not panic.
+        let _ = super::load_recent_files(std::path::Path::new("/tmp/no_such_workspace_xyz"));
     }
 
     #[test]
