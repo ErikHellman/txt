@@ -656,14 +656,14 @@ impl KeyBindings {
         // ── Go to Symbol in File: Cmd+Shift+O → ctrl+shift+o ───────────
         kb.rebind("open_fuzzy_picker", "ctrl+shift+o");
 
-        // ── Rename Symbol: F2 (same as default) ────────────────────────
-        // (already the default)
+        // ── Multi-cursor: Cmd+Alt+Up/Down → ctrl+alt+up/down ───────────
+        kb.rebind("spawn_cursor_up", "ctrl+alt+up");
+        kb.rebind("spawn_cursor_down", "ctrl+alt+down");
 
-        // ── Go to Definition: F12 (same as default) ────────────────────
-        // (already the default)
-
-        // ── Find All References: Shift+F12 (same as default) ───────────
-        // (already the default)
+        // ── Smart Select: Ctrl+Shift+Right/Left ────────────────────────
+        // (ctrl+shift+left/right freed by word selection moving to alt+shift)
+        kb.rebind("ast_expand_selection", "ctrl+shift+right");
+        kb.rebind("ast_contract_selection", "ctrl+shift+left");
 
         kb
     }
@@ -940,6 +940,30 @@ mod tests {
             Some(&EditorAction::MoveCursorWord(
                 super::super::action::Direction::Right
             ))
+        );
+    }
+
+    #[test]
+    fn vscode_defaults_multi_cursor_uses_ctrl_alt() {
+        let kb = KeyBindings::vscode_defaults();
+        let combo_up: KeyCombo = "ctrl+alt+up".parse().unwrap();
+        assert_eq!(kb.lookup(&combo_up), Some(&EditorAction::SpawnCursorUp));
+        let combo_down: KeyCombo = "ctrl+alt+down".parse().unwrap();
+        assert_eq!(kb.lookup(&combo_down), Some(&EditorAction::SpawnCursorDown));
+    }
+
+    #[test]
+    fn vscode_defaults_ast_selection_uses_ctrl_shift_arrow() {
+        let kb = KeyBindings::vscode_defaults();
+        let combo_right: KeyCombo = "ctrl+shift+right".parse().unwrap();
+        assert_eq!(
+            kb.lookup(&combo_right),
+            Some(&EditorAction::AstExpandSelection)
+        );
+        let combo_left: KeyCombo = "ctrl+shift+left".parse().unwrap();
+        assert_eq!(
+            kb.lookup(&combo_left),
+            Some(&EditorAction::AstContractSelection)
         );
     }
 
