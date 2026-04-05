@@ -6,6 +6,7 @@ mod editor;
 mod error;
 mod git;
 mod input;
+mod lsp;
 mod search;
 mod syntax;
 mod theme;
@@ -15,6 +16,8 @@ mod watcher;
 use std::{io, path::PathBuf};
 
 use anyhow::Result;
+use clap::{CommandFactory, Parser};
+use clap_complete::{Shell, generate};
 use crossterm::{
     event::{
         DisableMouseCapture, EnableMouseCapture, KeyboardEnhancementFlags,
@@ -27,27 +30,30 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 
 use crate::{app::App, editor::Editor};
 
-fn main() -> Result<()> {
-    let arg = std::env::args().nth(1).map(PathBuf::from);
+/// A fast, intuitive terminal text editor.
+///
+/// Press F1 inside the editor for the full key binding list.
+#[derive(Parser)]
+#[command(name = "txt", version, about, long_about = None)]
+struct Cli {
+    /// File or directory to open.
+    path: Option<PathBuf>,
 
-    if let Some(ref p) = arg
-        && (p == std::path::Path::new("--help") || p == std::path::Path::new("-h"))
-    {
-        println!("txt — a fast terminal text editor\n");
-        println!("USAGE:");
-        println!("  txt                  Open an empty buffer");
-        println!("  txt <file>           Open a file");
-        println!("  txt <directory>      Open a directory (shows file sidebar)");
-        println!();
-        println!("KEYS (press F1 inside the editor for the full list):");
-        println!("  Ctrl+S      Save          Ctrl+O      Open file");
-        println!("  Ctrl+Q      Quit          Ctrl+,      Settings");
-        println!("  Ctrl+P      File picker   Ctrl+B      Toggle sidebar");
-        println!("  Ctrl+F      Find          F1          Help");
+    /// Print shell completion script and exit.
+    #[arg(long, value_name = "SHELL")]
+    completions: Option<Shell>,
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    if let Some(shell) = cli.completions {
+        let mut cmd = Cli::command();
+        generate(shell, &mut cmd, "txt", &mut io::stdout());
         return Ok(());
     }
 
-    let (editor, open_sidebar) = match arg {
+    let (editor, open_sidebar) = match cli.path {
         Some(p) if p.is_dir() => {
             std::env::set_current_dir(&p)?;
             (Editor::new(), true)
@@ -92,12 +98,17 @@ fn init_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
 }
 
 fn restore_terminal() -> Result<()> {
+    let mut stdout = io::stdout();
+    // Disable terminal features while still in raw mode.
+    // Calling disable_raw_mode() first leaves a window where mouse tracking
+    // is still active but the tty is in cooked/echo mode — any mouse motion
+    // during that window produces SGR sequences that land in the shell's
+    // stdin and get printed as literal text.
+    // Separate execute! calls ensure DisableMouseCapture is always sent
+    // even if PopKeyboardEnhancementFlags fails on an unsupported terminal.
+    let _ = execute!(stdout, PopKeyboardEnhancementFlags);
+    let _ = execute!(stdout, DisableMouseCapture);
+    let _ = execute!(stdout, LeaveAlternateScreen);
     disable_raw_mode()?;
-    execute!(
-        io::stdout(),
-        PopKeyboardEnhancementFlags,
-        DisableMouseCapture,
-        LeaveAlternateScreen,
-    )?;
     Ok(())
 }

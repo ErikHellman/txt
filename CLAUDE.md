@@ -47,14 +47,19 @@ Many public methods are future API being built incrementally. Do not remove them
 
 Actions are intercepted in this order — higher priority handlers `return` early:
 
-1. `confirm_reload` / `confirm_quit` — y/n prompts
-2. `show_help` → `handle_help()` — returns `bool`; unhandled actions fall through
-3. `sidebar_focused` → `handle_sidebar_input()` — returns `bool`; unhandled actions fall through
-4. `command_palette.is_some()` → `handle_command_palette()` — captures all input
-5. `fuzzy_picker.is_some()` → `handle_fuzzy_picker()` — captures all input
-6. `search_state.is_some()` → `handle_search_input()` — navigation falls through
-7. `!input_mode.is_normal()` → `handle_modal_input()` — status-bar prompts
-8. Normal editing dispatch
+1. `confirm_quit` — y/n prompt
+2. `confirm_delete.is_some()` → `handle_confirm_delete()` — captures all input
+3. `show_help` → `handle_help()` — returns `bool`; unhandled actions fall through
+4. `show_settings` → `handle_settings()` — returns `bool`; unhandled actions fall through
+5. `lsp_picker.is_some()` → `handle_lsp_picker()` — returns `bool`; unhandled actions fall through
+6. `!input_mode.is_normal()` → `handle_modal_input()` — status-bar prompts (must come before sidebar so rename/new-folder prompts receive input while sidebar is focused)
+7. `sidebar_focused` → `handle_sidebar_input()` — returns `bool`; unhandled actions fall through
+8. `command_palette.is_some()` → `handle_command_palette()` — captures all input
+9. `fuzzy_picker.is_some()` → `handle_fuzzy_picker()` — captures all input
+10. `completion.is_some()` → `handle_completion_input()` — partial capture; chars fall through to editing
+11. `references_list.is_some()` → `handle_references_input()` — captures all input
+12. `search_state.is_some()` → `handle_search_input()` — navigation falls through
+13. Normal editing dispatch
 
 **When adding a new modal overlay:** make its handler return `bool` so global actions (Quit, ToggleHelp, etc.) are never accidentally swallowed.
 

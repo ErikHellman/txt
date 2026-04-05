@@ -41,6 +41,7 @@ const ENTRIES: &[(&str, &str)] = &[
     ("Ctrl+C", "Copy"),
     ("Ctrl+X", "Cut"),
     ("Ctrl+V", "Paste"),
+    ("Ctrl+Shift+C", "Copy file reference"),
     // ── File & Tabs ──────────────────────────────────────────────────
     ("", "File & Tabs"),
     ("Ctrl+S", "Save"),
@@ -54,7 +55,8 @@ const ENTRIES: &[(&str, &str)] = &[
     ("Ctrl+1..9", "Go to tab N"),
     // ── Panels & Pickers ─────────────────────────────────────────────
     ("", "Panels & Pickers"),
-    ("Ctrl+B", "Toggle sidebar"),
+    ("Ctrl+B", "Focus / open sidebar"),
+    ("Ctrl+Shift+B", "Toggle sidebar (show/hide)"),
     ("Ctrl+P", "Fuzzy file picker"),
     ("Ctrl+R", "Recent files"),
     ("Ctrl+Shift+P", "Command palette"),
@@ -66,11 +68,28 @@ const ENTRIES: &[(&str, &str)] = &[
     ("F3 / Shift+F3", "Next / Prev match"),
     ("Alt+R", "Toggle regex"),
     ("Alt+C", "Toggle case-sensitive"),
+    // ── LSP ──────────────────────────────────────────────────────────
+    ("", "LSP (when active)"),
+    ("Ctrl+Space", "Code completion"),
+    ("Ctrl+K", "Hover info"),
+    ("F12", "Go to definition"),
+    ("Shift+F12", "Find references"),
+    ("F2", "Rename symbol"),
+    ("Ctrl+.", "Code action / quick fix"),
+    // ── Sidebar ──────────────────────────────────────────────────────
+    ("", "Sidebar"),
+    ("Ctrl+C", "Copy file only (sidebar)"),
+    ("Ctrl+X", "Cut file/dir (sidebar)"),
+    ("Ctrl+V", "Paste (sidebar)"),
+    ("F2", "Rename file/dir (sidebar)"),
+    ("Delete", "Delete file/dir (sidebar)"),
+    ("Ctrl+Shift+N", "New folder (sidebar)"),
     // ── View & App ───────────────────────────────────────────────────
     ("", "View & App"),
     ("Alt+Z", "Toggle word wrap"),
     ("F1", "Toggle this help  (↑↓ to scroll)"),
     ("Ctrl+,", "Settings"),
+    ("Ctrl+L", "Configure LSP server"),
     ("Ctrl+Q", "Quit"),
 ];
 

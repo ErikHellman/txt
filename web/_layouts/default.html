@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ page.title | default: site.title }}</title>
+  <meta name="description" content="{{ site.description }}">
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #181d2a;
+      --border: #272d3f;
+      --text: #dde3f0;
+      --muted: #7a8399;
+      --accent: #6ea8fe;
+      --green: #4cc38a;
+      --code-bg: #131720;
+      --max-width: 780px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { font-size: 16px; scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      line-height: 1.75;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Header ── */
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 0.9rem 2rem;
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 100;
+    }
+
+    nav {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+    }
+
+    .logo {
+      font-family: 'Courier New', 'Courier', monospace;
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: 0.08em;
+      margin-right: auto;
+    }
+    .logo:hover { color: var(--accent); text-decoration: none; }
+
+    nav a:not(.logo) { color: var(--muted); font-size: 0.9rem; }
+    nav a:not(.logo):hover { color: var(--text); text-decoration: none; }
+
+    /* ── Main ── */
+    main {
+      flex: 1;
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 3.5rem 2rem 4rem;
+      width: 100%;
+    }
+
+    /* ── Hero ── */
+    .hero { margin-bottom: 3.5rem; }
+
+    .hero h1 {
+      font-family: 'Courier New', 'Courier', monospace;
+      font-size: 3.5rem;
+      font-weight: 700;
+      margin: 0 0 0.5rem;
+      letter-spacing: 0.04em;
+    }
+
+    .tagline {
+      font-size: 1.15rem;
+      color: var(--muted);
+      margin-bottom: 1.75rem;
+    }
+
+    .hero-links { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+
+    .btn {
+      display: inline-block;
+      padding: 0.55rem 1.1rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: opacity 0.15s;
+      cursor: pointer;
+    }
+    .btn:hover { text-decoration: none; opacity: 0.82; }
+    .btn-primary { background: var(--accent); color: #0a0e18; }
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    /* ── Typography ── */
+    h1, h2, h3 {
+      font-weight: 600;
+      line-height: 1.35;
+      margin-top: 2.75rem;
+      margin-bottom: 0.75rem;
+    }
+    h1 { font-size: 2rem; }
+    h2 {
+      font-size: 1.4rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.45rem;
+    }
+    h3 { font-size: 1.1rem; color: var(--text); }
+
+    p { margin-bottom: 1rem; }
+
+    ul, ol { margin-bottom: 1rem; padding-left: 1.6rem; }
+    li { margin-bottom: 0.4rem; }
+
+    strong { font-weight: 600; color: #eef1f8; }
+
+    /* ── Inline code ── */
+    code {
+      font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Courier New', monospace;
+      font-size: 0.875em;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.15em 0.4em;
+    }
+
+    /* ── Code blocks ── */
+    pre {
+      position: relative;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem 1.25rem;
+      overflow-x: auto;
+      margin-bottom: 1.5rem;
+    }
+
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 0.9rem;
+      line-height: 1.65;
+    }
+
+    /* ── Copy button ── */
+    .copy-btn {
+      position: absolute;
+      top: 0.65rem;
+      right: 0.65rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 0.3rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+      line-height: 1;
+    }
+    pre:hover .copy-btn { opacity: 1; }
+    .copy-btn:hover { color: var(--text); border-color: var(--accent); }
+    .copy-btn.copied { color: var(--green); border-color: var(--green); opacity: 1; }
+
+    /* ── Tables ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 1.5rem;
+      font-size: 0.9rem;
+    }
+    th {
+      text-align: left;
+      padding: 0.5rem 0.8rem;
+      border-bottom: 2px solid var(--border);
+      color: var(--muted);
+      font-weight: 600;
+    }
+    td {
+      padding: 0.45rem 0.8rem;
+      border-bottom: 1px solid var(--border);
+    }
+    td:first-child code { white-space: nowrap; }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid var(--border);
+      text-align: center;
+      padding: 1.5rem 2rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    footer a { color: var(--muted); }
+    footer a:hover { color: var(--text); }
+
+    /* ── Responsive ── */
+    @media (max-width: 600px) {
+      header { padding: 0.9rem 1.25rem; }
+      main { padding: 2.5rem 1.25rem 3rem; }
+      .hero h1 { font-size: 2.5rem; }
+      nav { gap: 1.25rem; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <nav>
+    <a href="{{ site.baseurl }}/" class="logo">txt</a>
+    <a href="https://github.com/ErikHellman/txt">GitHub</a>
+    <a href="https://github.com/ErikHellman/txt/releases">Releases</a>
+    <a href="https://github.com/ErikHellman/txt/issues">Issues</a>
+  </nav>
+</header>
+
+<main>
+  {{ content }}
+</main>
+
+<footer>
+  <p>txt &mdash; MIT or Apache 2.0 &mdash;
+    <a href="https://github.com/ErikHellman/txt">github.com/ErikHellman/txt</a>
+  </p>
+</footer>
+
+<script>
+  (function () {
+    var clipIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+    var checkIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+
+    document.querySelectorAll('pre').forEach(function (pre) {
+      var btn = document.createElement('button');
+      btn.className = 'copy-btn';
+      btn.title = 'Copy to clipboard';
+      btn.setAttribute('aria-label', 'Copy to clipboard');
+      btn.innerHTML = clipIcon;
+
+      btn.addEventListener('click', function () {
+        var codeEl = pre.querySelector('code');
+        var text = (codeEl || pre).innerText;
+
+        function onCopied() {
+          btn.innerHTML = checkIcon;
+          btn.classList.add('copied');
+          setTimeout(function () {
+            btn.innerHTML = clipIcon;
+            btn.classList.remove('copied');
+          }, 2000);
+        }
+
+        if (navigator.clipboard && window.isSecureContext) {
+          navigator.clipboard.writeText(text).then(onCopied).catch(function () {});
+        } else {
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          try { document.execCommand('copy'); } catch (e) {}
+          document.body.removeChild(ta);
+          onCopied();
+        }
+      });
+
+      pre.appendChild(btn);
+    });
+  })();
+</script>
+
+</body>
+</html>

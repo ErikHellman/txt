@@ -71,6 +71,53 @@ pub fn style_for_kind(kind: HighlightKind, theme: &ThemeColors) -> Style {
     }
 }
 
+/// Map an LSP semantic token type index to a `HighlightKind`.
+///
+/// Token type indices follow the order declared in `ClientCapabilities`:
+///   0=namespace, 1=type, 2=class, 3=enum, 4=interface, 5=struct,
+///   6=typeParameter, 7=parameter, 8=variable, 9=property,
+///   10=enumMember, 11=event, 12=function, 13=method, 14=macro,
+///   15=keyword, 16=modifier, 17=comment, 18=string, 19=number,
+///   20=regexp, 21=operator, 22=decorator
+pub fn semantic_token_to_kind(token_type: u32) -> Option<HighlightKind> {
+    match token_type {
+        0 => Some(HighlightKind::Type),           // namespace
+        1..=6 => Some(HighlightKind::Type), // type, class, enum, interface, struct, typeParameter
+        7..=10 => None,                     // parameter, variable, property, enumMember — plain
+        11 => None,                         // event
+        12 | 13 => Some(HighlightKind::Function), // function, method
+        14 => Some(HighlightKind::Attribute), // macro
+        15 | 16 => Some(HighlightKind::Keyword), // keyword, modifier
+        17 => Some(HighlightKind::Comment), // comment
+        18 => Some(HighlightKind::String),  // string
+        19 => Some(HighlightKind::Number),  // number
+        20 => Some(HighlightKind::String),  // regexp
+        21 => Some(HighlightKind::Punctuation), // operator
+        22 => Some(HighlightKind::Attribute), // decorator
+        _ => None,
+    }
+}
+
+/// Convert a slice of `SemanticTokenSpan`s to `HighlightSpan`s for a visible
+/// byte range. Filters and maps only tokens that overlap `[start_byte, end_byte)`.
+pub fn semantic_tokens_to_highlights(
+    tokens: &[crate::lsp::types::SemanticTokenSpan],
+    start_byte: usize,
+    end_byte: usize,
+) -> Vec<HighlightSpan> {
+    tokens
+        .iter()
+        .filter(|t| t.end_byte > start_byte && t.start_byte < end_byte)
+        .filter_map(|t| {
+            semantic_token_to_kind(t.token_type).map(|kind| HighlightSpan {
+                start: t.start_byte,
+                end: t.end_byte,
+                kind,
+            })
+        })
+        .collect()
+}
+
 // ── Tree walker ───────────────────────────────────────────────────────────────
 
 #[allow(clippy::only_used_in_recursion)]

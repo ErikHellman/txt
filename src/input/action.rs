@@ -48,6 +48,9 @@ pub enum EditorAction {
     Cut,
     /// Paste the given text at the cursor, replacing any selection.
     Paste(String),
+    /// Copy a file reference to the clipboard. In the editor, copies
+    /// `path:line,col`; when the sidebar is focused, copies only the file path.
+    CopyFileReference,
 
     // ── Edit operations ───────────────────────────────────────────────
     Undo,
@@ -115,8 +118,12 @@ pub enum EditorAction {
     JumpToLine,
     /// Open the fuzzy file picker overlay (Ctrl+P).
     OpenFuzzyPicker,
-    /// Toggle the file tree sidebar (Ctrl+B).
+    /// Toggle the file tree sidebar visibility (Ctrl+Shift+B).
     ToggleSidebar,
+    /// Focus-jump between the editor and the sidebar (Ctrl+B).
+    /// Opens the sidebar if it is closed, then focuses it.
+    /// If the sidebar is already focused, returns focus to the editor.
+    FocusSidebar,
 
     // ── View / UI toggles ─────────────────────────────────────────────
     /// Open the recent-files picker (Ctrl+R).
@@ -143,12 +150,41 @@ pub enum EditorAction {
     OpenCommandPalette,
     /// Open the open-buffer switcher (Ctrl+Shift+E).
     OpenBufferSwitcher,
+    /// Open the LSP server configuration overlay (Ctrl+L).
+    OpenLspConfig,
+
+    // ── LSP features ─────────────────────────────────────────────────
+    /// Trigger code completion (Ctrl+Space).
+    TriggerCompletion,
+    /// Show hover info at cursor (Ctrl+K).
+    ShowHover,
+    /// Go to definition (F12).
+    GoToDefinition,
+    /// Find references (Shift+F12).
+    FindReferences,
+    /// Rename symbol (F2).
+    RenameSymbol,
+    /// Code actions / quick fix (Ctrl+.).
+    CodeAction,
+    /// Restart the LSP server (command palette).
+    #[allow(dead_code)]
+    LspRestart,
+    /// Stop the LSP server (command palette).
+    #[allow(dead_code)]
+    LspStop,
 
     // ── App lifecycle ─────────────────────────────────────────────────
     /// Quit the editor. The app will confirm if there are unsaved changes.
     Quit,
     #[allow(dead_code)]
     ForceQuit,
+
+    // ── Sidebar file operations ───────────────────────────────────────
+    /// Rename the selected file/directory in the sidebar (F2).
+    #[allow(dead_code)]
+    SidebarRename,
+    /// Create a new folder in the sidebar (Ctrl+Shift+N).
+    SidebarNewFolder,
 
     // ── Placeholder for unrecognised / unimplemented keys ─────────────
     Unhandled,

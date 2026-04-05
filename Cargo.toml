@@ -1,6 +1,6 @@
 [package]
 name = "txt"
-version = "0.0.6"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.88"
 description = "A fast, intuitive terminal text editor"
@@ -39,6 +39,9 @@ serde = { version = "1.0.228", features = ["derive"] }
 regex = "1"
 serde_json = "1"
 notify = "8"
+url = "2"
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }

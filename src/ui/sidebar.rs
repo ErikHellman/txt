@@ -6,13 +6,15 @@ use ratatui::{
     style::{Color, Modifier, Style},
 };
 
-use crate::app::SidebarState;
+use crate::app::{SidebarClipboard, SidebarState};
 use crate::theme::ThemeColors;
 
 /// Render the file tree sidebar.
 /// `focused` controls whether the header is highlighted to indicate keyboard focus.
+/// `clipboard` is used to show italic on cut entries.
 pub fn render(
     sidebar: &SidebarState,
+    clipboard: Option<&SidebarClipboard>,
     focused: bool,
     theme: &ThemeColors,
     area: Rect,
@@ -22,7 +24,7 @@ pub fn render(
         return;
     }
 
-    let header_style = if focused {
+    let root_style = if focused {
         Style::default()
             .bg(Color::Rgb(60, 80, 160))
             .fg(Color::White)
@@ -39,18 +41,7 @@ pub fn render(
         .fg(theme.sidebar_dir_fg);
     let file_style = Style::default().bg(theme.sidebar_bg).fg(theme.sidebar_fg);
 
-    // ── Header ───────────────────────────────────────────────────────────────
-    let header = path_header(&sidebar.root, area.width as usize);
-    let header_line = format!("{:<width$}", header, width = area.width as usize);
-    buf.set_string(area.x, area.y, &header_line, header_style);
-
-    if area.height <= 1 {
-        return;
-    }
-
-    // ── File list ─────────────────────────────────────────────────────────────
-    let list_area = Rect::new(area.x, area.y + 1, area.width, area.height - 1);
-    let visible_rows = list_area.height as usize;
+    let visible_rows = area.height as usize;
 
     // Compute scroll offset so the selected entry is always visible.
     let scroll = if sidebar.selected >= visible_rows {
@@ -67,13 +58,35 @@ pub fn render(
         .enumerate()
     {
         let global_idx = scroll + screen_row;
-        let y = list_area.y + screen_row as u16;
+        let y = area.y + screen_row as u16;
         let is_selected = global_idx == sidebar.selected;
+        let is_root = entry.path == sidebar.root;
 
-        let base_style = if is_selected {
-            selected_style
+        let is_cut = clipboard
+            .map(|c| c.is_cut && c.path == entry.path)
+            .unwrap_or(false);
+
+        let base_style = if is_root {
+            // Root node always uses the header style.
+            if is_selected {
+                root_style.bg(Color::Rgb(60, 60, 100))
+            } else {
+                root_style
+            }
+        } else if is_selected {
+            if is_cut {
+                selected_style.add_modifier(Modifier::ITALIC)
+            } else {
+                selected_style
+            }
         } else if entry.is_dir {
-            dir_style
+            if is_cut {
+                dir_style.add_modifier(Modifier::ITALIC)
+            } else {
+                dir_style
+            }
+        } else if is_cut {
+            file_style.add_modifier(Modifier::ITALIC)
         } else {
             file_style
         };
@@ -85,15 +98,29 @@ pub fn render(
         // Build the label with indentation.
         let indent = "  ".repeat(entry.depth);
         let icon = if entry.is_dir {
-            if entry.expanded { "▾ " } else { "▸ " }
+            // Root is always expanded; other dirs show expand/collapse state.
+            if is_root || entry.expanded {
+                "▾ "
+            } else {
+                "▸ "
+            }
         } else {
             "  "
         };
-        let name = entry
-            .path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("?");
+        let name = if is_root {
+            // Show the root directory name (last path component).
+            entry
+                .path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("/")
+        } else {
+            entry
+                .path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("?")
+        };
         let label = format!(" {}{}{}", indent, icon, name);
 
         let max_w = area.width as usize;
@@ -108,6 +135,7 @@ pub fn render(
 /// 1. Full path with a leading space: " /home/user/project"
 /// 2. Directory name only:            " project"
 /// 3. Directory name truncated with ellipsis: " projec…"
+#[allow(dead_code)]
 fn path_header(root: &Path, max_cols: usize) -> String {
     if max_cols == 0 {
         return String::new();

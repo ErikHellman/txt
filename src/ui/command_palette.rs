@@ -67,8 +67,13 @@ pub static COMMANDS: &[CommandEntry] = &[
         action: || EditorAction::OpenBufferSwitcher,
     },
     CommandEntry {
-        name: "Toggle Sidebar",
+        name: "Focus Sidebar",
         key_hint: "Ctrl+B",
+        action: || EditorAction::FocusSidebar,
+    },
+    CommandEntry {
+        name: "Toggle Sidebar",
+        key_hint: "Ctrl+Shift+B",
         action: || EditorAction::ToggleSidebar,
     },
     CommandEntry {
@@ -135,6 +140,51 @@ pub static COMMANDS: &[CommandEntry] = &[
         name: "Reload Config",
         key_hint: "palette",
         action: || EditorAction::ReloadConfig,
+    },
+    CommandEntry {
+        name: "LSP: Configure Server…",
+        key_hint: "Ctrl+L",
+        action: || EditorAction::OpenLspConfig,
+    },
+    CommandEntry {
+        name: "LSP: Code Completion",
+        key_hint: "Ctrl+Space",
+        action: || EditorAction::TriggerCompletion,
+    },
+    CommandEntry {
+        name: "LSP: Hover Info",
+        key_hint: "Ctrl+K",
+        action: || EditorAction::ShowHover,
+    },
+    CommandEntry {
+        name: "LSP: Go to Definition",
+        key_hint: "F12",
+        action: || EditorAction::GoToDefinition,
+    },
+    CommandEntry {
+        name: "LSP: Find References",
+        key_hint: "Shift+F12",
+        action: || EditorAction::FindReferences,
+    },
+    CommandEntry {
+        name: "LSP: Rename Symbol…",
+        key_hint: "F2",
+        action: || EditorAction::RenameSymbol,
+    },
+    CommandEntry {
+        name: "LSP: Code Action",
+        key_hint: "Ctrl+.",
+        action: || EditorAction::CodeAction,
+    },
+    CommandEntry {
+        name: "LSP: Restart Server",
+        key_hint: "palette",
+        action: || EditorAction::LspRestart,
+    },
+    CommandEntry {
+        name: "LSP: Stop Server",
+        key_hint: "palette",
+        action: || EditorAction::LspStop,
     },
     CommandEntry {
         name: "Quit",

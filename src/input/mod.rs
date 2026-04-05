@@ -22,8 +22,11 @@ impl InputHandler {
         match event.code {
             // ── Function keys ─────────────────────────────────────────
             KeyCode::F(1) => EditorAction::ToggleHelp,
+            KeyCode::F(2) => EditorAction::RenameSymbol,
             KeyCode::F(3) if shift => EditorAction::SearchPrev,
             KeyCode::F(3) => EditorAction::SearchNext,
+            KeyCode::F(12) if shift => EditorAction::FindReferences,
+            KeyCode::F(12) => EditorAction::GoToDefinition,
             KeyCode::Esc => EditorAction::CloseSearch,
 
             // ── Alt combinations ──────────────────────────────────────
@@ -32,6 +35,8 @@ impl InputHandler {
             KeyCode::Char('z') if alt && !ctrl => EditorAction::ToggleWordWrap,
 
             // ── Printable characters ──────────────────────────────────
+            KeyCode::Char(' ') if ctrl => EditorAction::TriggerCompletion,
+            KeyCode::Char('.') if ctrl => EditorAction::CodeAction,
             KeyCode::Char(c) if ctrl && !shift && !alt => self.handle_ctrl_char(c),
             KeyCode::Char(c) if ctrl && shift => self.handle_ctrl_shift_char(c),
             KeyCode::Char(c) if !ctrl => EditorAction::InsertChar(c),
@@ -111,10 +116,12 @@ impl InputHandler {
             'o' | 'O' => EditorAction::OpenFile,
             't' | 'T' => EditorAction::NewTab,
             'g' | 'G' => EditorAction::JumpToLine,
-            'b' | 'B' => EditorAction::ToggleSidebar,
+            'b' | 'B' => EditorAction::FocusSidebar,
             'p' | 'P' => EditorAction::OpenFuzzyPicker,
             'f' | 'F' => EditorAction::OpenSearch,
             'h' | 'H' => EditorAction::OpenReplace,
+            'k' | 'K' => EditorAction::ShowHover,
+            'l' | 'L' => EditorAction::OpenLspConfig,
             'r' | 'R' => EditorAction::OpenRecentFiles,
             '/' => EditorAction::ToggleLineComment,
             ',' => EditorAction::OpenSettings,
@@ -143,6 +150,9 @@ impl InputHandler {
             'l' => EditorAction::SelectAllOccurrences,
             'p' => EditorAction::OpenCommandPalette,
             'e' => EditorAction::OpenBufferSwitcher,
+            'c' => EditorAction::CopyFileReference,
+            'b' => EditorAction::ToggleSidebar,
+            'n' => EditorAction::SidebarNewFolder,
             _ => EditorAction::Unhandled,
         }
     }
@@ -386,6 +396,10 @@ mod tests {
             IH.handle_key(shift(KeyCode::F(3))),
             EditorAction::SearchPrev
         );
+        assert_eq!(
+            IH.handle_key(plain(KeyCode::F(2))),
+            EditorAction::RenameSymbol
+        );
     }
 
     #[test]
@@ -430,6 +444,26 @@ mod tests {
     }
 
     #[test]
+    fn open_lsp_config() {
+        assert_eq!(
+            IH.handle_key(ctrl(KeyCode::Char('l'))),
+            EditorAction::OpenLspConfig
+        );
+    }
+
+    #[test]
+    fn sidebar_shortcuts() {
+        assert_eq!(
+            IH.handle_key(ctrl(KeyCode::Char('b'))),
+            EditorAction::FocusSidebar
+        );
+        assert_eq!(
+            IH.handle_key(ctrl_shift(KeyCode::Char('B'))),
+            EditorAction::ToggleSidebar
+        );
+    }
+
+    #[test]
     fn save_file_shortcuts() {
         assert_eq!(
             IH.handle_key(ctrl(KeyCode::Char('s'))),
@@ -449,6 +483,10 @@ mod tests {
         assert_eq!(
             IH.handle_key(ctrl(KeyCode::Char('v'))),
             EditorAction::Paste(String::new())
+        );
+        assert_eq!(
+            IH.handle_key(ctrl_shift(KeyCode::Char('C'))),
+            EditorAction::CopyFileReference
         );
     }
 
