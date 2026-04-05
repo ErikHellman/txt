@@ -70,8 +70,9 @@ impl SyntaxHost {
         // this allocation.
         let source = rope.to_string();
 
-        let old_tree = self.tree.take();
-        self.tree = self.parser.parse(source.as_bytes(), old_tree.as_ref());
+        // Disable incremental parsing - full reparse is safer
+        let _old_tree = self.tree.take();
+        self.tree = self.parser.parse(source.as_bytes(), None);
     }
 
     /// Returns true if a valid parse tree is available.
