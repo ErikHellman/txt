@@ -240,11 +240,6 @@ impl SidebarState {
             for entry in read_dir.flatten() {
                 let path = entry.path();
                 let is_dir = path.is_dir();
-                // Skip hidden files at depth 1 (root's direct children), but show deeper.
-                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if depth == 1 && name.starts_with('.') {
-                    continue;
-                }
                 children.push((path, is_dir));
             }
         }
