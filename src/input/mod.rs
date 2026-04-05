@@ -152,6 +152,7 @@ impl InputHandler {
             'e' => EditorAction::OpenBufferSwitcher,
             'c' => EditorAction::CopyFileReference,
             'b' => EditorAction::ToggleSidebar,
+            'n' => EditorAction::SidebarNewFolder,
             _ => EditorAction::Unhandled,
         }
     }
@@ -394,6 +395,10 @@ mod tests {
         assert_eq!(
             IH.handle_key(shift(KeyCode::F(3))),
             EditorAction::SearchPrev
+        );
+        assert_eq!(
+            IH.handle_key(plain(KeyCode::F(2))),
+            EditorAction::RenameSymbol
         );
     }
 
