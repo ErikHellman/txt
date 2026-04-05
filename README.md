@@ -8,7 +8,7 @@ A fast terminal text editor for engineers who want to make quick, precise edits 
 
 ## Why txt
 
-- **Starts instantly.** No language servers, no plugin system, no background daemons.
+- **Starts instantly.** No bundled language servers, no plugin system, no background daemons. LSP support is available when you need it — bring your own server.
 - **No configuration required.** Works out of the box with sensible defaults; a TOML config is available when you want it.
 - **Keyboard-driven.** Familiar shortcuts (Ctrl+S, Ctrl+F, Ctrl+Z), fuzzy file picker, multi-cursor editing, and AST-aware selection — all without a mouse.
 - **Just editing.** No built-in terminal, no code execution, no extension marketplace. The right tool for reviewing a diff, editing a config file, or making a targeted change alongside an AI coding agent.
