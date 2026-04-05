@@ -220,7 +220,14 @@ impl SidebarState {
     /// Load the top-level entries of the root directory.
     fn load_root(&mut self) {
         self.entries.clear();
-        self.entries_from_dir(&self.root.clone(), 0, true);
+        // Root node is always present and always expanded; it cannot be collapsed.
+        self.entries.push(TreeEntry {
+            path: self.root.clone(),
+            depth: 0,
+            is_dir: true,
+            expanded: true,
+        });
+        self.entries_from_dir(&self.root.clone(), 1, true);
     }
 
     /// Append entries for a directory at `depth`. If `expand` is false, only
@@ -231,9 +238,9 @@ impl SidebarState {
             for entry in read_dir.flatten() {
                 let path = entry.path();
                 let is_dir = path.is_dir();
-                // Skip hidden files at depth 0 (but show deeper)
+                // Skip hidden files at depth 1 (root's direct children), but show deeper.
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if depth == 0 && name.starts_with('.') {
+                if depth == 1 && name.starts_with('.') {
                     continue;
                 }
                 children.push((path, is_dir));
@@ -263,6 +270,10 @@ impl SidebarState {
         }
         let entry = &self.entries[idx];
         if !entry.is_dir {
+            return;
+        }
+        // Root cannot be collapsed.
+        if entry.path == self.root {
             return;
         }
         if entry.expanded {
@@ -300,6 +311,10 @@ impl SidebarState {
     /// Collapse the directory entry at `idx` (if expanded), removing its children.
     fn collapse_at(&mut self, idx: usize) {
         if idx >= self.entries.len() || !self.entries[idx].is_dir || !self.entries[idx].expanded {
+            return;
+        }
+        // Root cannot be collapsed.
+        if self.entries[idx].path == self.root {
             return;
         }
         let depth = self.entries[idx].depth;
@@ -399,6 +414,14 @@ impl SidebarState {
     #[allow(dead_code)]
     pub fn selected_path(&self) -> Option<&PathBuf> {
         self.entries.get(self.selected).map(|e| &e.path)
+    }
+
+    /// Returns true if the root directory itself is currently selected.
+    fn root_is_selected(&self) -> bool {
+        self.entries
+            .get(self.selected)
+            .map(|e| e.path == self.root)
+            .unwrap_or(false)
     }
 
     /// Reload the sidebar, preserving expanded directories and selection by path.
@@ -1602,11 +1625,10 @@ impl AppState {
                 true
             }
             EditorAction::Copy => {
-                // Ctrl+C: copy file path to sidebar clipboard.
-                if let Some(path) = self
-                    .sidebar
-                    .as_ref()
-                    .and_then(|sb| sb.selected_path().cloned())
+                // Ctrl+C: copy file path to sidebar clipboard (not root).
+                let sel = self.sidebar.as_ref();
+                if sel.map(|sb| !sb.root_is_selected()).unwrap_or(false)
+                    && let Some(path) = sel.and_then(|sb| sb.selected_path().cloned())
                 {
                     self.sidebar_clipboard = Some(SidebarClipboard {
                         path,
@@ -1616,11 +1638,10 @@ impl AppState {
                 true
             }
             EditorAction::Cut => {
-                // Ctrl+X: cut file path to sidebar clipboard.
-                if let Some(path) = self
-                    .sidebar
-                    .as_ref()
-                    .and_then(|sb| sb.selected_path().cloned())
+                // Ctrl+X: cut file path to sidebar clipboard (not root).
+                let sel = self.sidebar.as_ref();
+                if sel.map(|sb| !sb.root_is_selected()).unwrap_or(false)
+                    && let Some(path) = sel.and_then(|sb| sb.selected_path().cloned())
                 {
                     self.sidebar_clipboard = Some(SidebarClipboard { path, is_cut: true });
                 }
@@ -1632,11 +1653,17 @@ impl AppState {
                 true
             }
             EditorAction::DeleteForward => {
-                // Delete key: delete the selected file/directory.
-                if let Some(path) = self
+                // Delete key: delete the selected file/directory (not root).
+                let is_root = self
                     .sidebar
                     .as_ref()
-                    .and_then(|sb| sb.selected_path().cloned())
+                    .map(|sb| sb.root_is_selected())
+                    .unwrap_or(true);
+                if !is_root
+                    && let Some(path) = self
+                        .sidebar
+                        .as_ref()
+                        .and_then(|sb| sb.selected_path().cloned())
                 {
                     if path.is_dir() {
                         self.confirm_delete = Some(ConfirmDelete::Dir(path));
@@ -1647,11 +1674,17 @@ impl AppState {
                 true
             }
             EditorAction::SidebarRename => {
-                // F2: rename the selected file/directory.
-                if let Some(path) = self
+                // F2: rename the selected file/directory (not root).
+                let is_root = self
                     .sidebar
                     .as_ref()
-                    .and_then(|sb| sb.selected_path().cloned())
+                    .map(|sb| sb.root_is_selected())
+                    .unwrap_or(true);
+                if !is_root
+                    && let Some(path) = self
+                        .sidebar
+                        .as_ref()
+                        .and_then(|sb| sb.selected_path().cloned())
                 {
                     let name = path
                         .file_name()
