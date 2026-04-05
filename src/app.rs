@@ -1806,7 +1806,7 @@ fn read_rss_kb() -> Option<u64> {
     type MachMsgTypeNumberT = u32;
     type KernReturnT = i32;
 
-    extern "C" {
+    unsafe extern "C" {
         fn mach_task_self() -> TaskT;
         fn task_info(
             target_task: TaskT,
@@ -1848,7 +1848,7 @@ fn read_rss_kb() -> Option<u64> {
 fn read_rss_kb() -> Option<u64> {
     use std::mem;
 
-    extern "system" {
+    unsafe extern "system" {
         fn GetCurrentProcess() -> *mut core::ffi::c_void;
         fn K32GetProcessMemoryInfo(
             process: *mut core::ffi::c_void,
