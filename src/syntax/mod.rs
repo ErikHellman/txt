@@ -70,9 +70,14 @@ impl SyntaxHost {
         // this allocation.
         let source = rope.to_string();
 
-        // Disable incremental parsing - full reparse is safer
-        let _old_tree = self.tree.take();
-        self.tree = self.parser.parse(source.as_bytes(), None);
+        // Use incremental parsing for non-markdown languages.
+        // Markdown requires full reparse due to tree-sitter bus errors with incremental.
+        let old_tree = if self.language == Lang::Markdown {
+            None
+        } else {
+            self.tree.take()
+        };
+        self.tree = self.parser.parse(source.as_bytes(), old_tree.as_ref());
     }
 
     /// Returns true if a valid parse tree is available.

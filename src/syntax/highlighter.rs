@@ -478,7 +478,11 @@ fn collect_embedded_spans(
         let s = (node_start + offset).max(start_byte);
         let e = (node_end + offset).min(end_byte);
         if s < e {
-            spans.push(HighlightSpan { start: s, end: e, kind: hk });
+            spans.push(HighlightSpan {
+                start: s,
+                end: e,
+                kind: hk,
+            });
         }
         return;
     }
@@ -490,7 +494,11 @@ fn collect_embedded_spans(
             let s = (node_start + offset).max(start_byte);
             let e = (node_end + offset).min(end_byte);
             if s < e {
-                spans.push(HighlightSpan { start: s, end: e, kind: hk });
+                spans.push(HighlightSpan {
+                    start: s,
+                    end: e,
+                    kind: hk,
+                });
             }
         }
         return;
@@ -637,12 +645,16 @@ mod tests {
         let src = "let mut x = 0;";
         let tree = parse_rust(src);
         let spans = spans_for(src, &tree, Lang::Rust);
-        assert!(spans
-            .iter()
-            .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "let"));
-        assert!(spans
-            .iter()
-            .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "mut"));
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "let")
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "mut")
+        );
     }
 
     #[test]
@@ -749,15 +761,21 @@ mod tests {
         let src = r#"{"a":true,"b":false,"c":null}"#;
         let tree = parse_json(src);
         let spans = spans_for(src, &tree, Lang::Json);
-        assert!(spans
-            .iter()
-            .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "true"));
-        assert!(spans
-            .iter()
-            .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "false"));
-        assert!(spans
-            .iter()
-            .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "null"));
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "true")
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "false")
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "null")
+        );
     }
 
     // ── Filtering ─────────────────────────────────────────────────────────────
