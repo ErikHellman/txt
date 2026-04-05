@@ -561,47 +561,109 @@ impl KeyBindings {
     }
 
     /// Build IntelliJ IDEA macOS-style keybindings (Cmd→Ctrl, Opt→Alt for terminal).
+    ///
+    /// Based on the IntelliJ IDEA macOS default keymap, translating Cmd→Ctrl and
+    /// Opt→Alt for terminal use. Only actions that exist in this editor are mapped.
     fn intellij_defaults() -> Self {
         let mut kb = Self::defaults();
 
-        // IntelliJ uses Opt+Arrow for word navigation (not Ctrl+Arrow).
+        // ── Word navigation: Opt+Arrow (not Ctrl+Arrow) ────────────────
         kb.rebind("move_cursor_word_left", "alt+left");
         kb.rebind("move_cursor_word_right", "alt+right");
         kb.rebind("extend_selection_word_left", "alt+shift+left");
         kb.rebind("extend_selection_word_right", "alt+shift+right");
 
-        // IntelliJ uses Opt+Backspace/Delete for word deletion.
+        // ── Word deletion: Opt+Backspace/Delete ────────────────────────
         kb.rebind("delete_word_backward", "alt+backspace");
         kb.rebind("delete_word_forward", "alt+delete");
 
-        // Find & Replace: Cmd+R → ctrl+r (instead of ctrl+h).
+        // ── Recent Files: Cmd+E → ctrl+e ────────────────────────────────
+        // (must come before open_replace to free ctrl+r)
+        kb.rebind("open_recent_files", "ctrl+e");
+
+        // ── Find & Replace: Cmd+R → ctrl+r ─────────────────────────────
         kb.rebind("open_replace", "ctrl+r");
 
-        // Find Action: Cmd+Shift+A → ctrl+shift+a (instead of ctrl+shift+p).
+        // ── Find Next/Prev: Cmd+G / Cmd+Shift+G ────────────────────────
+        // (jump_to_line moves to ctrl+g is default, but IntelliJ uses Cmd+L
+        //  for jump-to-line. We keep ctrl+g for jump_to_line and use f3/shift+f3
+        //  which are also already bound for search_next/search_prev.)
+
+        // ── Find Action: Cmd+Shift+A → ctrl+shift+a ────────────────────
         kb.rebind("open_command_palette", "ctrl+shift+a");
 
-        // Show Intention Actions / Quick Fix: Alt+Enter (instead of ctrl+.).
+        // ── Navigate File: Cmd+Shift+O → ctrl+shift+o ──────────────────
+        kb.rebind("open_fuzzy_picker", "ctrl+shift+o");
+
+        // ── Tab navigation: Cmd+Shift+[ / ] → ctrl+alt+left / right ────
+        kb.rebind("prev_tab", "ctrl+alt+left");
+        kb.rebind("next_tab", "ctrl+alt+right");
+
+        // ── Project Tool Window: Alt+1 (sidebar) ─────────────────────────
+        // (must come before go_to_definition to free ctrl+b)
+        kb.rebind("focus_sidebar", "alt+1");
+
+        // ── Go to Declaration: Cmd+B → ctrl+b ──────────────────────────
+        kb.rebind("go_to_definition", "ctrl+b");
+
+        // ── Find Usages: Alt+F7 ────────────────────────────────────────
+        kb.rebind("find_references", "alt+f7");
+
+        // ── Rename: Shift+F6 ───────────────────────────────────────────
+        kb.rebind("rename_symbol", "shift+f6");
+
+        // ── Show Intention Actions / Quick Fix: Alt+Enter ───────────────
         kb.rebind("code_action", "alt+enter");
 
-        // Quick Documentation: Ctrl+J (ctrl+q conflicts with quit).
+        // ── Quick Documentation: Ctrl+Q → ctrl+j ───────────────────────
+        // (ctrl+q is quit; IntelliJ uses F1 for docs too, but F1 is help)
         kb.rebind("show_hover", "ctrl+j");
 
-        // Quit: Ctrl+Shift+Q (ctrl+q is taken by show_hover in IntelliJ style).
-        // Actually let's keep ctrl+q for quit since we moved hover to ctrl+j.
+        // ── Duplicate Line: Cmd+D → ctrl+d (same as default) ───────────
+        // (already the default)
+
+        // ── Extend/Shrink Selection: Cmd+W / Cmd+Shift+W ───────────────
+        // (already the default: ctrl+w / ctrl+shift+w)
 
         kb
     }
 
     /// Build VS Code macOS-style keybindings (Cmd→Ctrl for terminal).
+    ///
+    /// Based on the VS Code macOS default keymap, translating Cmd→Ctrl and
+    /// Opt→Alt for terminal use. The editor's defaults are already very close
+    /// to VS Code, so this preset has fewer changes than IntelliJ.
     fn vscode_defaults() -> Self {
         let mut kb = Self::defaults();
 
-        // VS Code uses Cmd+Opt+F → ctrl+alt+f for Find & Replace.
+        // ── Find & Replace: Cmd+Opt+F → ctrl+alt+f ─────────────────────
         kb.rebind("open_replace", "ctrl+alt+f");
 
-        // VS Code uses Ctrl+Shift+D for duplicate line (Opt+Shift+Down copies line
-        // down but conflicts with spawn_cursor_down).
+        // ── Duplicate Line: Opt+Shift+Down in VS Code, but that conflicts
+        //    with spawn_cursor_down, so use Ctrl+Shift+D ─────────────────
         kb.rebind("duplicate_line", "ctrl+shift+d");
+
+        // ── Word navigation: Opt+Arrow (VS Code macOS uses Opt for word nav)
+        kb.rebind("move_cursor_word_left", "alt+left");
+        kb.rebind("move_cursor_word_right", "alt+right");
+        kb.rebind("extend_selection_word_left", "alt+shift+left");
+        kb.rebind("extend_selection_word_right", "alt+shift+right");
+
+        // ── Word deletion: Opt+Backspace/Delete ────────────────────────
+        kb.rebind("delete_word_backward", "alt+backspace");
+        kb.rebind("delete_word_forward", "alt+delete");
+
+        // ── Go to Symbol in File: Cmd+Shift+O → ctrl+shift+o ───────────
+        kb.rebind("open_fuzzy_picker", "ctrl+shift+o");
+
+        // ── Rename Symbol: F2 (same as default) ────────────────────────
+        // (already the default)
+
+        // ── Go to Definition: F12 (same as default) ────────────────────
+        // (already the default)
+
+        // ── Find All References: Shift+F12 (same as default) ───────────
+        // (already the default)
 
         kb
     }
@@ -821,6 +883,34 @@ mod tests {
     }
 
     #[test]
+    fn intellij_defaults_go_to_definition_is_ctrl_b() {
+        let kb = KeyBindings::intellij_defaults();
+        let combo: KeyCombo = "ctrl+b".parse().unwrap();
+        assert_eq!(kb.lookup(&combo), Some(&EditorAction::GoToDefinition));
+    }
+
+    #[test]
+    fn intellij_defaults_find_references_is_alt_f7() {
+        let kb = KeyBindings::intellij_defaults();
+        let combo: KeyCombo = "alt+f7".parse().unwrap();
+        assert_eq!(kb.lookup(&combo), Some(&EditorAction::FindReferences));
+    }
+
+    #[test]
+    fn intellij_defaults_rename_is_shift_f6() {
+        let kb = KeyBindings::intellij_defaults();
+        let combo: KeyCombo = "shift+f6".parse().unwrap();
+        assert_eq!(kb.lookup(&combo), Some(&EditorAction::RenameSymbol));
+    }
+
+    #[test]
+    fn intellij_defaults_sidebar_is_alt_1() {
+        let kb = KeyBindings::intellij_defaults();
+        let combo: KeyCombo = "alt+1".parse().unwrap();
+        assert_eq!(kb.lookup(&combo), Some(&EditorAction::FocusSidebar));
+    }
+
+    #[test]
     fn vscode_defaults_replace_is_ctrl_alt_f() {
         let kb = KeyBindings::vscode_defaults();
         let combo: KeyCombo = "ctrl+alt+f".parse().unwrap();
@@ -832,6 +922,25 @@ mod tests {
         let kb = KeyBindings::vscode_defaults();
         let combo: KeyCombo = "ctrl+shift+d".parse().unwrap();
         assert_eq!(kb.lookup(&combo), Some(&EditorAction::DuplicateLine));
+    }
+
+    #[test]
+    fn vscode_defaults_word_nav_uses_alt() {
+        let kb = KeyBindings::vscode_defaults();
+        let alt_left: KeyCombo = "alt+left".parse().unwrap();
+        assert_eq!(
+            kb.lookup(&alt_left),
+            Some(&EditorAction::MoveCursorWord(
+                super::super::action::Direction::Left
+            ))
+        );
+        let alt_right: KeyCombo = "alt+right".parse().unwrap();
+        assert_eq!(
+            kb.lookup(&alt_right),
+            Some(&EditorAction::MoveCursorWord(
+                super::super::action::Direction::Right
+            ))
+        );
     }
 
     #[test]
