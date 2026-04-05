@@ -560,6 +560,8 @@ pub struct AppState {
     lsp_change_sent: bool,
     pub term_width: u16,
     pub term_height: u16,
+    pub memory_rss_kb: u64,
+    memory_last_checked: Instant,
 }
 
 impl AppState {
@@ -602,6 +604,8 @@ impl AppState {
             lsp_change_sent: false,
             term_width: 80,
             term_height: 24,
+            memory_rss_kb: 0,
+            memory_last_checked: Instant::now(),
         };
         // Apply config to initial buffer.
         if state.config.word_wrap {
@@ -2003,6 +2007,16 @@ impl AppState {
         }
     }
 
+    /// Update cached RSS memory usage (throttled to every 2 seconds).
+    pub fn refresh_memory(&mut self) {
+        if self.memory_last_checked.elapsed() >= Duration::from_secs(2) {
+            if let Some(kb) = read_rss_kb() {
+                self.memory_rss_kb = kb;
+            }
+            self.memory_last_checked = Instant::now();
+        }
+    }
+
     /// Reload the active buffer from disk (used after external modification).
     fn reload_active_file(&mut self) {
         let path = match self.editor.active().path.clone() {
@@ -2901,6 +2915,7 @@ impl App {
 
             // Check for external file changes (non-blocking).
             state.poll_file_watcher();
+            state.refresh_memory();
 
             // Drain pending LSP server updates (non-blocking).
             state.poll_lsp_updates();
@@ -2936,6 +2951,117 @@ impl Default for App {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ── Platform-specific RSS memory reading ─────────────────────────────────────
+
+#[cfg(target_os = "linux")]
+fn read_rss_kb() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("VmRSS:") {
+            return rest.trim().trim_end_matches(" kB").trim().parse().ok();
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn read_rss_kb() -> Option<u64> {
+    use std::mem;
+
+    const MACH_TASK_BASIC_INFO: u32 = 20;
+
+    type TaskT = u32;
+    type TaskFlavorT = u32;
+    type TaskInfoT = u32;
+    type MachMsgTypeNumberT = u32;
+    type KernReturnT = i32;
+
+    unsafe extern "C" {
+        fn mach_task_self() -> TaskT;
+        fn task_info(
+            target_task: TaskT,
+            flavor: TaskFlavorT,
+            task_info_out: *mut TaskInfoT,
+            task_info_outCnt: *mut MachMsgTypeNumberT,
+        ) -> KernReturnT;
+    }
+
+    #[repr(C)]
+    struct MachTaskBasicInfo {
+        virtual_size: u64,
+        resident_size: u64,
+        resident_size_max: u64,
+        user_time: [u32; 2],
+        system_time: [u32; 2],
+        policy: i32,
+        suspend_count: i32,
+    }
+
+    unsafe {
+        let mut info: MachTaskBasicInfo = mem::zeroed();
+        let mut count = (mem::size_of::<MachTaskBasicInfo>() / mem::size_of::<u32>()) as u32;
+        let ret = task_info(
+            mach_task_self(),
+            MACH_TASK_BASIC_INFO,
+            &mut info as *mut _ as *mut TaskInfoT,
+            &mut count,
+        );
+        if ret == 0 {
+            Some(info.resident_size / 1024)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn read_rss_kb() -> Option<u64> {
+    use std::mem;
+
+    unsafe extern "system" {
+        fn GetCurrentProcess() -> *mut core::ffi::c_void;
+        fn K32GetProcessMemoryInfo(
+            process: *mut core::ffi::c_void,
+            ppsmemCounters: *mut ProcessMemoryCounters,
+            cb: u32,
+        ) -> i32;
+    }
+
+    #[repr(C)]
+    struct ProcessMemoryCounters {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set_size: usize,
+        working_set_size: usize,
+        quota_peak_paged_pool_usage: usize,
+        quota_paged_pool_usage: usize,
+        quota_peak_non_paged_pool_usage: usize,
+        quota_non_paged_pool_usage: usize,
+        page_file_usage: usize,
+        peak_page_file_usage: usize,
+    }
+
+    unsafe {
+        let mut pmc: ProcessMemoryCounters = mem::zeroed();
+        pmc.cb = mem::size_of::<ProcessMemoryCounters>() as u32;
+        let ret = K32GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            &mut pmc,
+            mem::size_of::<ProcessMemoryCounters>() as u32,
+        );
+        if ret != 0 {
+            Some(pmc.working_set_size as u64 / 1024)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn read_rss_kb() -> Option<u64> {
+    None
 }
 
 // ── Free helpers for LSP ─────────────────────────────────────────────────────

@@ -85,6 +85,11 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
     let modified_str = if handle.buffer.modified { " [+]" } else { "" };
     let lang = handle.syntax.language.name();
     let pos = format!(" {}:{} ", line, col);
+    let mem_str = if state.memory_rss_kb > 0 {
+        format_memory(state.memory_rss_kb)
+    } else {
+        String::new()
+    };
     let enc = " UTF-8  F1:Help ";
     let wrap_flag = if handle.viewport.word_wrap { " WW" } else { "" };
     let lsp_flag = match &state.lsp {
@@ -101,9 +106,9 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
         String::new()
     };
 
-    // Right side: word-wrap flag + LSP/TS mode + diagnostics + language + position + encoding
+    // Right side: word-wrap flag + LSP/TS mode + diagnostics + language + position + memory + encoding
     let right = format!(
-        "{}{}{}{}  {}{}",
+        "{}{}{}{}  {}{}{}",
         wrap_flag,
         lsp_flag,
         diag_str,
@@ -113,6 +118,7 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
             String::new()
         },
         pos,
+        mem_str,
         enc
     );
     let width = area.width as usize;
@@ -181,6 +187,16 @@ fn modal_prompt(mode: &InputMode) -> Option<String> {
         InputMode::OpenFilePath(s) => Some(format!(" Open: {}_", s)),
         InputMode::SaveAsPath(s) => Some(format!(" Save as: {}_", s)),
         InputMode::Rename(s) => Some(format!(" Rename: {}_", s)),
+    }
+}
+
+fn format_memory(kb: u64) -> String {
+    if kb >= 1_048_576 {
+        format!(" {:.1} GiB ", kb as f64 / 1_048_576.0)
+    } else if kb >= 1024 {
+        format!(" {:.1} MiB ", kb as f64 / 1024.0)
+    } else {
+        format!(" {} KiB ", kb)
     }
 }
 
