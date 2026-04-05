@@ -2361,6 +2361,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-kotlin-codanna"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3fb3a558eb12b0c0cb104bc6e44bd15c8aa6ac4c7241e4b342b92ae6202ede5d"
+dependencies = [
+ "cc",
+ "tree-sitter",
+]
+
+[[package]]
 name = "tree-sitter-language"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2409,6 +2419,7 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-javascript",
  "tree-sitter-json",
+ "tree-sitter-kotlin-codanna",
  "tree-sitter-python",
  "tree-sitter-rust",
  "unicode-segmentation",

@@ -8,6 +8,7 @@ pub enum Lang {
     Python,
     JavaScript,
     Json,
+    Kotlin,
     #[default]
     Unknown,
 }
@@ -26,6 +27,7 @@ impl Lang {
             "py" | "pyw" => Self::Python,
             "js" | "mjs" | "cjs" => Self::JavaScript,
             "json" | "jsonc" => Self::Json,
+            "kt" | "kts" => Self::Kotlin,
             _ => Self::Unknown,
         }
     }
@@ -37,6 +39,7 @@ impl Lang {
             Self::Python => Some(tree_sitter_python::LANGUAGE.into()),
             Self::JavaScript => Some(tree_sitter_javascript::LANGUAGE.into()),
             Self::Json => Some(tree_sitter_json::LANGUAGE.into()),
+            Self::Kotlin => Some(tree_sitter_kotlin_codanna::language()),
             Self::Unknown => None,
         }
     }
@@ -48,6 +51,7 @@ impl Lang {
             Self::Python => "Python",
             Self::JavaScript => "JavaScript",
             Self::Json => "JSON",
+            Self::Kotlin => "Kotlin",
             Self::Unknown => "",
         }
     }
@@ -56,7 +60,7 @@ impl Lang {
     /// Returns `None` for languages that don't support line comments.
     pub fn comment_prefix(self) -> Option<&'static str> {
         match self {
-            Self::Rust | Self::JavaScript => Some("// "),
+            Self::Rust | Self::JavaScript | Self::Kotlin => Some("// "),
             Self::Python => Some("# "),
             Self::Json | Self::Unknown => None,
         }
@@ -92,6 +96,13 @@ mod tests {
     }
 
     #[test]
+    fn detect_kotlin() {
+        assert_eq!(Lang::from_extension("kt"), Lang::Kotlin);
+        assert_eq!(Lang::from_extension("kts"), Lang::Kotlin);
+        assert_eq!(Lang::from_path(Path::new("Main.kt")), Lang::Kotlin);
+    }
+
+    #[test]
     fn unknown_extension() {
         assert_eq!(Lang::from_extension("txt"), Lang::Unknown);
         assert_eq!(Lang::from_extension(""), Lang::Unknown);
@@ -103,6 +114,7 @@ mod tests {
         assert!(Lang::Python.ts_language().is_some());
         assert!(Lang::JavaScript.ts_language().is_some());
         assert!(Lang::Json.ts_language().is_some());
+        assert!(Lang::Kotlin.ts_language().is_some());
     }
 
     #[test]
@@ -113,6 +125,7 @@ mod tests {
     #[test]
     fn names() {
         assert_eq!(Lang::Rust.name(), "Rust");
+        assert_eq!(Lang::Kotlin.name(), "Kotlin");
         assert_eq!(Lang::Unknown.name(), "");
     }
 
@@ -121,6 +134,7 @@ mod tests {
         assert_eq!(Lang::Rust.comment_prefix(), Some("// "));
         assert_eq!(Lang::JavaScript.comment_prefix(), Some("// "));
         assert_eq!(Lang::Python.comment_prefix(), Some("# "));
+        assert_eq!(Lang::Kotlin.comment_prefix(), Some("// "));
     }
 
     #[test]
