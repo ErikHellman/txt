@@ -66,6 +66,8 @@ txt --help           # show CLI reference
 ## Keyboard reference
 
 > Press **F1** inside the editor for a scrollable in-app reference.
+>
+> All keyboard shortcuts below are the **defaults** and can be customized — see [Configurable keybindings](#configurable-keybindings) below.
 
 ### Navigation
 
@@ -141,6 +143,7 @@ All editing and navigation operations apply to every cursor simultaneously.
 | Ctrl+N | New file |
 | Ctrl+T | New tab |
 | Ctrl+O | Open file (path prompt) |
+| Ctrl+F4 | Close tab |
 | Ctrl+] / Ctrl+PgDn | Next tab |
 | Ctrl+[ / Ctrl+PgUp | Previous tab |
 | Ctrl+1 – Ctrl+9 | Jump to tab by index |
@@ -278,6 +281,7 @@ confirm_exit = false      # ask before quitting with unsaved changes
 auto_save = false         # auto-save after edits (debounced)
 show_whitespace = false   # render whitespace glyphs
 theme = "default"         # "default" | "monokai" | "gruvbox" | "nord"
+keymap_preset = "default" # "default" | "intellij_idea" | "vscode"
 ```
 
 | Key | Type | Default | Description |
@@ -288,10 +292,51 @@ theme = "default"         # "default" | "monokai" | "gruvbox" | "nord"
 | `auto_save` | bool | `false` | Auto-save after edits |
 | `show_whitespace` | bool | `false` | Show visible whitespace glyphs |
 | `theme` | string | `"default"` | Color theme |
+| `keymap_preset` | string | `"default"` | Keybinding preset |
 
 Settings can also be changed interactively via **Ctrl+,** and are written back to `config.toml` immediately.
 
 **Recent files** are stored per-workspace in `<workspace>/.txt/recents.json` (up to 50 entries). This file is local to each project. If you do not want it to appear in Git, add `.txt/` to your project's `.gitignore`.
+
+### Configurable keybindings
+
+**Location:** `~/.config/txt/keybindings.toml`
+
+All keyboard shortcuts are configurable. The keybindings file is created with defaults on first launch. Each line maps an action name to a key combo:
+
+```toml
+# Format: action_name = "key+combo"
+# Modifiers: ctrl, alt, shift (order doesn't matter)
+# Keys: a-z, 0-9, f1-f12, up, down, left, right, home, end,
+#       pageup, pagedown, backspace, delete, esc, enter, tab, space
+
+save_file = "ctrl+s"
+open_replace = "ctrl+h"
+toggle_line_comment = "ctrl+/"
+```
+
+To rebind a shortcut, change the key combo string. For example, to use Ctrl+Shift+Q for quit instead of Ctrl+Q:
+
+```toml
+quit = "ctrl+shift+q"
+```
+
+#### Presets
+
+Three keybinding presets are available — **Default**, **IntelliJ IDEA**, and **VS Code**. Switch between them interactively via **Ctrl+,** (Settings overlay) or set `keymap_preset` in `config.toml`.
+
+Switching presets copies the selected preset file to `keybindings.toml` and reloads immediately. You can further customize the active keybindings after switching.
+
+All preset files are auto-created in `~/.config/txt/` on first launch:
+
+| File | Description |
+|------|-------------|
+| `keybindings.toml` | Active keybindings (loaded by the editor) |
+| `keybindings-default.toml` | Default preset (copy of original defaults) |
+| `keybindings-intellij.toml` | IntelliJ IDEA macOS keymap (Cmd→Ctrl, Opt→Alt) |
+| `keybindings-vscode.toml` | VS Code macOS keymap (Cmd→Ctrl, Opt→Alt) |
+
+The IntelliJ and VS Code presets translate macOS modifier keys for terminal use: Cmd becomes Ctrl, and Opt becomes Alt. Notable differences from the defaults include word navigation (Alt+Arrow instead of Ctrl+Arrow), find & replace shortcuts, and LSP key bindings. See the preset files for the full mapping.
 
 ## Development
 
