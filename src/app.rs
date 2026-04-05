@@ -562,6 +562,13 @@ impl AppState {
             return;
         }
 
+        // Modal input (status-bar prompts) — must come before sidebar so that
+        // rename / new-folder prompts receive Enter/typing even while sidebar is focused.
+        if !self.input_mode.is_normal() {
+            self.handle_modal_input(action);
+            return;
+        }
+
         // Sidebar focus — intercept navigation when sidebar has focus
         if self.sidebar_focused && self.handle_sidebar_input(&action) {
             return;
@@ -584,12 +591,6 @@ impl AppState {
             return;
         }
         // Navigation actions fall through to normal dispatch below.
-
-        // Status-bar modal input modes
-        if !self.input_mode.is_normal() {
-            self.handle_modal_input(action);
-            return;
-        }
 
         // Normal editing
         let text_h = (terminal_height as usize).saturating_sub(1);
