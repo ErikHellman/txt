@@ -401,7 +401,12 @@ fn handle_markdown_code_fence(
                 "info_string" => {
                     let text = node_text(child, source).trim().to_string();
                     if let Some(lang_name) = text.split_whitespace().next() {
-                        embedded_lang = Some(Lang::from_extension(lang_name));
+                        let normalized_lang_name = lang_name
+                            .trim_matches(|c: char| !c.is_ascii_alphanumeric())
+                            .to_ascii_lowercase();
+                        if !normalized_lang_name.is_empty() {
+                            embedded_lang = Some(Lang::from_extension(&normalized_lang_name));
+                        }
                     }
                 }
                 "code_fence_content" => {
