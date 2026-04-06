@@ -547,6 +547,14 @@ mod tests {
         parser.parse(source, None).unwrap()
     }
 
+    fn parse_markdown(source: &str) -> Tree {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_md::LANGUAGE.into())
+            .unwrap();
+        parser.parse(source, None).unwrap()
+    }
+
     fn spans_for(source: &str, tree: &Tree, lang: Lang) -> Vec<HighlightSpan> {
         highlight(tree, source.as_bytes(), lang, 0, source.len())
     }
@@ -780,6 +788,64 @@ mod tests {
             spans
                 .iter()
                 .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "null")
+        );
+    }
+
+    // ── Markdown ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn markdown_atx_heading_marker() {
+        let src = "# Hello World";
+        let tree = parse_markdown(src);
+        let spans = spans_for(src, &tree, Lang::Markdown);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Heading && &src[s.start..s.end] == "#"),
+            "expected Heading span for '#', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn markdown_link_punctuation() {
+        let src = "[link](https://example.com)";
+        let tree = parse_markdown(src);
+        let spans = spans_for(src, &tree, Lang::Markdown);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Link && src.get(s.start..s.end) == Some("[")),
+            "expected Link span for '[', got: {:?}",
+            spans
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Link && src.get(s.start..s.end) == Some("]")),
+            "expected Link span for ']', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn markdown_fenced_code_block_with_embedded_rust() {
+        let src = "```rust\nlet x = 1;\n```";
+        let tree = parse_markdown(src);
+        let spans = spans_for(src, &tree, Lang::Markdown);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::CodeBlock && &src[s.start..s.end] == "```"),
+            "expected CodeBlock span for fence markers, got: {:?}",
+            spans
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "let"),
+            "expected embedded 'let' as Keyword, got: {:?}",
+            spans
         );
     }
 
