@@ -30,15 +30,10 @@ impl Lang {
             "js" | "mjs" | "cjs" => Self::JavaScript,
             "json" | "jsonc" => Self::Json,
             "md" | "markdown" => Self::Markdown,
-            // Code fence language identifiers (lowercase)
+            // Code fence language identifiers (lowercase) for supported grammars only
             "rust" => Self::Rust,
             "python" => Self::Python,
             "javascript" => Self::JavaScript,
-            "ruby" => Self::Python,
-            "go" => Self::Rust,
-            "c" | "cpp" | "c++" => Self::Rust,
-            "java" => Self::Rust,
-            "ts" | "typescript" => Self::JavaScript,
             _ => Self::Unknown,
         }
     }
