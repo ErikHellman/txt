@@ -16,6 +16,10 @@ pub enum HighlightKind {
     Function,
     Attribute,
     Punctuation,
+    Heading,
+    Link,
+    Emphasis,
+    CodeBlock,
 }
 
 /// A highlighted byte range within the buffer.
@@ -68,6 +72,12 @@ pub fn style_for_kind(kind: HighlightKind, theme: &ThemeColors) -> Style {
         HighlightKind::Function => Style::default().fg(theme.syn_function),
         HighlightKind::Attribute => Style::default().fg(theme.syn_attribute),
         HighlightKind::Punctuation => Style::default().fg(theme.syn_punctuation),
+        HighlightKind::Heading => Style::default().fg(theme.syn_heading),
+        HighlightKind::Link => Style::default().fg(theme.syn_link),
+        HighlightKind::Emphasis => Style::default()
+            .fg(theme.syn_emphasis)
+            .add_modifier(Modifier::ITALIC),
+        HighlightKind::CodeBlock => Style::default().fg(theme.syn_codeblock),
     }
 }
 
@@ -150,6 +160,23 @@ fn visit(
         return;
     }
 
+    // Special-case for markdown: 'inline' nodes contain text with potential formatting.
+    // Don't treat as leaf - always recurse.
+    if lang == Lang::Markdown && kind == "inline" {
+        for i in 0..node.child_count() {
+            if let Some(child) = node.child(i as u32) {
+                visit(child, lang, source, start_byte, end_byte, spans);
+            }
+        }
+        return;
+    }
+
+    // Special-case for markdown: fenced code blocks with embedded language highlighting
+    if lang == Lang::Markdown && kind == "fenced_code_block" {
+        handle_markdown_code_fence(node, source, start_byte, end_byte, spans);
+        return;
+    }
+
     // Leaf nodes: match by kind (keywords, numbers, operators, etc.)
     if node.child_count() == 0 {
         let parent_kind = node.parent().map(|p| p.kind()).unwrap_or("");
@@ -222,6 +249,7 @@ fn atomic_kind(node_kind: &str, lang: Lang) -> Option<HighlightKind> {
             "string" => Some(HighlightKind::String),
             _ => None,
         },
+        Lang::Markdown => None,
         Lang::Unknown => None,
     }
 }
@@ -233,7 +261,24 @@ fn leaf_kind(node_kind: &str, parent_kind: &str, lang: Lang) -> Option<Highlight
         Lang::Python => python_leaf(node_kind, parent_kind),
         Lang::JavaScript => js_leaf(node_kind, parent_kind),
         Lang::Json => json_leaf(node_kind),
+        Lang::Markdown => markdown_leaf(node_kind, parent_kind),
         Lang::Unknown => None,
+    }
+}
+
+fn markdown_leaf(kind: &str, _parent: &str) -> Option<HighlightKind> {
+    match kind {
+        "atx_h1_marker"
+        | "atx_h2_marker"
+        | "atx_h3_marker"
+        | "atx_h4_marker"
+        | "atx_h5_marker"
+        | "atx_h6_marker"
+        | "setext_heading_marker" => Some(HighlightKind::Heading),
+        "[" | "]" | "(" | ")" => Some(HighlightKind::Link),
+        "*" | "_" | "`" | "**" | "***" | "__" | "___" => Some(HighlightKind::Emphasis),
+        "fenced_code_block_delimiter" => Some(HighlightKind::CodeBlock),
+        _ => None,
     }
 }
 
@@ -321,7 +366,154 @@ fn is_function_context(ctx: &str, lang: Lang) -> bool {
             ctx,
             "function_declaration" | "method_definition" | "function"
         ),
+        Lang::Markdown => false,
         _ => false,
+    }
+}
+
+/// Extract text from a tree-sitter node
+fn node_text(node: Node<'_>, source: &[u8]) -> String {
+    let start = node.start_byte();
+    let end = node.end_byte();
+    if start >= source.len() || end > source.len() {
+        return String::new();
+    }
+    String::from_utf8_lossy(&source[start..end]).to_string()
+}
+
+/// Handle markdown fenced code blocks with embedded language highlighting
+#[allow(clippy::only_used_in_recursion)]
+fn handle_markdown_code_fence(
+    node: Node<'_>,
+    source: &[u8],
+    start_byte: usize,
+    end_byte: usize,
+    spans: &mut Vec<HighlightSpan>,
+) {
+    // Find info_string (language) and code_fence_content
+    let mut embedded_lang: Option<Lang> = None;
+    let mut code_start: usize = 0;
+    let mut code_end: usize = 0;
+
+    for i in 0..node.child_count() {
+        if let Some(child) = node.child(i as u32) {
+            match child.kind() {
+                "info_string" => {
+                    let text = node_text(child, source).trim().to_string();
+                    if let Some(lang_name) = text.split_whitespace().next() {
+                        let normalized_lang_name = lang_name
+                            .trim_matches(|c: char| !c.is_ascii_alphanumeric())
+                            .to_ascii_lowercase();
+                        if !normalized_lang_name.is_empty() {
+                            embedded_lang = Some(Lang::from_extension(&normalized_lang_name));
+                        }
+                    }
+                }
+                "code_fence_content" => {
+                    code_start = child.start_byte();
+                    code_end = child.end_byte();
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Recursively visit all children to highlight fence markers and info_string
+    for i in 0..node.child_count() {
+        if let Some(child) = node.child(i as u32) {
+            if child.kind() == "code_fence_content" {
+                continue; // Handle separately for embedded highlighting
+            }
+            visit(child, Lang::Markdown, source, start_byte, end_byte, spans);
+        }
+    }
+
+    // If embedded language detected, parse and highlight the code content
+    if let Some(lang) = embedded_lang
+        && lang != Lang::Unknown
+        && code_start < code_end
+        && code_end <= source.len()
+    {
+        let mut parser = tree_sitter::Parser::new();
+        if let Some(ts_lang) = lang.ts_language()
+            && parser.set_language(&ts_lang).is_ok()
+        {
+            let content_bytes = &source[code_start..code_end];
+            if let Some(tree) = parser.parse(content_bytes, None) {
+                let offset = code_start;
+                collect_embedded_spans(
+                    &tree.root_node(),
+                    lang,
+                    offset,
+                    start_byte,
+                    end_byte,
+                    spans,
+                );
+            }
+        }
+    }
+}
+
+/// Collect spans from embedded language parsing with offset adjustment
+#[allow(clippy::too_many_arguments)]
+fn collect_embedded_spans(
+    node: &Node<'_>,
+    lang: Lang,
+    offset: usize,
+    start_byte: usize,
+    end_byte: usize,
+    spans: &mut Vec<HighlightSpan>,
+) {
+    let node_start = node.start_byte();
+    let node_end = node.end_byte();
+
+    if node_start >= node_end {
+        return;
+    }
+
+    // Prune: skip outside visible range
+    if node_end + offset <= start_byte || node_start + offset >= end_byte {
+        return;
+    }
+
+    let kind = node.kind();
+
+    // Atomic nodes
+    if let Some(hk) = atomic_kind(kind, lang) {
+        let s = (node_start + offset).max(start_byte);
+        let e = (node_end + offset).min(end_byte);
+        if s < e {
+            spans.push(HighlightSpan {
+                start: s,
+                end: e,
+                kind: hk,
+            });
+        }
+        return;
+    }
+
+    // Leaf nodes
+    if node.child_count() == 0 {
+        let parent_kind = node.parent().map(|p| p.kind()).unwrap_or("");
+        if let Some(hk) = leaf_kind(kind, parent_kind, lang) {
+            let s = (node_start + offset).max(start_byte);
+            let e = (node_end + offset).min(end_byte);
+            if s < e {
+                spans.push(HighlightSpan {
+                    start: s,
+                    end: e,
+                    kind: hk,
+                });
+            }
+        }
+        return;
+    }
+
+    // Recurse
+    for i in 0..node.child_count() {
+        if let Some(child) = node.child(i as u32) {
+            collect_embedded_spans(&child, lang, offset, start_byte, end_byte, spans);
+        }
     }
 }
 
@@ -351,6 +543,14 @@ mod tests {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(&tree_sitter_json::LANGUAGE.into())
+            .unwrap();
+        parser.parse(source, None).unwrap()
+    }
+
+    fn parse_markdown(source: &str) -> Tree {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_md::LANGUAGE.into())
             .unwrap();
         parser.parse(source, None).unwrap()
     }
@@ -588,6 +788,64 @@ mod tests {
             spans
                 .iter()
                 .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "null")
+        );
+    }
+
+    // ── Markdown ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn markdown_atx_heading_marker() {
+        let src = "# Hello World";
+        let tree = parse_markdown(src);
+        let spans = spans_for(src, &tree, Lang::Markdown);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Heading && &src[s.start..s.end] == "#"),
+            "expected Heading span for '#', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn markdown_link_punctuation() {
+        let src = "[link](https://example.com)";
+        let tree = parse_markdown(src);
+        let spans = spans_for(src, &tree, Lang::Markdown);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Link && src.get(s.start..s.end) == Some("[")),
+            "expected Link span for '[', got: {:?}",
+            spans
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Link && src.get(s.start..s.end) == Some("]")),
+            "expected Link span for ']', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn markdown_fenced_code_block_with_embedded_rust() {
+        let src = "```rust\nlet x = 1;\n```";
+        let tree = parse_markdown(src);
+        let spans = spans_for(src, &tree, Lang::Markdown);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::CodeBlock && &src[s.start..s.end] == "```"),
+            "expected CodeBlock span for fence markers, got: {:?}",
+            spans
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "let"),
+            "expected embedded 'let' as Keyword, got: {:?}",
+            spans
         );
     }
 

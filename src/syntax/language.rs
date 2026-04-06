@@ -8,6 +8,7 @@ pub enum Lang {
     Python,
     JavaScript,
     Json,
+    Markdown,
     #[default]
     Unknown,
 }
@@ -20,12 +21,19 @@ impl Lang {
     }
 
     /// Detect language from a file extension string (lowercase expected).
+    /// Also accepts common language identifiers used in code fences.
     pub fn from_extension(ext: &str) -> Self {
         match ext {
+            // File extensions
             "rs" => Self::Rust,
             "py" | "pyw" => Self::Python,
             "js" | "mjs" | "cjs" => Self::JavaScript,
             "json" | "jsonc" => Self::Json,
+            "md" | "markdown" => Self::Markdown,
+            // Code fence language identifiers (lowercase) for supported grammars only
+            "rust" => Self::Rust,
+            "python" => Self::Python,
+            "javascript" => Self::JavaScript,
             _ => Self::Unknown,
         }
     }
@@ -37,6 +45,7 @@ impl Lang {
             Self::Python => Some(tree_sitter_python::LANGUAGE.into()),
             Self::JavaScript => Some(tree_sitter_javascript::LANGUAGE.into()),
             Self::Json => Some(tree_sitter_json::LANGUAGE.into()),
+            Self::Markdown => Some(tree_sitter_md::LANGUAGE.into()),
             Self::Unknown => None,
         }
     }
@@ -48,6 +57,7 @@ impl Lang {
             Self::Python => "Python",
             Self::JavaScript => "JavaScript",
             Self::Json => "JSON",
+            Self::Markdown => "Markdown",
             Self::Unknown => "",
         }
     }
@@ -58,7 +68,7 @@ impl Lang {
         match self {
             Self::Rust | Self::JavaScript => Some("// "),
             Self::Python => Some("# "),
-            Self::Json | Self::Unknown => None,
+            Self::Json | Self::Markdown | Self::Unknown => None,
         }
     }
 }

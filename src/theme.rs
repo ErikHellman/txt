@@ -17,6 +17,10 @@ pub struct ThemeColors {
     pub syn_function: Color,
     pub syn_attribute: Color,
     pub syn_punctuation: Color,
+    pub syn_heading: Color,
+    pub syn_link: Color,
+    pub syn_emphasis: Color,
+    pub syn_codeblock: Color,
     // ── Editor text area ──────────────────────────────────────────────────────
     pub text: Color,
     pub selection_bg: Color,
@@ -56,6 +60,10 @@ impl ThemeColors {
             syn_function: Color::Rgb(220, 220, 170),
             syn_attribute: Color::Rgb(156, 220, 254),
             syn_punctuation: Color::DarkGray,
+            syn_heading: Color::Cyan,
+            syn_link: Color::Rgb(78, 201, 176),
+            syn_emphasis: Color::White,
+            syn_codeblock: Color::DarkGray,
             text: Color::White,
             selection_bg: Color::Rgb(60, 80, 120),
             line_num_cur: Color::Yellow,
@@ -82,6 +90,10 @@ impl ThemeColors {
             syn_function: Color::Rgb(166, 226, 46),     // #a6e22e bright green
             syn_attribute: Color::Rgb(249, 38, 114),    // #f92672 pink
             syn_punctuation: Color::Rgb(248, 248, 242), // #f8f8f2 near-white
+            syn_heading: Color::Rgb(102, 217, 239),     // #66d9ef cyan
+            syn_link: Color::Rgb(102, 217, 239),        // #66d9ef cyan
+            syn_emphasis: Color::Rgb(248, 248, 242),    // #f8f8f2 near-white
+            syn_codeblock: Color::Rgb(117, 113, 94),    // #75715e gray-brown
             text: Color::Rgb(248, 248, 242),            // #f8f8f2
             selection_bg: Color::Rgb(73, 72, 62),       // #49483e
             line_num_cur: Color::Rgb(230, 219, 116),    // yellow
@@ -108,6 +120,10 @@ impl ThemeColors {
             syn_function: Color::Rgb(250, 189, 47),         // #fabd2f yellow
             syn_attribute: Color::Rgb(131, 165, 152),       // #83a598 teal
             syn_punctuation: Color::Rgb(168, 153, 132),     // #a89984 warm gray
+            syn_heading: Color::Rgb(131, 165, 152),         // #83a598 teal
+            syn_link: Color::Rgb(131, 165, 152),            // #83a598 teal
+            syn_emphasis: Color::Rgb(213, 196, 161),        // #d5c4a1 cream
+            syn_codeblock: Color::Rgb(168, 153, 132),       // #a89984 warm gray
             text: Color::Rgb(235, 219, 178),                // #ebdbb2
             selection_bg: Color::Rgb(80, 73, 69),           // dark warm
             line_num_cur: Color::Rgb(250, 189, 47),         // yellow
@@ -134,6 +150,10 @@ impl ThemeColors {
             syn_function: Color::Rgb(143, 188, 187),  // #8fbcbb nord7 teal
             syn_attribute: Color::Rgb(235, 203, 139), // #ebcb8b nord13 yellow
             syn_punctuation: Color::Rgb(76, 86, 106), // nord3 dark
+            syn_heading: Color::Rgb(136, 192, 208),   // #88c0d0 nord8 light blue
+            syn_link: Color::Rgb(136, 192, 208),      // #88c0d0 nord8 light blue
+            syn_emphasis: Color::Rgb(216, 222, 233),  // #d8dee9 nord4
+            syn_codeblock: Color::Rgb(76, 86, 106),   // nord3 dark
             text: Color::Rgb(216, 222, 233),          // #d8dee9 nord4
             selection_bg: Color::Rgb(67, 76, 94),     // #434c5e nord2
             line_num_cur: Color::Rgb(129, 161, 193),  // nord9 blue
