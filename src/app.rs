@@ -578,6 +578,7 @@ pub const LSP_SERVER_OPTIONS: &[(&str, &str, &[&str])] = &[
     ("gopls", "gopls", &["serve"]),
     ("lua-language-server", "lua-language-server", &[]),
     ("zls", "zls", &[]),
+    ("kotlin-lsp", "kotlin-lsp", &[]),
 ];
 
 /// State for the LSP configuration picker overlay.

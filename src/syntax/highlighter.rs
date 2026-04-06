@@ -174,11 +174,14 @@ fn visit(
     for i in 0..node.child_count() {
         if let Some(child) = node.child(i as u32) {
             // Special-case: identifier whose parent context implies Function.
-            if child.kind() == "identifier" && is_function_context(ctx, lang) {
-                // Only the first named identifier child is the function name.
-                // Check field_name to be sure.
+            if matches!(child.kind(), "identifier" | "simple_identifier")
+                && is_function_context(ctx, lang)
+            {
+                // The function name is typically the first identifier child.
+                // Some grammars use a "name" field (Rust, Python, JS); others
+                // (e.g. Kotlin) have no field name on the identifier child.
                 let field = node.field_name_for_child(i as u32);
-                if matches!(field, Some("name")) {
+                if field == Some("name") || (field.is_none() && child.is_named()) {
                     let s = child.start_byte().max(start_byte);
                     let e = child.end_byte().min(end_byte);
                     if s < e && child.end_byte() > start_byte && child.start_byte() < end_byte {
@@ -222,6 +225,14 @@ fn atomic_kind(node_kind: &str, lang: Lang) -> Option<HighlightKind> {
             "string" => Some(HighlightKind::String),
             _ => None,
         },
+        Lang::Kotlin => match node_kind {
+            "string_literal" | "multiline_string_literal" | "character_literal" => {
+                Some(HighlightKind::String)
+            }
+            "line_comment" | "multiline_comment" => Some(HighlightKind::Comment),
+            "annotation" => Some(HighlightKind::Attribute),
+            _ => None,
+        },
         Lang::Unknown => None,
     }
 }
@@ -233,6 +244,7 @@ fn leaf_kind(node_kind: &str, parent_kind: &str, lang: Lang) -> Option<Highlight
         Lang::Python => python_leaf(node_kind, parent_kind),
         Lang::JavaScript => js_leaf(node_kind, parent_kind),
         Lang::Json => json_leaf(node_kind),
+        Lang::Kotlin => kotlin_leaf(node_kind, parent_kind),
         Lang::Unknown => None,
     }
 }
@@ -309,6 +321,37 @@ fn json_leaf(kind: &str) -> Option<HighlightKind> {
     }
 }
 
+fn kotlin_leaf(kind: &str, parent: &str) -> Option<HighlightKind> {
+    match kind {
+        // Keywords
+        "fun" | "val" | "var" | "class" | "interface" | "object" | "if" | "else" | "when"
+        | "for" | "while" | "do" | "return" | "break" | "continue" | "package" | "import"
+        | "is" | "in" | "as" | "try" | "catch" | "finally" | "throw" | "data" | "sealed"
+        | "open" | "abstract" | "override" | "private" | "protected" | "public" | "internal"
+        | "companion" | "enum" | "suspend" | "typealias" | "by" | "constructor" | "init"
+        | "where" | "lateinit" | "const" => Some(HighlightKind::Keyword),
+        "null" | "true" | "false" | "this" | "super" => Some(HighlightKind::Keyword),
+
+        // Numbers
+        "integer_literal" | "real_literal" | "long_literal" | "hex_literal" | "bin_literal" => {
+            Some(HighlightKind::Number)
+        }
+
+        // Types
+        "type_identifier" => Some(HighlightKind::Type),
+
+        // Function calls
+        "simple_identifier" if matches!(parent, "call_expression") => Some(HighlightKind::Function),
+
+        // Punctuation
+        "{" | "}" | "(" | ")" | "[" | "]" | ";" | ":" | "::" | "," | "." | "->" => {
+            Some(HighlightKind::Punctuation)
+        }
+
+        _ => None,
+    }
+}
+
 /// True if a node of kind `ctx` is a context where the `name` child is a function name.
 fn is_function_context(ctx: &str, lang: Lang) -> bool {
     match lang {
@@ -321,6 +364,7 @@ fn is_function_context(ctx: &str, lang: Lang) -> bool {
             ctx,
             "function_declaration" | "method_definition" | "function"
         ),
+        Lang::Kotlin => matches!(ctx, "function_declaration"),
         _ => false,
     }
 }
@@ -351,6 +395,14 @@ mod tests {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(&tree_sitter_json::LANGUAGE.into())
+            .unwrap();
+        parser.parse(source, None).unwrap()
+    }
+
+    fn parse_kotlin(source: &str) -> Tree {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_kotlin_codanna::language())
             .unwrap();
         parser.parse(source, None).unwrap()
     }
@@ -588,6 +640,71 @@ mod tests {
             spans
                 .iter()
                 .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "null")
+        );
+    }
+
+    // ── Kotlin ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn kotlin_fun_keyword() {
+        let src = "fun main() {}";
+        let tree = parse_kotlin(src);
+        let spans = spans_for(src, &tree, Lang::Kotlin);
+        assert!(
+            has_span_of_kind(&spans, 0, 3, HighlightKind::Keyword),
+            "expected 'fun' as Keyword at 0..3, got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn kotlin_string_literal() {
+        let src = r#"val x = "hello""#;
+        let tree = parse_kotlin(src);
+        let spans = spans_for(src, &tree, Lang::Kotlin);
+        assert!(
+            spans.iter().any(|s| s.kind == HighlightKind::String),
+            "expected String span, got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn kotlin_line_comment() {
+        let src = "// a comment\nval x = 1";
+        let tree = parse_kotlin(src);
+        let spans = spans_for(src, &tree, Lang::Kotlin);
+        assert!(
+            has_span_of_kind(&spans, 0, 12, HighlightKind::Comment),
+            "expected Comment span at 0..12, got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn kotlin_integer_literal() {
+        let src = "val x = 42";
+        let tree = parse_kotlin(src);
+        let spans = spans_for(src, &tree, Lang::Kotlin);
+        assert!(
+            spans.iter().any(|s| s.kind == HighlightKind::Number),
+            "expected Number span, got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn kotlin_function_name() {
+        let src = "fun main() {}";
+        let tree = parse_kotlin(src);
+        let spans = spans_for(src, &tree, Lang::Kotlin);
+        // "main" should be highlighted as Function
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Function && &src[s.start..s.end] == "main"),
+            "expected Function span for 'main', got: {:?}",
+            spans
         );
     }
 
