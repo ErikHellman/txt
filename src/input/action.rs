@@ -14,6 +14,9 @@ pub enum EditorAction {
     DeleteForward,
     DeleteWordBackward,
     DeleteWordForward,
+    /// Delete from the cursor to the end of the line. If already at the end of
+    /// the line, delete the newline character (joining with the next line).
+    KillLine,
 
     // ── Cursor movement ───────────────────────────────────────────────
     MoveCursor(Direction),
@@ -203,6 +206,7 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::DeleteForward => "delete_forward",
         EditorAction::DeleteWordBackward => "delete_word_backward",
         EditorAction::DeleteWordForward => "delete_word_forward",
+        EditorAction::KillLine => "kill_line",
         // Cursor movement
         EditorAction::MoveCursor(Direction::Up) => "move_cursor_up",
         EditorAction::MoveCursor(Direction::Down) => "move_cursor_down",
@@ -309,6 +313,7 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "delete_forward" => EditorAction::DeleteForward,
         "delete_word_backward" => EditorAction::DeleteWordBackward,
         "delete_word_forward" => EditorAction::DeleteWordForward,
+        "kill_line" => EditorAction::KillLine,
         // Cursor movement
         "move_cursor_up" => EditorAction::MoveCursor(Direction::Up),
         "move_cursor_down" => EditorAction::MoveCursor(Direction::Down),

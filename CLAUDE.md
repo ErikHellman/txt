@@ -1,5 +1,4 @@
 # txt — Claude Code Guide
-
 `txt` is a fast terminal text editor written in Rust. It uses **ratatui + crossterm** for TUI rendering, **ropey** for the rope-based text buffer, and **tree-sitter** for syntax highlighting. The architecture is Model-View-Update: `AppState::update()` mutates all state, `ui::render()` draws it every frame.
 
 ## Commands

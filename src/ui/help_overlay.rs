@@ -108,6 +108,10 @@ const TEMPLATE: &[HelpEntry] = &[
         desc: "Delete word forward",
     },
     HelpEntry::Binding {
+        actions: &["kill_line"],
+        desc: "Delete to end of line (kill line)",
+    },
+    HelpEntry::Binding {
         actions: &["undo", "redo"],
         desc: "Undo / Redo",
     },

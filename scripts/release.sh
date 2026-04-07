@@ -92,6 +92,11 @@ TAG="v${NEW_VERSION}"
 git tag --list "${TAG}" | grep -q . \
   && die "tag ${TAG} already exists"
 
+# ── Changelog check ───────────────────────────────────────────────────────────
+
+grep -q "^## v${NEW_VERSION}" "${ROOT}/CHANGELOG.md" \
+  || die "no entry for v${NEW_VERSION} in CHANGELOG.md — add release notes first"
+
 # ── Update Cargo.toml ─────────────────────────────────────────────────────────
 
 echo "Updating Cargo.toml ..."

@@ -79,9 +79,17 @@ jobs:
       contents: write
 
     steps:
+      - uses: actions/checkout@v6
+
       - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
+
+      - name: Extract release notes
+        run: |
+          VERSION="${{ github.ref_name }}"
+          awk "/^## ${VERSION}/{found=1; next} /^## /{if(found) exit} found" \
+            CHANGELOG.md | sed '/^[[:space:]]*$/d' > release_notes.txt
 
       - name: Generate checksums
         run: sha256sum txt-* > checksums.txt
@@ -91,4 +99,4 @@ jobs:
           files: |
             txt-*
             checksums.txt
-          generate_release_notes: true
+          body_path: release_notes.txt

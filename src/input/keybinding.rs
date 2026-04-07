@@ -450,7 +450,8 @@ impl KeyBindings {
         bind("ctrl+p", EditorAction::OpenFuzzyPicker);
         bind("ctrl+f", EditorAction::OpenSearch);
         bind("ctrl+h", EditorAction::OpenReplace);
-        bind("ctrl+k", EditorAction::ShowHover);
+        bind("ctrl+k", EditorAction::KillLine);
+        bind("ctrl+shift+k", EditorAction::ShowHover);
         bind("ctrl+l", EditorAction::OpenLspConfig);
         bind("ctrl+r", EditorAction::OpenRecentFiles);
         bind("ctrl+/", EditorAction::ToggleLineComment);
@@ -631,6 +632,11 @@ impl KeyBindings {
         // (ctrl+q is quit; IntelliJ uses F1 for docs too, but F1 is help)
         kb.rebind("show_hover", "ctrl+j");
 
+        // ── Kill line: ctrl+k (same as Emacs/readline) ─────────────────
+        // (IntelliJ default uses ctrl+k for VCS commit, which is not in
+        //  this editor; ctrl+k is free so we keep the readline convention)
+        // (inherited from defaults)
+
         // ── Duplicate Line: Cmd+D → ctrl+d (same as default) ───────────
         // (already the default)
 
@@ -676,6 +682,11 @@ impl KeyBindings {
         // (ctrl+shift+left/right freed by word selection moving to alt+shift)
         kb.rebind("ast_expand_selection", "ctrl+shift+right");
         kb.rebind("ast_contract_selection", "ctrl+shift+left");
+
+        // ── Kill line: ctrl+k (readline convention) ────────────────────
+        // (VS Code uses ctrl+k as a chord prefix, but in terminal context
+        //  ctrl+k as a single key is the readline/Emacs kill-to-EOL)
+        // (inherited from defaults)
 
         kb
     }

@@ -907,6 +907,45 @@ impl AppState {
                 let next = crate::buffer::edit::next_word_boundary(buf.rope(), at);
                 buf.delete_range(at, next);
             }
+            EditorAction::KillLine => {
+                let (at, end, killed) = {
+                    let buf = &mut self.editor.active_mut().buffer;
+                    let at = buf.cursors.primary().byte_offset;
+                    let rope = buf.rope();
+                    let char_at = rope.byte_to_char(at);
+                    let line_idx = rope.char_to_line(char_at);
+                    let line_start_char = rope.line_to_char(line_idx);
+                    let line_end_char = line_start_char + rope.line(line_idx).len_chars();
+                    // len_chars() includes the trailing '\n'; strip it to get content end.
+                    let content_end_char = if line_end_char > line_start_char
+                        && rope.char(line_end_char - 1) == '\n'
+                    {
+                        line_end_char - 1
+                    } else {
+                        line_end_char
+                    };
+                    let content_end_byte = rope.char_to_byte(content_end_char);
+                    let end = if at == content_end_byte {
+                        // At end of line content: delete the newline to join lines.
+                        crate::buffer::edit::next_grapheme_boundary(rope, at)
+                    } else {
+                        content_end_byte
+                    };
+                    let killed = if end > at {
+                        rope.slice(rope.byte_to_char(at)..rope.byte_to_char(end))
+                            .to_string()
+                    } else {
+                        String::new()
+                    };
+                    (at, end, killed)
+                };
+                if !killed.is_empty() {
+                    self.clipboard.set(killed);
+                }
+                if end > at {
+                    self.editor.active_mut().buffer.delete_range(at, end);
+                }
+            }
 
             // ── Clipboard ────────────────────────────────────────────
             EditorAction::Copy => {
@@ -1771,6 +1810,10 @@ impl AppState {
                 self.show_help = false;
                 true
             }
+            // Swallow all text-insertion actions so they don't reach the editor.
+            EditorAction::InsertChar(_) | EditorAction::InsertNewline | EditorAction::InsertTab => {
+                true
+            }
             _ => false,
         }
     }
@@ -1811,6 +1854,8 @@ impl AppState {
                 self.show_settings = false;
                 false
             }
+            // Swallow all text-insertion actions so they don't reach the editor.
+            EditorAction::InsertChar(_) | EditorAction::InsertTab => true,
             _ => false,
         }
     }
@@ -2118,6 +2163,8 @@ impl AppState {
                 }
                 true
             }
+            // Swallow all text-insertion actions so they don't reach the editor.
+            EditorAction::InsertChar(_) | EditorAction::InsertTab => true,
             _ => false,
         }
     }
