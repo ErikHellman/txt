@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.2.0
+## v0.2.1
 
 - Add markdown syntax highlighting support
 - Added customizable keymaps. 3 pre-installed (TXT, VS Code, and IntelliJ IDEA)
