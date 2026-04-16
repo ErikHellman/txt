@@ -303,10 +303,19 @@ impl MultiCursor {
         self.primary = 0;
     }
 
-    /// Sort cursors by byte offset and remove exact duplicates.
-    /// Call this after any operation that may reorder or merge cursors.
+    /// Re-sort and deduplicate after any operation that may reorder cursors.
     pub fn normalize(&mut self) {
         self.sort_and_dedup();
+    }
+
+    /// Iterate over all non-primary cursors in sorted order.
+    pub fn secondary_cursors(&self) -> impl Iterator<Item = &Cursor> {
+        let primary = self.primary;
+        self.cursors
+            .iter()
+            .enumerate()
+            .filter(move |(i, _)| *i != primary)
+            .map(|(_, c)| c)
     }
 
     /// Sort cursors by byte offset and remove exact duplicates.

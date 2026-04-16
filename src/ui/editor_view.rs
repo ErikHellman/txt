@@ -76,36 +76,13 @@ pub fn render(
     let selection = cursor.selection_bytes();
     let has_selection = cursor.has_selection();
 
-    // Collect secondary cursor byte offsets for multi-cursor rendering.
-    let secondary_cursor_offsets: Vec<usize> = if handle.buffer.cursors.is_multi() {
-        let primary_idx = handle.buffer.cursors.primary_idx();
+    let (secondary_cursor_offsets, secondary_cursors_eol): (Vec<usize>, Vec<(usize, usize)>) =
         handle
             .buffer
             .cursors
-            .cursors()
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| *i != primary_idx)
-            .map(|(_, c)| c.byte_offset)
-            .collect()
-    } else {
-        vec![]
-    };
-    // Secondary cursor structs needed for end-of-line rendering.
-    let secondary_cursors_eol: Vec<(usize, usize)> = if handle.buffer.cursors.is_multi() {
-        let primary_idx = handle.buffer.cursors.primary_idx();
-        handle
-            .buffer
-            .cursors
-            .cursors()
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| *i != primary_idx)
-            .map(|(_, c)| (c.line, c.col))
-            .collect()
-    } else {
-        vec![]
-    };
+            .secondary_cursors()
+            .map(|c| (c.byte_offset, (c.line, c.col)))
+            .unzip();
 
     // Pre-compute bracket-match positions.
     let bracket_pair = find_matching_bracket(handle.buffer.rope(), cursor.byte_offset);
@@ -125,9 +102,15 @@ pub fn render(
             .bg(Color::Rgb(70, 70, 95))
             .fg(Color::Rgb(160, 160, 180))
     };
-    let secondary_cursor_style = Style::default()
-        .bg(Color::Rgb(60, 140, 80))
-        .fg(Color::Black);
+    let secondary_cursor_style = if focused {
+        Style::default()
+            .bg(Color::Rgb(60, 140, 80))
+            .fg(Color::Black)
+    } else {
+        Style::default()
+            .bg(Color::Rgb(40, 80, 50))
+            .fg(Color::Rgb(120, 160, 120))
+    };
     let match_style = Style::default()
         .bg(Color::Rgb(80, 70, 20))
         .fg(Color::Rgb(255, 230, 100));

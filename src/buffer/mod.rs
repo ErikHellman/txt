@@ -342,16 +342,13 @@ impl Buffer {
 
     pub fn move_cursor_left(&mut self, extend: bool) {
         if self.cursors.is_multi() {
-            let new_offsets: Vec<usize> = self
+            let offsets: Vec<usize> = self
                 .cursors
                 .cursors()
                 .iter()
                 .map(|c| rope_edit::prev_grapheme_boundary(&self.rope, c.byte_offset))
                 .collect();
-            for (cursor, new_offset) in self.cursors.cursors_mut().iter_mut().zip(new_offsets) {
-                cursor.move_to(&self.rope, new_offset, extend);
-            }
-            self.cursors.normalize();
+            self.multi_apply_offsets(offsets, extend);
         } else {
             let at = self.cursors.primary().byte_offset;
             let prev = rope_edit::prev_grapheme_boundary(&self.rope, at);
@@ -361,16 +358,13 @@ impl Buffer {
 
     pub fn move_cursor_right(&mut self, extend: bool) {
         if self.cursors.is_multi() {
-            let new_offsets: Vec<usize> = self
+            let offsets: Vec<usize> = self
                 .cursors
                 .cursors()
                 .iter()
                 .map(|c| rope_edit::next_grapheme_boundary(&self.rope, c.byte_offset))
                 .collect();
-            for (cursor, new_offset) in self.cursors.cursors_mut().iter_mut().zip(new_offsets) {
-                cursor.move_to(&self.rope, new_offset, extend);
-            }
-            self.cursors.normalize();
+            self.multi_apply_offsets(offsets, extend);
         } else {
             let at = self.cursors.primary().byte_offset;
             let next = rope_edit::next_grapheme_boundary(&self.rope, at);
@@ -380,7 +374,6 @@ impl Buffer {
 
     pub fn move_cursor_up(&mut self, extend: bool) {
         if self.cursors.is_multi() {
-            let last_line = self.rope.len_lines().saturating_sub(1);
             let moves: Vec<(usize, usize)> = self
                 .cursors
                 .cursors()
@@ -388,20 +381,12 @@ impl Buffer {
                 .map(|c| {
                     let preferred = c.preferred_col;
                     let target_line = c.line.saturating_sub(1);
-                    let line_len = line_byte_len_no_newline(&self.rope, target_line);
-                    let col = preferred.min(line_len);
+                    let col = preferred.min(line_byte_len_no_newline(&self.rope, target_line));
                     let offset = self.rope.char_to_byte(self.rope.line_to_char(target_line)) + col;
                     (offset, preferred)
                 })
                 .collect();
-            for (cursor, (new_offset, preferred)) in
-                self.cursors.cursors_mut().iter_mut().zip(moves)
-            {
-                cursor.move_to(&self.rope, new_offset, extend);
-                cursor.preferred_col = preferred;
-            }
-            self.cursors.normalize();
-            let _ = last_line; // suppress unused warning
+            self.multi_apply_moves(moves, extend);
         } else {
             let cursor = self.cursors.primary();
             if cursor.line == 0 {
@@ -410,13 +395,12 @@ impl Buffer {
             }
             let target_line = cursor.line - 1;
             let preferred = cursor.preferred_col;
-            let line_len = line_byte_len_no_newline(&self.rope, target_line);
-            let col = preferred.min(line_len);
+            let col = preferred.min(line_byte_len_no_newline(&self.rope, target_line));
             let new_offset = self.rope.char_to_byte(self.rope.line_to_char(target_line)) + col;
             self.cursors
                 .primary_mut()
                 .move_to(&self.rope, new_offset, extend);
-            // Restore preferred col after move (move_to recalculates it from display)
+            // Restore preferred col — move_to recalculates it from display position.
             self.cursors.primary_mut().preferred_col = preferred;
         }
     }
@@ -431,19 +415,12 @@ impl Buffer {
                 .map(|c| {
                     let preferred = c.preferred_col;
                     let target_line = (c.line + 1).min(last_line);
-                    let line_len = line_byte_len_no_newline(&self.rope, target_line);
-                    let col = preferred.min(line_len);
+                    let col = preferred.min(line_byte_len_no_newline(&self.rope, target_line));
                     let offset = self.rope.char_to_byte(self.rope.line_to_char(target_line)) + col;
                     (offset, preferred)
                 })
                 .collect();
-            for (cursor, (new_offset, preferred)) in
-                self.cursors.cursors_mut().iter_mut().zip(moves)
-            {
-                cursor.move_to(&self.rope, new_offset, extend);
-                cursor.preferred_col = preferred;
-            }
-            self.cursors.normalize();
+            self.multi_apply_moves(moves, extend);
         } else {
             let cursor = self.cursors.primary();
             let last_line = self.rope.len_lines().saturating_sub(1);
@@ -453,8 +430,7 @@ impl Buffer {
             }
             let target_line = cursor.line + 1;
             let preferred = cursor.preferred_col;
-            let line_len = line_byte_len_no_newline(&self.rope, target_line);
-            let col = preferred.min(line_len);
+            let col = preferred.min(line_byte_len_no_newline(&self.rope, target_line));
             let new_offset = self.rope.char_to_byte(self.rope.line_to_char(target_line)) + col;
             self.cursors
                 .primary_mut()
@@ -477,7 +453,7 @@ impl Buffer {
 
     pub fn move_cursor_home(&mut self, extend: bool) {
         if self.cursors.is_multi() {
-            let targets: Vec<usize> = self
+            let offsets: Vec<usize> = self
                 .cursors
                 .cursors()
                 .iter()
@@ -491,10 +467,7 @@ impl Buffer {
                     }
                 })
                 .collect();
-            for (cursor, target) in self.cursors.cursors_mut().iter_mut().zip(targets) {
-                cursor.move_to(&self.rope, target, extend);
-            }
-            self.cursors.normalize();
+            self.multi_apply_offsets(offsets, extend);
         } else {
             let cursor = self.cursors.primary();
             let line = cursor.line;
@@ -512,7 +485,7 @@ impl Buffer {
 
     pub fn move_cursor_end(&mut self, extend: bool) {
         if self.cursors.is_multi() {
-            let targets: Vec<usize> = self
+            let offsets: Vec<usize> = self
                 .cursors
                 .cursors()
                 .iter()
@@ -520,16 +493,32 @@ impl Buffer {
                     self.line_start_byte(c.line) + line_byte_len_no_newline(&self.rope, c.line)
                 })
                 .collect();
-            for (cursor, target) in self.cursors.cursors_mut().iter_mut().zip(targets) {
-                cursor.move_to(&self.rope, target, extend);
-            }
-            self.cursors.normalize();
+            self.multi_apply_offsets(offsets, extend);
         } else {
             let cursor = self.cursors.primary();
             let line = cursor.line;
             let end = self.line_start_byte(line) + line_byte_len_no_newline(&self.rope, line);
             self.move_cursor_to(end, extend);
         }
+    }
+
+    /// Apply pre-computed target offsets to all cursors and normalize.
+    /// Used by multi-cursor movement where preferred_col can be recalculated from position.
+    fn multi_apply_offsets(&mut self, offsets: Vec<usize>, extend: bool) {
+        for (cursor, offset) in self.cursors.cursors_mut().iter_mut().zip(offsets) {
+            cursor.move_to(&self.rope, offset, extend);
+        }
+        self.cursors.normalize();
+    }
+
+    /// Apply pre-computed `(offset, preferred_col)` moves to all cursors and normalize.
+    /// Used by up/down movement where preferred_col must be preserved across short lines.
+    fn multi_apply_moves(&mut self, moves: Vec<(usize, usize)>, extend: bool) {
+        for (cursor, (offset, preferred)) in self.cursors.cursors_mut().iter_mut().zip(moves) {
+            cursor.move_to(&self.rope, offset, extend);
+            cursor.preferred_col = preferred;
+        }
+        self.cursors.normalize();
     }
 
     pub fn move_cursor_file_start(&mut self, extend: bool) {
