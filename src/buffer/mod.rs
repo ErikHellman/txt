@@ -632,18 +632,32 @@ impl Buffer {
         self.history.begin_batch();
         for op in &ops {
             if op.del_end > op.ins_pt {
+                let del_len = op.del_end - op.ins_pt;
                 let deleted = rope_edit::delete(&mut self.rope, op.ins_pt, op.del_end);
                 self.history.record(EditCommand::Delete {
                     start: op.ins_pt,
                     end: op.del_end,
                     deleted,
                 });
+                // Deletion at [ins_pt, del_end) shifts all tracked positions >= del_end down.
+                for pos in new_positions.iter_mut() {
+                    if *pos >= op.del_end {
+                        *pos -= del_len;
+                    }
+                }
             }
             rope_edit::insert(&mut self.rope, op.ins_pt, text);
             self.history.record(EditCommand::Insert {
                 at: op.ins_pt,
                 text: text.to_string(),
             });
+            // Insertion at ins_pt shifts all tracked positions >= ins_pt up.
+            // (Processed descending, so all previously-set positions are above ins_pt.)
+            for pos in new_positions.iter_mut() {
+                if *pos >= op.ins_pt {
+                    *pos += text.len();
+                }
+            }
             new_positions[op.cursor_idx] = op.ins_pt + text.len();
         }
         self.history.commit_batch();
@@ -728,12 +742,19 @@ impl Buffer {
 
         self.history.begin_batch();
         for op in &ops {
+            let del_len = op.del_end - op.del_start;
             let deleted = rope_edit::delete(&mut self.rope, op.del_start, op.del_end);
             self.history.record(EditCommand::Delete {
                 start: op.del_start,
                 end: op.del_end,
                 deleted,
             });
+            // Deletion at [del_start, del_end) shifts all tracked positions >= del_end down.
+            for pos in new_positions.iter_mut() {
+                if *pos >= op.del_end {
+                    *pos -= del_len;
+                }
+            }
             new_positions[op.cursor_idx] = op.del_start;
         }
         self.history.commit_batch();
@@ -816,12 +837,19 @@ impl Buffer {
 
         self.history.begin_batch();
         for op in &ops {
+            let del_len = op.del_end - op.del_start;
             let deleted = rope_edit::delete(&mut self.rope, op.del_start, op.del_end);
             self.history.record(EditCommand::Delete {
                 start: op.del_start,
                 end: op.del_end,
                 deleted,
             });
+            // Deletion at [del_start, del_end) shifts all tracked positions >= del_end down.
+            for pos in new_positions.iter_mut() {
+                if *pos >= op.del_end {
+                    *pos -= del_len;
+                }
+            }
             new_positions[op.cursor_idx] = op.del_start;
         }
         self.history.commit_batch();
@@ -1234,5 +1262,54 @@ mod tests {
         assert_eq!(buf.to_string(), "Xabc\nXdef");
         buf.undo();
         assert_eq!(buf.to_string(), "abc\ndef");
+    }
+
+    #[test]
+    fn multi_insert_multiple_chars_three_cursors() {
+        // Type "hi" with 3 cursors — each cursor should get exactly "hi" prepended.
+        let mut buf = Buffer::from_str("aa\nbb\ncc");
+        buf.move_cursor_to(0, false);
+        buf.add_cursor_at_display_col(1, 0);
+        buf.add_cursor_at_display_col(2, 0);
+        assert_eq!(buf.cursors.len(), 3);
+        buf.multi_insert_char('h');
+        buf.multi_insert_char('i');
+        assert_eq!(buf.to_string(), "hiaa\nhibb\nhicc");
+        // All three cursors should be after their inserted "hi" (col 2 on each line).
+        for c in buf.cursors.cursors() {
+            assert_eq!(c.col, 2, "cursor on line {} should be at col 2", c.line);
+        }
+    }
+
+    #[test]
+    fn multi_delete_backward_three_cursors() {
+        // Delete one char backward with 3 cursors — each line loses its last char.
+        let mut buf = Buffer::from_str("abc\ndef\nghi");
+        // Place cursors at end of each line.
+        buf.move_cursor_to(3, false); // after 'c'
+        buf.add_cursor_at_display_col(1, 3); // after 'f'
+        buf.add_cursor_at_display_col(2, 3); // after 'i'
+        assert_eq!(buf.cursors.len(), 3);
+        buf.multi_delete_backward();
+        assert_eq!(buf.to_string(), "ab\nde\ngh");
+        // Cursors should land at end of their (now shorter) lines.
+        for c in buf.cursors.cursors() {
+            assert_eq!(c.col, 2, "cursor on line {} should be at col 2", c.line);
+        }
+    }
+
+    #[test]
+    fn multi_delete_forward_three_cursors() {
+        // Delete forward at start of each line.
+        let mut buf = Buffer::from_str("abc\ndef\nghi");
+        buf.move_cursor_to(0, false);
+        buf.add_cursor_at_display_col(1, 0);
+        buf.add_cursor_at_display_col(2, 0);
+        assert_eq!(buf.cursors.len(), 3);
+        buf.multi_delete_forward();
+        assert_eq!(buf.to_string(), "bc\nef\nhi");
+        for c in buf.cursors.cursors() {
+            assert_eq!(c.col, 0, "cursor on line {} should stay at col 0", c.line);
+        }
     }
 }
