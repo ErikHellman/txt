@@ -76,6 +76,37 @@ pub fn render(
     let selection = cursor.selection_bytes();
     let has_selection = cursor.has_selection();
 
+    // Collect secondary cursor byte offsets for multi-cursor rendering.
+    let secondary_cursor_offsets: Vec<usize> = if handle.buffer.cursors.is_multi() {
+        let primary_idx = handle.buffer.cursors.primary_idx();
+        handle
+            .buffer
+            .cursors
+            .cursors()
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != primary_idx)
+            .map(|(_, c)| c.byte_offset)
+            .collect()
+    } else {
+        vec![]
+    };
+    // Secondary cursor structs needed for end-of-line rendering.
+    let secondary_cursors_eol: Vec<(usize, usize)> = if handle.buffer.cursors.is_multi() {
+        let primary_idx = handle.buffer.cursors.primary_idx();
+        handle
+            .buffer
+            .cursors
+            .cursors()
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != primary_idx)
+            .map(|(_, c)| (c.line, c.col))
+            .collect()
+    } else {
+        vec![]
+    };
+
     // Pre-compute bracket-match positions.
     let bracket_pair = find_matching_bracket(handle.buffer.rope(), cursor.byte_offset);
 
@@ -94,6 +125,9 @@ pub fn render(
             .bg(Color::Rgb(70, 70, 95))
             .fg(Color::Rgb(160, 160, 180))
     };
+    let secondary_cursor_style = Style::default()
+        .bg(Color::Rgb(60, 140, 80))
+        .fg(Color::Black);
     let match_style = Style::default()
         .bg(Color::Rgb(80, 70, 20))
         .fg(Color::Rgb(255, 230, 100));
@@ -242,6 +276,7 @@ pub fn render(
                     let style = style_for_byte(
                         byte_offset,
                         cursor.byte_offset,
+                        &secondary_cursor_offsets,
                         has_selection,
                         selection,
                         search,
@@ -249,6 +284,7 @@ pub fn render(
                         highlights,
                         theme,
                         cursor_style,
+                        secondary_cursor_style,
                         selection_style,
                         current_match_style,
                         match_style,
@@ -289,6 +325,7 @@ pub fn render(
             let style = style_for_byte(
                 byte_offset,
                 cursor.byte_offset,
+                &secondary_cursor_offsets,
                 has_selection,
                 selection,
                 search,
@@ -296,6 +333,7 @@ pub fn render(
                 highlights,
                 theme,
                 cursor_style,
+                secondary_cursor_style,
                 selection_style,
                 current_match_style,
                 match_style,
@@ -322,6 +360,17 @@ pub fn render(
         {
             buf.set_string(screen_x, y, " ", cursor_style);
         }
+        // Draw secondary cursors at end of line.
+        if is_last_seg || !handle.viewport.word_wrap {
+            for &(sc_line, sc_col) in &secondary_cursors_eol {
+                if sc_line == line_idx
+                    && sc_col >= line_str_byte_len(&vl.display)
+                    && screen_x < max_x
+                {
+                    buf.set_string(screen_x, y, " ", secondary_cursor_style);
+                }
+            }
+        }
     }
 
     // If the buffer is empty, show cursor on line 0.
@@ -341,6 +390,7 @@ pub fn render(
 fn style_for_byte(
     byte_offset: usize,
     cursor_byte: usize,
+    secondary_cursors: &[usize],
     has_selection: bool,
     selection: ByteRange,
     search: Option<&SearchState>,
@@ -348,15 +398,20 @@ fn style_for_byte(
     highlights: &[HighlightSpan],
     theme: &ThemeColors,
     cursor_style: Style,
+    secondary_cursor_style: Style,
     selection_style: Style,
     current_match_style: Style,
     match_style: Style,
     bracket_style: Style,
     text_style: Style,
 ) -> Style {
-    // 1. Cursor
+    // 1. Primary cursor
     if byte_offset == cursor_byte {
         return cursor_style;
+    }
+    // 1.5. Secondary cursors (multi-cursor mode)
+    if secondary_cursors.contains(&byte_offset) {
+        return secondary_cursor_style;
     }
     // 2. Selection
     if has_selection && byte_offset >= selection.start && byte_offset < selection.end {

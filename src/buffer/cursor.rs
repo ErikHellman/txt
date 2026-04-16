@@ -304,6 +304,12 @@ impl MultiCursor {
     }
 
     /// Sort cursors by byte offset and remove exact duplicates.
+    /// Call this after any operation that may reorder or merge cursors.
+    pub fn normalize(&mut self) {
+        self.sort_and_dedup();
+    }
+
+    /// Sort cursors by byte offset and remove exact duplicates.
     /// Overlapping selections are merged and the earlier cursor wins.
     fn sort_and_dedup(&mut self) {
         let primary_offset = self.cursors[self.primary].byte_offset;
