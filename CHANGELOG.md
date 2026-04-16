@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Fix multi-cursor mode: secondary cursors now render and move correctly
+- Fix multi-cursor editing: typing or deleting with multiple cursors no longer produces garbled text
+
 ## v0.2.1
 
 - Add markdown syntax highlighting support
