@@ -94,7 +94,7 @@ jobs:
       - name: Generate checksums
         run: sha256sum txt-* > checksums.txt
 
-      - uses: softprops/action-gh-release@v2.6.2
+      - uses: softprops/action-gh-release@v3
         with:
           files: |
             txt-*
