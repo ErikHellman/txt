@@ -4,6 +4,7 @@ pub mod editor_view;
 pub mod fuzzy_picker;
 pub mod help_overlay;
 pub mod hover_popup;
+pub mod lsp_approval;
 pub mod lsp_picker;
 pub mod references_list;
 pub mod search_bar;
@@ -249,6 +250,11 @@ pub fn render(state: &AppState, frame: &mut Frame) {
     // ── LSP picker overlay ───────────────────────────────────────────────────
     if let Some(picker) = &state.lsp_picker {
         lsp_picker::render(picker, area, buf);
+    }
+
+    // ── LSP-binary trust approval overlay (security-critical, render last) ───
+    if let Some(pending) = &state.pending_lsp_approval {
+        lsp_approval::render(pending, area, buf);
     }
 
     // ── Completion popup ─────────────────────────────────────────────────────

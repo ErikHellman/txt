@@ -43,6 +43,8 @@ notify = "8"
 url = "2"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
+sha2 = "0.10"
+which = "8"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }

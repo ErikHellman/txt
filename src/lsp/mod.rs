@@ -2,7 +2,9 @@ pub mod capabilities;
 pub mod client;
 pub mod config;
 pub mod protocol;
+pub mod resolve;
 pub mod transport;
+pub mod trust;
 pub mod types;
 
 use std::path::Path;

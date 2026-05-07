@@ -564,6 +564,34 @@ pub struct ReferenceItem {
     pub context: String,
 }
 
+/// Why the user is being prompted to approve an LSP binary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LspApprovalReason {
+    /// We've never seen this binary before.
+    FirstLaunch,
+    /// We have an entry for this path, but the hash on disk has changed.
+    BinaryChanged { previous_hash: String },
+}
+
+/// State for the LSP-binary approval overlay.
+#[derive(Debug, Clone)]
+pub struct PendingLspApproval {
+    /// Server identifier from the active LSP config (e.g. `"rust-analyzer"`).
+    pub server_name: String,
+    /// Raw command from the config (may be a bare name or a path).
+    pub command: String,
+    /// Command-line args from the config.
+    pub args: Vec<String>,
+    /// Path returned by `which` (or the absolute path the user gave).
+    pub display_path: PathBuf,
+    /// Canonicalized path that gets hashed and recorded in the trust store.
+    pub canonical_path: PathBuf,
+    /// SHA-256 of the binary contents, lowercase hex.
+    pub hash: String,
+    /// What triggered the prompt.
+    pub reason: LspApprovalReason,
+}
+
 /// Built-in LSP server definitions the user can choose from.
 pub const LSP_SERVER_OPTIONS: &[(&str, &str, &[&str])] = &[
     // (display name / key, command, args)
@@ -648,6 +676,8 @@ pub struct AppState {
     pub lsp_config: crate::lsp::config::WorkspaceLspConfig,
     /// Active LSP server connection (None when LSP is disabled or unavailable).
     pub lsp: Option<crate::lsp::LspRegistry>,
+    /// Pending trust-on-first-use approval for the LSP binary, if any.
+    pub pending_lsp_approval: Option<PendingLspApproval>,
     /// Transient error message shown in the status bar (cleared on next user action).
     pub status_error: Option<String>,
     /// When the buffer was last edited — used to debounce `didChange` notifications
@@ -666,11 +696,6 @@ impl AppState {
     pub fn new(editor: Editor, workspace: PathBuf) -> Self {
         let config = Config::load();
         let lsp_config = crate::lsp::config::WorkspaceLspConfig::load(&workspace);
-        let lsp = if lsp_config.is_active() {
-            crate::lsp::LspRegistry::start(&lsp_config, &workspace).ok()
-        } else {
-            None
-        };
         let mut state = Self {
             editor,
             clipboard: ClipboardManager::new(),
@@ -700,7 +725,8 @@ impl AppState {
             auto_save_timer: None,
             file_watcher: None,
             lsp_config,
-            lsp,
+            lsp: None,
+            pending_lsp_approval: None,
             status_error: None,
             lsp_dirty_since: None,
             lsp_change_sent: false,
@@ -715,6 +741,8 @@ impl AppState {
         }
         // Compute git gutter for the initial file (if any).
         state.refresh_git_gutter();
+        // Trust-gated LSP launch (may set `pending_lsp_approval` for a first-frame prompt).
+        state.request_lsp_start();
         state
     }
 
@@ -744,6 +772,12 @@ impl AppState {
                     self.confirm_quit = false;
                 }
             }
+            return;
+        }
+
+        // LSP-binary trust approval — security decision, captures all input.
+        if self.pending_lsp_approval.is_some() {
+            self.handle_lsp_approval(&action);
             return;
         }
 
@@ -1976,14 +2010,13 @@ impl AppState {
 
         // Tear down existing LSP connection if any.
         self.lsp = None;
+        self.pending_lsp_approval = None;
 
         // Apply new config.
         self.lsp_config = new_config;
 
-        // Start new server if enabled.
-        if self.lsp_config.is_active() {
-            self.lsp = crate::lsp::LspRegistry::start(&self.lsp_config, &self.workspace).ok();
-        }
+        // Start new server if enabled — routed through the trust gate.
+        self.request_lsp_start();
     }
 
     // ── Sidebar input handling ────────────────────────────────────────────────
@@ -2509,6 +2542,21 @@ impl AppState {
                 self.apply_diagnostics(&uri, &diagnostics);
             }
             LspUpdate::ServerExited => {
+                // If the binary on disk is still the one the user approved,
+                // use the existing in-place restart path (preserves restart_count
+                // so a crash loop self-terminates after MAX_RESTARTS).
+                // If the binary changed (or vanished), tear down and route
+                // through the approval gate so the user is re-prompted.
+                let trusted = self.lsp_binary_still_trusted();
+
+                if !trusted {
+                    self.lsp = None;
+                    self.status_error =
+                        Some("LSP binary changed since approval; re-prompting".into());
+                    self.request_lsp_start();
+                    return;
+                }
+
                 let config = self.lsp_config.clone();
                 let workspace = self.workspace.clone();
                 let mut disable_lsp = false;
@@ -3216,14 +3264,130 @@ impl AppState {
     fn lsp_restart(&mut self) {
         // Tear down existing connection.
         self.lsp = None;
+        self.pending_lsp_approval = None;
         // Clear stale state from all buffers.
         for tab in &mut self.editor.tabs {
             tab.lsp_state.diagnostics.clear();
             tab.lsp_state.semantic_tokens = None;
         }
-        // Start fresh if config is active.
-        if self.lsp_config.is_active() {
-            self.lsp = crate::lsp::LspRegistry::start(&self.lsp_config, &self.workspace).ok();
+        // Start fresh if config is active — routed through the trust gate.
+        self.request_lsp_start();
+    }
+
+    /// Trust-gated entry point for spawning the LSP server.
+    ///
+    /// Resolves the configured binary, hashes it, and consults the user-global
+    /// trust store. If the binary is approved, spawns directly. If unknown or
+    /// the hash has changed, sets `pending_lsp_approval` so the approval
+    /// overlay opens on the next frame.
+    pub fn request_lsp_start(&mut self) {
+        if !self.lsp_config.is_active() {
+            return;
+        }
+        let entry = match self.lsp_config.active_server() {
+            Some(e) => e.clone(),
+            None => return,
+        };
+        let server_name = self.lsp_config.server.clone().unwrap_or_default();
+
+        let resolved = match crate::lsp::resolve::resolve_binary(&entry.command) {
+            Ok(r) => r,
+            Err(e) => {
+                self.status_error = Some(format!("LSP: {e}"));
+                return;
+            }
+        };
+        let hash = match crate::lsp::resolve::hash_file(&resolved.canonical_path) {
+            Ok(h) => h,
+            Err(e) => {
+                self.status_error = Some(format!("LSP: {e}"));
+                return;
+            }
+        };
+
+        let store = crate::lsp::trust::TrustStore::load();
+        match store.check(&resolved.canonical_path, &hash) {
+            crate::lsp::trust::TrustDecision::Approved => {
+                self.lsp = crate::lsp::LspRegistry::start(&self.lsp_config, &self.workspace).ok();
+            }
+            crate::lsp::trust::TrustDecision::Unknown => {
+                self.pending_lsp_approval = Some(PendingLspApproval {
+                    server_name,
+                    command: entry.command.clone(),
+                    args: entry.args.clone(),
+                    display_path: resolved.display_path,
+                    canonical_path: resolved.canonical_path,
+                    hash,
+                    reason: LspApprovalReason::FirstLaunch,
+                });
+            }
+            crate::lsp::trust::TrustDecision::HashMismatch { previous_hash } => {
+                self.pending_lsp_approval = Some(PendingLspApproval {
+                    server_name,
+                    command: entry.command.clone(),
+                    args: entry.args.clone(),
+                    display_path: resolved.display_path,
+                    canonical_path: resolved.canonical_path,
+                    hash,
+                    reason: LspApprovalReason::BinaryChanged { previous_hash },
+                });
+            }
+        }
+    }
+
+    /// Whether the currently configured LSP binary still matches its trust-store
+    /// entry. Used by the crash-recovery path to decide between an in-place
+    /// restart and re-routing through the approval gate.
+    fn lsp_binary_still_trusted(&self) -> bool {
+        let entry = match self.lsp_config.active_server() {
+            Some(e) => e,
+            None => return false,
+        };
+        let resolved = match crate::lsp::resolve::resolve_binary(&entry.command) {
+            Ok(r) => r,
+            Err(_) => return false,
+        };
+        let hash = match crate::lsp::resolve::hash_file(&resolved.canonical_path) {
+            Ok(h) => h,
+            Err(_) => return false,
+        };
+        matches!(
+            crate::lsp::trust::TrustStore::load().check(&resolved.canonical_path, &hash),
+            crate::lsp::trust::TrustDecision::Approved
+        )
+    }
+
+    /// Handle input while the LSP-binary approval overlay is shown.
+    /// Returns `true` if the action was consumed (always, while modal is open).
+    fn handle_lsp_approval(&mut self, action: &EditorAction) -> bool {
+        match action {
+            EditorAction::InsertChar('y') | EditorAction::InsertChar('Y') => {
+                if let Some(pending) = self.pending_lsp_approval.take() {
+                    let mut store = crate::lsp::trust::TrustStore::load();
+                    store.approve(
+                        pending.canonical_path,
+                        pending.hash,
+                        Some(pending.server_name),
+                    );
+                    store.save();
+                    self.lsp =
+                        crate::lsp::LspRegistry::start(&self.lsp_config, &self.workspace).ok();
+                    self.status_error = Some(
+                        "LSP approved; recorded in ~/.config/txt/trusted_binaries.json".into(),
+                    );
+                }
+                true
+            }
+            EditorAction::InsertChar('n')
+            | EditorAction::InsertChar('N')
+            | EditorAction::Quit
+            | EditorAction::CloseSearch => {
+                self.pending_lsp_approval = None;
+                self.status_error = Some("LSP not started.".into());
+                true
+            }
+            // Capture every other input while the modal is up.
+            _ => true,
         }
     }
 

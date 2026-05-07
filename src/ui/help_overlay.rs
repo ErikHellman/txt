@@ -297,6 +297,10 @@ const TEMPLATE: &[HelpEntry] = &[
         actions: &["open_lsp_config"],
         desc: "Configure LSP server",
     },
+    HelpEntry::Static {
+        key: "y / n",
+        desc: "Approve / reject LSP binary (when prompted)",
+    },
     HelpEntry::Binding {
         actions: &["quit"],
         desc: "Quit",
