@@ -126,7 +126,7 @@ impl FuzzyPickerState {
             })
             .collect();
 
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.sort_by_key(|b| std::cmp::Reverse(b.0));
         scored.truncate(200);
         self.filtered = scored;
     }
@@ -2257,13 +2257,11 @@ impl AppState {
                 }
                 _ => {} // Any other key cancels.
             },
-            Some(ConfirmDelete::DirConfirmed(path)) => {
-                if action == EditorAction::InsertNewline {
-                    let _ = std::fs::remove_dir_all(&path);
-                    self.refresh_sidebar();
-                }
+            Some(ConfirmDelete::DirConfirmed(path)) if action == EditorAction::InsertNewline => {
+                let _ = std::fs::remove_dir_all(&path);
+                self.refresh_sidebar();
             }
-            None => {}
+            Some(ConfirmDelete::DirConfirmed(_)) | None => {}
         }
     }
 
@@ -3159,7 +3157,7 @@ impl AppState {
             }
 
             // Apply in reverse byte order.
-            text_edits.sort_by(|a, b| b.0.cmp(&a.0));
+            text_edits.sort_by_key(|b| std::cmp::Reverse(b.0));
             let tab = &mut self.editor.tabs[tab_idx];
             for (start, end, new_text) in &text_edits {
                 let rope = tab.buffer.rope();
