@@ -320,6 +320,8 @@ impl KeyBindings {
         bind("alt+r", EditorAction::SearchToggleRegex);
         bind("alt+c", EditorAction::SearchToggleCaseSensitive);
         bind("alt+z", EditorAction::ToggleWordWrap);
+        bind("alt+m", EditorAction::GoToMatchingBracket);
+        bind("alt+l", EditorAction::ScrollCursorCenter);
 
         // ── Ctrl+Space / Ctrl+. ────────────────────────────────────
         bind("ctrl+space", EditorAction::TriggerCompletion);

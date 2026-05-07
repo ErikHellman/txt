@@ -2,6 +2,11 @@ use regex::Regex;
 
 use crate::buffer::cursor::ByteRange;
 
+/// Cap on the number of matches stored at once. Protects the editor against
+/// pathological queries (e.g. `e` in a megabyte file) that would otherwise
+/// allocate millions of byte-ranges and stall the UI.
+const MAX_MATCHES: usize = 10_000;
+
 /// State for the find / replace bar.
 ///
 /// Matches are recomputed synchronously on every query change. For Phase 6 this is
@@ -12,7 +17,11 @@ pub struct SearchState {
     pub is_regex: bool,
     pub case_sensitive: bool,
     /// All match byte-ranges in the current buffer text, in document order.
+    /// Capped at `MAX_MATCHES`; if the cap was hit, `match_count_capped` is true.
     pub matches: Vec<ByteRange>,
+    /// True if `recompute_matches` stopped collecting at `MAX_MATCHES`. The UI
+    /// can display this as "10000+ matches".
+    pub match_count_capped: bool,
     /// 0-based index into `matches` for the highlighted "current" match.
     pub current_match: usize,
     /// True when the replace input row is visible (Ctrl+H).
@@ -29,6 +38,7 @@ impl SearchState {
             is_regex: false,
             case_sensitive: false,
             matches: Vec::new(),
+            match_count_capped: false,
             current_match: 0,
             show_replace,
             focus_replace: false,
@@ -38,8 +48,12 @@ impl SearchState {
     // ── Match computation ────────────────────────────────────────────────────
 
     /// Recompute all match byte-ranges against `text`.
+    ///
+    /// Stops collecting at `MAX_MATCHES` and sets `match_count_capped` so the
+    /// status bar can indicate truncation.
     pub fn recompute_matches(&mut self, text: &str) {
         self.matches.clear();
+        self.match_count_capped = false;
         if self.query.is_empty() {
             return;
         }
@@ -47,6 +61,10 @@ impl SearchState {
         let pattern = build_pattern(&self.query, self.is_regex, self.case_sensitive);
         if let Ok(re) = Regex::new(&pattern) {
             for m in re.find_iter(text) {
+                if self.matches.len() >= MAX_MATCHES {
+                    self.match_count_capped = true;
+                    break;
+                }
                 self.matches.push(ByteRange::new(m.start(), m.end()));
             }
         }
@@ -211,5 +229,25 @@ mod tests {
         assert_eq!(s1.bar_height(), 1);
         let s2 = SearchState::new(true);
         assert_eq!(s2.bar_height(), 2);
+    }
+
+    #[test]
+    fn match_count_is_capped() {
+        let mut s = SearchState::new(false);
+        s.query = "a".to_string();
+        // Build text with way more than MAX_MATCHES occurrences.
+        let text = "a".repeat(MAX_MATCHES + 100);
+        s.recompute_matches(&text);
+        assert_eq!(s.matches.len(), MAX_MATCHES);
+        assert!(s.match_count_capped);
+    }
+
+    #[test]
+    fn match_count_not_capped_when_under_limit() {
+        let mut s = SearchState::new(false);
+        s.query = "x".to_string();
+        s.recompute_matches("xx xx");
+        assert_eq!(s.matches.len(), 4);
+        assert!(!s.match_count_capped);
     }
 }

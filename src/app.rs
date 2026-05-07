@@ -858,6 +858,21 @@ impl AppState {
                     }
                 }
             }
+            EditorAction::GoToMatchingBracket => {
+                let buf = &mut self.editor.active_mut().buffer;
+                let cursor_byte = buf.cursors.primary().byte_offset;
+                if let Some((open_b, close_b)) =
+                    crate::buffer::edit::find_matching_bracket(buf.rope(), cursor_byte)
+                {
+                    // Jump to the opposite bracket from the one currently under cursor.
+                    let target = if cursor_byte == open_b {
+                        close_b
+                    } else {
+                        open_b
+                    };
+                    buf.move_cursor_to(target, false);
+                }
+            }
 
             // ── Text insertion ────────────────────────────────────────
             EditorAction::InsertChar(c) => {
@@ -1123,6 +1138,12 @@ impl AppState {
                             (vp.scroll_row + text_h / 2).min(total_lines.saturating_sub(1));
                     }
                 }
+            }
+            EditorAction::ScrollCursorCenter => {
+                let cursor_line = self.editor.active().buffer.cursors.primary().line;
+                let half = text_h / 2;
+                let vp = &mut self.editor.active_mut().viewport;
+                vp.scroll_row = cursor_line.saturating_sub(half);
             }
 
             // ── Edit ops ──────────────────────────────────────────────
@@ -1579,6 +1600,8 @@ impl AppState {
             | EditorAction::MoveCursorFileEnd
             | EditorAction::MoveCursorPage(_)
             | EditorAction::Scroll(_)
+            | EditorAction::ScrollCursorCenter
+            | EditorAction::GoToMatchingBracket
             | EditorAction::MouseClick { .. }
             | EditorAction::MouseDrag { .. } => return false,
 

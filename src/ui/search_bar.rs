@@ -87,6 +87,8 @@ pub fn render(search: &SearchState, area: Rect, buf: &mut TermBuffer) {
         } else {
             " No matches".to_string()
         }
+    } else if search.match_count_capped {
+        format!(" {}/{}+", search.current_match + 1, search.matches.len())
     } else {
         format!(" {}/{}", search.current_match + 1, search.matches.len())
     };
