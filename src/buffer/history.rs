@@ -58,6 +58,11 @@ enum UndoEntry {
     Batch(Vec<EditCommand>),
 }
 
+/// Default cap on the number of entries kept on the undo stack. The oldest
+/// entries are dropped when this limit is exceeded so editing a long-lived
+/// buffer can't grow undo memory without bound.
+const DEFAULT_MAX_ENTRIES: usize = 1000;
+
 /// Undo/redo stack.
 pub struct UndoStack {
     /// Past commands, oldest first. Undo pops from the back.
@@ -66,6 +71,9 @@ pub struct UndoStack {
     redo_stack: Vec<UndoEntry>,
     /// Accumulator for the current batch (Some while a BatchGuard is alive).
     current_batch: Option<Vec<EditCommand>>,
+    /// Maximum number of entries on the undo stack. Oldest are dropped when
+    /// exceeded.
+    max_entries: usize,
 }
 
 impl UndoStack {
@@ -74,6 +82,16 @@ impl UndoStack {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             current_batch: None,
+            max_entries: DEFAULT_MAX_ENTRIES,
+        }
+    }
+
+    /// Drop entries from the front of the undo stack until it fits within
+    /// `max_entries`. Called after every push.
+    fn trim_to_capacity(&mut self) {
+        if self.undo_stack.len() > self.max_entries {
+            let drop = self.undo_stack.len() - self.max_entries;
+            self.undo_stack.drain(..drop);
         }
     }
 
@@ -85,6 +103,7 @@ impl UndoStack {
             batch.push(cmd);
         } else {
             self.undo_stack.push(UndoEntry::Single(cmd));
+            self.trim_to_capacity();
         }
     }
 
@@ -103,6 +122,7 @@ impl UndoStack {
             && !batch.is_empty()
         {
             self.undo_stack.push(UndoEntry::Batch(batch));
+            self.trim_to_capacity();
         }
     }
 
@@ -289,5 +309,30 @@ mod tests {
         stack.pop_undo();
         assert_eq!(stack.undo_depth(), 1);
         assert_eq!(stack.redo_depth(), 2);
+    }
+
+    #[test]
+    fn undo_stack_is_bounded() {
+        let mut stack = UndoStack::new();
+        stack.max_entries = 3;
+        for i in 0..10 {
+            stack.record(insert(i, "x"));
+        }
+        // Only the 3 newest entries survive.
+        assert_eq!(stack.undo_depth(), 3);
+    }
+
+    #[test]
+    fn batch_commit_respects_cap() {
+        let mut stack = UndoStack::new();
+        stack.max_entries = 2;
+        stack.record(insert(0, "a"));
+        stack.record(insert(1, "b"));
+        stack.begin_batch();
+        stack.record(insert(2, "c"));
+        stack.record(insert(3, "d"));
+        stack.commit_batch();
+        // Two singles + one batch = 3 → trimmed to 2.
+        assert_eq!(stack.undo_depth(), 2);
     }
 }

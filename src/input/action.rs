@@ -39,12 +39,18 @@ pub enum EditorAction {
 
     // ── Scrolling (without moving the cursor) ─────────────────────────
     Scroll(ScrollDir),
+    /// Re-center the viewport so the primary cursor is on the middle row.
+    /// Does not move the cursor.
+    ScrollCursorCenter,
 
     // ── AST-aware selection (tree-sitter) ────────────────────────────
     /// Ctrl+W: expand selection to the next enclosing AST node.
     AstExpandSelection,
     /// Ctrl+Shift+W: contract selection back to the previous one.
     AstContractSelection,
+    /// Jump the primary cursor to the matching bracket (`{}`, `()`, `[]`).
+    /// No-op when the cursor is not on a bracket character.
+    GoToMatchingBracket,
 
     // ── Clipboard ────────────────────────────────────────────────────
     Copy,
@@ -237,9 +243,11 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         // Scrolling
         EditorAction::Scroll(ScrollDir::Up) => "scroll_up",
         EditorAction::Scroll(ScrollDir::Down) => "scroll_down",
+        EditorAction::ScrollCursorCenter => "scroll_cursor_center",
         // AST selection
         EditorAction::AstExpandSelection => "ast_expand_selection",
         EditorAction::AstContractSelection => "ast_contract_selection",
+        EditorAction::GoToMatchingBracket => "go_to_matching_bracket",
         // Clipboard
         EditorAction::Copy => "copy",
         EditorAction::Cut => "cut",
@@ -344,9 +352,11 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         // Scrolling
         "scroll_up" => EditorAction::Scroll(ScrollDir::Up),
         "scroll_down" => EditorAction::Scroll(ScrollDir::Down),
+        "scroll_cursor_center" => EditorAction::ScrollCursorCenter,
         // AST selection
         "ast_expand_selection" => EditorAction::AstExpandSelection,
         "ast_contract_selection" => EditorAction::AstContractSelection,
+        "go_to_matching_bracket" => EditorAction::GoToMatchingBracket,
         // Clipboard
         "copy" => EditorAction::Copy,
         "cut" => EditorAction::Cut,

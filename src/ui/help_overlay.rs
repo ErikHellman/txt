@@ -65,6 +65,14 @@ const TEMPLATE: &[HelpEntry] = &[
         actions: &["move_cursor_page_up", "move_cursor_page_down"],
         desc: "Page up / down",
     },
+    HelpEntry::Binding {
+        actions: &["go_to_matching_bracket"],
+        desc: "Jump to matching bracket",
+    },
+    HelpEntry::Binding {
+        actions: &["scroll_cursor_center"],
+        desc: "Scroll cursor to center",
+    },
     // ── Selection ────────────────────────────────────────────────────
     HelpEntry::Section("Selection"),
     HelpEntry::Binding {
