@@ -249,6 +249,74 @@ fn atomic_kind(node_kind: &str, lang: Lang) -> Option<HighlightKind> {
             "string" => Some(HighlightKind::String),
             _ => None,
         },
+        Lang::Sh => match node_kind {
+            "string" | "raw_string" | "ansi_c_string" => Some(HighlightKind::String),
+            "heredoc_body" | "heredoc_start" | "heredoc_end" => Some(HighlightKind::String),
+            "comment" => Some(HighlightKind::Comment),
+            _ => None,
+        },
+        Lang::TypeScript | Lang::Tsx => match node_kind {
+            "string" | "template_string" | "template_literal" => Some(HighlightKind::String),
+            "comment" => Some(HighlightKind::Comment),
+            "regex" => Some(HighlightKind::String),
+            _ => None,
+        },
+        Lang::CSharp => match node_kind {
+            "string_literal"
+            | "verbatim_string_literal"
+            | "raw_string_literal"
+            | "character_literal" => Some(HighlightKind::String),
+            "comment" => Some(HighlightKind::Comment),
+            _ => None,
+        },
+        Lang::Java => match node_kind {
+            "string_literal" | "character_literal" => Some(HighlightKind::String),
+            "line_comment" | "block_comment" => Some(HighlightKind::Comment),
+            "marker_annotation" | "annotation" => Some(HighlightKind::Attribute),
+            _ => None,
+        },
+        Lang::Go => match node_kind {
+            "interpreted_string_literal" | "raw_string_literal" | "rune_literal" => {
+                Some(HighlightKind::String)
+            }
+            "comment" => Some(HighlightKind::Comment),
+            _ => None,
+        },
+        Lang::Kotlin => match node_kind {
+            "line_string_literal"
+            | "multi_line_string_literal"
+            | "string_literal"
+            | "character_literal" => Some(HighlightKind::String),
+            "line_comment" | "block_comment" | "comment" => Some(HighlightKind::Comment),
+            _ => None,
+        },
+        Lang::Groovy => match node_kind {
+            "string_literal"
+            | "gstring"
+            | "gstring_literal"
+            | "slashy_string"
+            | "dollar_slashy_string" => Some(HighlightKind::String),
+            "line_comment" | "block_comment" | "comment" => Some(HighlightKind::Comment),
+            _ => None,
+        },
+        Lang::Yaml => match node_kind {
+            "comment" => Some(HighlightKind::Comment),
+            "double_quote_scalar" | "single_quote_scalar" | "block_scalar" => {
+                Some(HighlightKind::String)
+            }
+            _ => None,
+        },
+        Lang::Properties => match node_kind {
+            "comment" => Some(HighlightKind::Comment),
+            _ => None,
+        },
+        Lang::Toml => match node_kind {
+            "string" | "literal_string" | "multiline_string" | "multiline_literal_string" => {
+                Some(HighlightKind::String)
+            }
+            "comment" => Some(HighlightKind::Comment),
+            _ => None,
+        },
         Lang::Markdown => None,
         Lang::Unknown => None,
     }
@@ -262,6 +330,16 @@ fn leaf_kind(node_kind: &str, parent_kind: &str, lang: Lang) -> Option<Highlight
         Lang::JavaScript => js_leaf(node_kind, parent_kind),
         Lang::Json => json_leaf(node_kind),
         Lang::Markdown => markdown_leaf(node_kind, parent_kind),
+        Lang::Sh => sh_leaf(node_kind, parent_kind),
+        Lang::TypeScript | Lang::Tsx => ts_leaf(node_kind, parent_kind),
+        Lang::CSharp => csharp_leaf(node_kind, parent_kind),
+        Lang::Java => java_leaf(node_kind, parent_kind),
+        Lang::Go => go_leaf(node_kind, parent_kind),
+        Lang::Kotlin => kotlin_leaf(node_kind, parent_kind),
+        Lang::Groovy => groovy_leaf(node_kind, parent_kind),
+        Lang::Yaml => yaml_leaf(node_kind),
+        Lang::Properties => properties_leaf(node_kind, parent_kind),
+        Lang::Toml => toml_leaf(node_kind, parent_kind),
         Lang::Unknown => None,
     }
 }
@@ -354,6 +432,185 @@ fn json_leaf(kind: &str) -> Option<HighlightKind> {
     }
 }
 
+fn sh_leaf(kind: &str, parent: &str) -> Option<HighlightKind> {
+    match kind {
+        "if" | "then" | "else" | "elif" | "fi" | "for" | "while" | "until" | "do" | "done"
+        | "case" | "esac" | "in" | "function" | "select" | "return" | "break" | "continue" => {
+            Some(HighlightKind::Keyword)
+        }
+        "[[" | "]]" | "((" | "))" => Some(HighlightKind::Keyword),
+        "number" => Some(HighlightKind::Number),
+        "$" => Some(HighlightKind::Punctuation),
+        "variable_name" => Some(HighlightKind::Type),
+        "word" if parent == "command_name" => Some(HighlightKind::Function),
+        "{" | "}" | "(" | ")" | ";" | ";;" | "|" | "&" | "&&" | "||" => {
+            Some(HighlightKind::Punctuation)
+        }
+        _ => None,
+    }
+}
+
+fn ts_leaf(kind: &str, parent: &str) -> Option<HighlightKind> {
+    match kind {
+        "function" | "var" | "let" | "const" | "if" | "else" | "for" | "while" | "do"
+        | "return" | "new" | "this" | "class" | "extends" | "import" | "export" | "from"
+        | "default" | "switch" | "case" | "break" | "continue" | "throw" | "try" | "catch"
+        | "finally" | "in" | "of" | "typeof" | "instanceof" | "void" | "delete" | "async"
+        | "await" | "yield" | "static" | "get" | "set" | "debugger" | "type" | "interface"
+        | "enum" | "namespace" | "module" | "readonly" | "abstract" | "implements" | "private"
+        | "protected" | "public" | "declare" | "is" | "keyof" | "infer" | "satisfies" | "as"
+        | "override" => Some(HighlightKind::Keyword),
+        "true" | "false" | "null" | "undefined" => Some(HighlightKind::Keyword),
+        "number" => Some(HighlightKind::Number),
+        "type_identifier" | "predefined_type" => Some(HighlightKind::Type),
+        "identifier" if matches!(parent, "call_expression" | "new_expression") => {
+            Some(HighlightKind::Function)
+        }
+        _ => None,
+    }
+}
+
+fn csharp_leaf(kind: &str, parent: &str) -> Option<HighlightKind> {
+    match kind {
+        "class" | "struct" | "interface" | "enum" | "record" | "namespace" | "using" | "public"
+        | "private" | "protected" | "internal" | "static" | "readonly" | "abstract" | "virtual"
+        | "override" | "sealed" | "void" | "var" | "new" | "if" | "else" | "for" | "foreach"
+        | "while" | "do" | "switch" | "case" | "default" | "break" | "continue" | "return"
+        | "this" | "base" | "in" | "out" | "ref" | "params" | "is" | "as" | "throw" | "try"
+        | "catch" | "finally" | "async" | "await" | "yield" | "lock" | "unsafe" | "fixed"
+        | "checked" | "unchecked" | "delegate" | "event" | "extern" | "operator" | "implicit"
+        | "explicit" | "where" | "typeof" | "sizeof" | "nameof" | "stackalloc" | "partial"
+        | "global" | "init" | "required" => Some(HighlightKind::Keyword),
+        "null" | "true" | "false" => Some(HighlightKind::Keyword),
+        "predefined_type" => Some(HighlightKind::Type),
+        "integer_literal" | "real_literal" => Some(HighlightKind::Number),
+        "identifier" if parent == "invocation_expression" => Some(HighlightKind::Function),
+        _ => None,
+    }
+}
+
+fn java_leaf(kind: &str, parent: &str) -> Option<HighlightKind> {
+    match kind {
+        "class" | "interface" | "enum" | "record" | "extends" | "implements" | "package"
+        | "import" | "public" | "private" | "protected" | "static" | "final" | "abstract"
+        | "synchronized" | "native" | "transient" | "volatile" | "void" | "if" | "else" | "for"
+        | "while" | "do" | "switch" | "case" | "default" | "break" | "continue" | "return"
+        | "this" | "super" | "new" | "throw" | "try" | "catch" | "finally" | "throws"
+        | "instanceof" | "yield" | "var" | "sealed" | "permits" => Some(HighlightKind::Keyword),
+        "null_literal" | "true" | "false" => Some(HighlightKind::Keyword),
+        "type_identifier"
+        | "boolean_type"
+        | "void_type"
+        | "integral_type"
+        | "floating_point_type" => Some(HighlightKind::Type),
+        "decimal_integer_literal"
+        | "hex_integer_literal"
+        | "binary_integer_literal"
+        | "octal_integer_literal"
+        | "decimal_floating_point_literal"
+        | "hex_floating_point_literal" => Some(HighlightKind::Number),
+        "identifier" if parent == "method_invocation" => Some(HighlightKind::Function),
+        _ => None,
+    }
+}
+
+fn go_leaf(kind: &str, parent: &str) -> Option<HighlightKind> {
+    match kind {
+        "func" | "var" | "const" | "type" | "struct" | "interface" | "package" | "import"
+        | "return" | "if" | "else" | "for" | "range" | "switch" | "case" | "default" | "break"
+        | "continue" | "goto" | "go" | "defer" | "select" | "chan" | "map" | "fallthrough" => {
+            Some(HighlightKind::Keyword)
+        }
+        "true" | "false" | "nil" => Some(HighlightKind::Keyword),
+        "type_identifier" => Some(HighlightKind::Type),
+        "int_literal" | "float_literal" | "imaginary_literal" => Some(HighlightKind::Number),
+        "identifier" if parent == "call_expression" => Some(HighlightKind::Function),
+        _ => None,
+    }
+}
+
+fn kotlin_leaf(kind: &str, parent: &str) -> Option<HighlightKind> {
+    match kind {
+        "class" | "interface" | "object" | "fun" | "val" | "var" | "if" | "else" | "when"
+        | "for" | "while" | "do" | "return" | "this" | "super" | "is" | "as" | "in" | "out"
+        | "by" | "package" | "import" | "public" | "private" | "protected" | "internal"
+        | "open" | "final" | "abstract" | "override" | "sealed" | "data" | "inline"
+        | "operator" | "infix" | "lateinit" | "const" | "companion" | "init" | "constructor"
+        | "enum" | "annotation" | "suspend" | "tailrec" | "external" | "noinline"
+        | "crossinline" | "reified" | "vararg" | "throw" | "try" | "catch" | "finally"
+        | "break" | "continue" => Some(HighlightKind::Keyword),
+        "true" | "false" | "null" => Some(HighlightKind::Keyword),
+        "type_identifier" | "user_type" => Some(HighlightKind::Type),
+        "integer_literal" | "long_literal" | "hex_literal" | "bin_literal" | "real_literal"
+        | "double_literal" | "float_literal" | "unsigned_literal" => Some(HighlightKind::Number),
+        "simple_identifier" if parent == "call_expression" => Some(HighlightKind::Function),
+        _ => None,
+    }
+}
+
+fn groovy_leaf(kind: &str, parent: &str) -> Option<HighlightKind> {
+    match kind {
+        "def" | "class" | "interface" | "trait" | "enum" | "extends" | "implements" | "package"
+        | "import" | "public" | "private" | "protected" | "static" | "final" | "abstract"
+        | "synchronized" | "void" | "if" | "else" | "for" | "while" | "do" | "switch" | "case"
+        | "default" | "break" | "continue" | "return" | "this" | "super" | "new" | "throw"
+        | "try" | "catch" | "finally" | "throws" | "instanceof" | "in" | "as" => {
+            Some(HighlightKind::Keyword)
+        }
+        "null" | "true" | "false" => Some(HighlightKind::Keyword),
+        "type_identifier" => Some(HighlightKind::Type),
+        "integer_literal"
+        | "decimal_floating_point_literal"
+        | "hex_integer_literal"
+        | "octal_integer_literal"
+        | "binary_integer_literal" => Some(HighlightKind::Number),
+        "identifier" if parent == "method_invocation" || parent == "method_call" => {
+            Some(HighlightKind::Function)
+        }
+        _ => None,
+    }
+}
+
+fn yaml_leaf(kind: &str) -> Option<HighlightKind> {
+    match kind {
+        "true" | "false" | "null" => Some(HighlightKind::Keyword),
+        "integer_scalar" | "float_scalar" => Some(HighlightKind::Number),
+        "boolean_scalar" => Some(HighlightKind::Keyword),
+        "null_scalar" => Some(HighlightKind::Keyword),
+        ":" | "-" | "?" | "[" | "]" | "{" | "}" | "," => Some(HighlightKind::Punctuation),
+        _ => None,
+    }
+}
+
+fn properties_leaf(kind: &str, parent: &str) -> Option<HighlightKind> {
+    match kind {
+        "=" | ":" => Some(HighlightKind::Punctuation),
+        // Property keys (the LHS of `key=value`) read nicely as Type.
+        "name" | "key" if parent == "property" => Some(HighlightKind::Type),
+        _ => None,
+    }
+}
+
+fn toml_leaf(kind: &str, parent: &str) -> Option<HighlightKind> {
+    match kind {
+        "true" | "false" => Some(HighlightKind::Keyword),
+        "integer" | "float" => Some(HighlightKind::Number),
+        "local_date" | "local_time" | "local_date_time" | "offset_date_time" => {
+            Some(HighlightKind::Number)
+        }
+        "[" | "]" | "[[" | "]]" | "{" | "}" | "=" | "," | "." => Some(HighlightKind::Punctuation),
+        "bare_key"
+            if matches!(
+                parent,
+                "pair" | "table" | "table_array_element" | "dotted_key"
+            ) =>
+        {
+            Some(HighlightKind::Type)
+        }
+        _ => None,
+    }
+}
+
 /// True if a node of kind `ctx` is a context where the `name` child is a function name.
 fn is_function_context(ctx: &str, lang: Lang) -> bool {
     match lang {
@@ -366,6 +623,22 @@ fn is_function_context(ctx: &str, lang: Lang) -> bool {
             ctx,
             "function_declaration" | "method_definition" | "function"
         ),
+        Lang::Sh => matches!(ctx, "function_definition"),
+        Lang::TypeScript | Lang::Tsx => matches!(
+            ctx,
+            "function_declaration" | "method_definition" | "function" | "method_signature"
+        ),
+        Lang::CSharp => matches!(
+            ctx,
+            "method_declaration"
+                | "constructor_declaration"
+                | "destructor_declaration"
+                | "local_function_statement"
+        ),
+        Lang::Java => matches!(ctx, "method_declaration" | "constructor_declaration"),
+        Lang::Go => matches!(ctx, "function_declaration" | "method_declaration"),
+        Lang::Kotlin => matches!(ctx, "function_declaration"),
+        Lang::Groovy => matches!(ctx, "method_declaration"),
         Lang::Markdown => false,
         _ => false,
     }
@@ -552,6 +825,20 @@ mod tests {
         parser
             .set_language(&tree_sitter_md::LANGUAGE.into())
             .unwrap();
+        parser.parse(source, None).unwrap()
+    }
+
+    fn parse_shell(source: &str) -> Tree {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_bash::LANGUAGE.into())
+            .unwrap();
+        parser.parse(source, None).unwrap()
+    }
+
+    fn parse_with(source: &str, lang: tree_sitter::Language) -> Tree {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&lang).unwrap();
         parser.parse(source, None).unwrap()
     }
 
@@ -845,6 +1132,315 @@ mod tests {
                 .iter()
                 .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "let"),
             "expected embedded 'let' as Keyword, got: {:?}",
+            spans
+        );
+    }
+
+    // ── Shell ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn sh_comment() {
+        let src = "# hello\necho hi\n";
+        let tree = parse_shell(src);
+        let spans = spans_for(src, &tree, Lang::Sh);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Comment && &src[s.start..s.end] == "# hello"),
+            "expected Comment span for '# hello', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn sh_double_quoted_string() {
+        let src = r#"echo "hi""#;
+        let tree = parse_shell(src);
+        let spans = spans_for(src, &tree, Lang::Sh);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::String && &src[s.start..s.end] == "\"hi\""),
+            "expected String span for '\"hi\"', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn sh_keyword_if() {
+        let src = "if true; then :; fi";
+        let tree = parse_shell(src);
+        let spans = spans_for(src, &tree, Lang::Sh);
+        for kw in ["if", "then", "fi"] {
+            assert!(
+                spans
+                    .iter()
+                    .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == kw),
+                "expected Keyword span for '{}', got: {:?}",
+                kw,
+                spans
+            );
+        }
+    }
+
+    #[test]
+    fn sh_command_name() {
+        let src = "echo hello";
+        let tree = parse_shell(src);
+        let spans = spans_for(src, &tree, Lang::Sh);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Function && &src[s.start..s.end] == "echo"),
+            "expected Function span for 'echo', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn sh_variable_expansion() {
+        let src = "echo $HOME";
+        let tree = parse_shell(src);
+        let spans = spans_for(src, &tree, Lang::Sh);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Type && &src[s.start..s.end] == "HOME"),
+            "expected Type span for 'HOME', got: {:?}",
+            spans
+        );
+    }
+
+    // ── TypeScript / TSX ──────────────────────────────────────────────────────
+
+    #[test]
+    fn ts_keyword_interface() {
+        let src = "interface User { name: string; }";
+        let tree = parse_with(src, tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into());
+        let spans = spans_for(src, &tree, Lang::TypeScript);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "interface"),
+            "expected Keyword span for 'interface', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn ts_string_literal() {
+        let src = "const x = \"hi\";";
+        let tree = parse_with(src, tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into());
+        let spans = spans_for(src, &tree, Lang::TypeScript);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::String && &src[s.start..s.end] == "\"hi\""),
+            "expected String span for '\"hi\"', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn tsx_keyword() {
+        let src = "const X = () => <div/>;";
+        let tree = parse_with(src, tree_sitter_typescript::LANGUAGE_TSX.into());
+        let spans = spans_for(src, &tree, Lang::Tsx);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "const"),
+            "expected Keyword span for 'const', got: {:?}",
+            spans
+        );
+    }
+
+    // ── C# ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn csharp_keyword_class() {
+        let src = "public class Foo { }";
+        let tree = parse_with(src, tree_sitter_c_sharp::LANGUAGE.into());
+        let spans = spans_for(src, &tree, Lang::CSharp);
+        for kw in ["public", "class"] {
+            assert!(
+                spans
+                    .iter()
+                    .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == kw),
+                "expected Keyword span for '{}', got: {:?}",
+                kw,
+                spans
+            );
+        }
+    }
+
+    #[test]
+    fn csharp_comment() {
+        let src = "// hi\nclass X {}";
+        let tree = parse_with(src, tree_sitter_c_sharp::LANGUAGE.into());
+        let spans = spans_for(src, &tree, Lang::CSharp);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Comment && &src[s.start..s.end] == "// hi"),
+            "expected Comment span for '// hi', got: {:?}",
+            spans
+        );
+    }
+
+    // ── Java ───────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn java_keyword_class() {
+        let src = "public class Foo {}";
+        let tree = parse_with(src, tree_sitter_java::LANGUAGE.into());
+        let spans = spans_for(src, &tree, Lang::Java);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "class"),
+            "expected Keyword span for 'class', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn java_comment() {
+        let src = "// hi\nclass X {}";
+        let tree = parse_with(src, tree_sitter_java::LANGUAGE.into());
+        let spans = spans_for(src, &tree, Lang::Java);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Comment && &src[s.start..s.end] == "// hi"),
+            "expected Comment span for '// hi', got: {:?}",
+            spans
+        );
+    }
+
+    // ── Go ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn go_keyword_func() {
+        let src = "package main\nfunc f() {}";
+        let tree = parse_with(src, tree_sitter_go::LANGUAGE.into());
+        let spans = spans_for(src, &tree, Lang::Go);
+        for kw in ["package", "func"] {
+            assert!(
+                spans
+                    .iter()
+                    .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == kw),
+                "expected Keyword span for '{}', got: {:?}",
+                kw,
+                spans
+            );
+        }
+    }
+
+    #[test]
+    fn go_string() {
+        let src = "package main\nvar s = \"hi\"";
+        let tree = parse_with(src, tree_sitter_go::LANGUAGE.into());
+        let spans = spans_for(src, &tree, Lang::Go);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::String && &src[s.start..s.end] == "\"hi\""),
+            "expected String span for '\"hi\"', got: {:?}",
+            spans
+        );
+    }
+
+    // ── Kotlin ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn kotlin_keyword_fun() {
+        let src = "fun main() {}";
+        let tree = parse_with(src, tree_sitter_kotlin_ng::LANGUAGE.into());
+        let spans = spans_for(src, &tree, Lang::Kotlin);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "fun"),
+            "expected Keyword span for 'fun', got: {:?}",
+            spans
+        );
+    }
+
+    // ── Groovy ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn groovy_keyword_def() {
+        let src = "def x = 1";
+        let tree = parse_with(src, tree_sitter_groovy::LANGUAGE.into());
+        let spans = spans_for(src, &tree, Lang::Groovy);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Keyword && &src[s.start..s.end] == "def"),
+            "expected Keyword span for 'def', got: {:?}",
+            spans
+        );
+    }
+
+    // ── YAML ───────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn yaml_comment() {
+        let src = "# hello\nname: foo\n";
+        let tree = parse_with(src, tree_sitter_yaml::LANGUAGE.into());
+        let spans = spans_for(src, &tree, Lang::Yaml);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Comment && &src[s.start..s.end] == "# hello"),
+            "expected Comment span for '# hello', got: {:?}",
+            spans
+        );
+    }
+
+    // ── Properties ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn properties_comment() {
+        let src = "# hello\nfoo=bar\n";
+        let tree = parse_with(src, tree_sitter_properties::LANGUAGE.into());
+        let spans = spans_for(src, &tree, Lang::Properties);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Comment && &src[s.start..s.end] == "# hello"),
+            "expected Comment span for '# hello', got: {:?}",
+            spans
+        );
+    }
+
+    // ── TOML ───────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn toml_string() {
+        let src = "name = \"hi\"";
+        let tree = parse_with(src, tree_sitter_toml_ng::LANGUAGE.into());
+        let spans = spans_for(src, &tree, Lang::Toml);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::String && &src[s.start..s.end] == "\"hi\""),
+            "expected String span for '\"hi\"', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn toml_comment() {
+        let src = "# hi\nname = 1";
+        let tree = parse_with(src, tree_sitter_toml_ng::LANGUAGE.into());
+        let spans = spans_for(src, &tree, Lang::Toml);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Comment && &src[s.start..s.end] == "# hi"),
+            "expected Comment span for '# hi', got: {:?}",
             spans
         );
     }

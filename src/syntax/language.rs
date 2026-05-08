@@ -9,6 +9,17 @@ pub enum Lang {
     JavaScript,
     Json,
     Markdown,
+    Sh,
+    TypeScript,
+    Tsx,
+    CSharp,
+    Java,
+    Go,
+    Kotlin,
+    Groovy,
+    Yaml,
+    Properties,
+    Toml,
     #[default]
     Unknown,
 }
@@ -30,10 +41,25 @@ impl Lang {
             "js" | "mjs" | "cjs" => Self::JavaScript,
             "json" | "jsonc" => Self::Json,
             "md" | "markdown" => Self::Markdown,
+            "sh" | "bash" | "zsh" => Self::Sh,
+            "ts" => Self::TypeScript,
+            "tsx" => Self::Tsx,
+            "cs" => Self::CSharp,
+            "java" => Self::Java,
+            "go" => Self::Go,
+            "kt" | "kts" => Self::Kotlin,
+            "groovy" | "gradle" => Self::Groovy,
+            "yml" | "yaml" => Self::Yaml,
+            "properties" => Self::Properties,
+            "toml" => Self::Toml,
             // Code fence language identifiers (lowercase) for supported grammars only
             "rust" => Self::Rust,
             "python" => Self::Python,
             "javascript" => Self::JavaScript,
+            "shell" => Self::Sh,
+            "typescript" => Self::TypeScript,
+            "csharp" => Self::CSharp,
+            "kotlin" => Self::Kotlin,
             _ => Self::Unknown,
         }
     }
@@ -46,6 +72,17 @@ impl Lang {
             Self::JavaScript => Some(tree_sitter_javascript::LANGUAGE.into()),
             Self::Json => Some(tree_sitter_json::LANGUAGE.into()),
             Self::Markdown => Some(tree_sitter_md::LANGUAGE.into()),
+            Self::Sh => Some(tree_sitter_bash::LANGUAGE.into()),
+            Self::TypeScript => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
+            Self::Tsx => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
+            Self::CSharp => Some(tree_sitter_c_sharp::LANGUAGE.into()),
+            Self::Java => Some(tree_sitter_java::LANGUAGE.into()),
+            Self::Go => Some(tree_sitter_go::LANGUAGE.into()),
+            Self::Kotlin => Some(tree_sitter_kotlin_ng::LANGUAGE.into()),
+            Self::Groovy => Some(tree_sitter_groovy::LANGUAGE.into()),
+            Self::Yaml => Some(tree_sitter_yaml::LANGUAGE.into()),
+            Self::Properties => Some(tree_sitter_properties::LANGUAGE.into()),
+            Self::Toml => Some(tree_sitter_toml_ng::LANGUAGE.into()),
             Self::Unknown => None,
         }
     }
@@ -58,6 +95,17 @@ impl Lang {
             Self::JavaScript => "JavaScript",
             Self::Json => "JSON",
             Self::Markdown => "Markdown",
+            Self::Sh => "Shell",
+            Self::TypeScript => "TypeScript",
+            Self::Tsx => "TSX",
+            Self::CSharp => "C#",
+            Self::Java => "Java",
+            Self::Go => "Go",
+            Self::Kotlin => "Kotlin",
+            Self::Groovy => "Groovy",
+            Self::Yaml => "YAML",
+            Self::Properties => "Properties",
+            Self::Toml => "TOML",
             Self::Unknown => "",
         }
     }
@@ -66,8 +114,16 @@ impl Lang {
     /// Returns `None` for languages that don't support line comments.
     pub fn comment_prefix(self) -> Option<&'static str> {
         match self {
-            Self::Rust | Self::JavaScript => Some("// "),
-            Self::Python => Some("# "),
+            Self::Rust
+            | Self::JavaScript
+            | Self::TypeScript
+            | Self::Tsx
+            | Self::CSharp
+            | Self::Java
+            | Self::Go
+            | Self::Kotlin
+            | Self::Groovy => Some("// "),
+            Self::Python | Self::Sh | Self::Yaml | Self::Properties | Self::Toml => Some("# "),
             Self::Json | Self::Markdown | Self::Unknown => None,
         }
     }
@@ -99,6 +155,69 @@ mod tests {
     fn detect_json() {
         assert_eq!(Lang::from_extension("json"), Lang::Json);
         assert_eq!(Lang::from_extension("jsonc"), Lang::Json);
+    }
+
+    #[test]
+    fn detect_shell() {
+        assert_eq!(Lang::from_extension("sh"), Lang::Sh);
+        assert_eq!(Lang::from_extension("bash"), Lang::Sh);
+        assert_eq!(Lang::from_extension("zsh"), Lang::Sh);
+        assert_eq!(Lang::from_extension("shell"), Lang::Sh);
+        assert_eq!(Lang::from_path(Path::new("script.sh")), Lang::Sh);
+    }
+
+    #[test]
+    fn detect_typescript() {
+        assert_eq!(Lang::from_extension("ts"), Lang::TypeScript);
+        assert_eq!(Lang::from_extension("typescript"), Lang::TypeScript);
+        assert_eq!(Lang::from_extension("tsx"), Lang::Tsx);
+        assert_eq!(Lang::from_path(Path::new("App.tsx")), Lang::Tsx);
+    }
+
+    #[test]
+    fn detect_csharp() {
+        assert_eq!(Lang::from_extension("cs"), Lang::CSharp);
+        assert_eq!(Lang::from_extension("csharp"), Lang::CSharp);
+    }
+
+    #[test]
+    fn detect_java() {
+        assert_eq!(Lang::from_extension("java"), Lang::Java);
+    }
+
+    #[test]
+    fn detect_go() {
+        assert_eq!(Lang::from_extension("go"), Lang::Go);
+    }
+
+    #[test]
+    fn detect_kotlin() {
+        assert_eq!(Lang::from_extension("kt"), Lang::Kotlin);
+        assert_eq!(Lang::from_extension("kts"), Lang::Kotlin);
+        assert_eq!(Lang::from_path(Path::new("build.gradle.kts")), Lang::Kotlin);
+    }
+
+    #[test]
+    fn detect_groovy() {
+        assert_eq!(Lang::from_extension("groovy"), Lang::Groovy);
+        assert_eq!(Lang::from_extension("gradle"), Lang::Groovy);
+        assert_eq!(Lang::from_path(Path::new("build.gradle")), Lang::Groovy);
+    }
+
+    #[test]
+    fn detect_yaml() {
+        assert_eq!(Lang::from_extension("yml"), Lang::Yaml);
+        assert_eq!(Lang::from_extension("yaml"), Lang::Yaml);
+    }
+
+    #[test]
+    fn detect_properties() {
+        assert_eq!(Lang::from_extension("properties"), Lang::Properties);
+    }
+
+    #[test]
+    fn detect_toml() {
+        assert_eq!(Lang::from_extension("toml"), Lang::Toml);
     }
 
     #[test]
