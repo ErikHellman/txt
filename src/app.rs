@@ -3685,6 +3685,12 @@ impl App {
             state.sidebar_focused = true;
         }
 
+        // Only re-anchor the viewport on the cursor when something actually
+        // moved the cursor (or the layout changed); pure scroll actions leave
+        // both untouched so the cursor is allowed to leave the screen.
+        let mut prev_anchor: Option<(usize, usize)> = None; // (active tab, primary byte offset)
+        let mut prev_size: Option<(usize, usize)> = None; // (text_h, text_w)
+
         loop {
             let term_size = terminal.size()?;
             let term_height = term_size.height;
@@ -3707,7 +3713,17 @@ impl App {
             };
             let gutter = gutter_width(state.editor.active().buffer.len_lines());
             let text_w = term_width.saturating_sub(gutter + 1 + sidebar_w) as usize;
-            state.editor.active_mut().scroll_to_cursor(text_h, text_w);
+
+            let curr_anchor = (
+                state.editor.active_idx,
+                state.editor.active().buffer.cursors.primary().byte_offset,
+            );
+            let curr_size = (text_h, text_w);
+            if prev_anchor != Some(curr_anchor) || prev_size != Some(curr_size) {
+                state.editor.active_mut().scroll_to_cursor(text_h, text_w);
+            }
+            prev_anchor = Some(curr_anchor);
+            prev_size = Some(curr_size);
 
             // Check for external file changes (non-blocking).
             state.poll_file_watcher();
