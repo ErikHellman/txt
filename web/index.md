@@ -10,6 +10,10 @@ title: txt — fast terminal text editor
     <a class="btn btn-primary" href="#install">Install</a>
     <a class="btn btn-secondary" href="https://github.com/ErikHellman/txt">View on GitHub</a>
   </div>
+  <p class="hero-version" hidden>
+    Latest release:
+    <a id="latest-version" href="https://github.com/ErikHellman/txt/releases/latest"></a>
+  </p>
 </div>
 
 <video src="txt-editor-demo.mp4" autoplay loop muted playsinline style="width:100%;border-radius:8px;border:1px solid var(--border);margin-bottom:3rem;display:block;"></video>
@@ -40,13 +44,22 @@ The design principle behind `txt` is simple: **editing should feel like thought*
 
 ## Install {#install}
 
-### macOS and Linux
+### Homebrew (macOS and Linux)
+
+```sh
+brew tap ErikHellman/tap
+brew install txt
+```
+
+Update later with `brew upgrade txt`.
+
+### macOS and Linux (curl)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ErikHellman/txt/main/install.sh | sh
 ```
 
-Installs the latest release binary to `~/.local/bin`. Make sure that directory is on your `PATH`.
+Installs the latest release binary to `~/.local/bin`. Make sure that directory is on your `PATH`. Re-run the same command to update.
 
 ### Windows
 
