@@ -26,14 +26,16 @@ The design principle behind `txt` is simple: **editing should feel like thought*
 
 ## Features
 
-- **Syntax highlighting** for Rust, Python, JavaScript, and JSON via tree-sitter
+- **Syntax highlighting** via tree-sitter for Rust, Python, JavaScript, TypeScript / TSX, Go, Java, Kotlin, C#, Groovy, Shell, HTML, CSS, JSON, YAML, TOML, Properties, and Markdown (with embedded code blocks)
 - **Git gutter** showing added, modified, and deleted lines inline
 - **Fuzzy file picker** for fast navigation across large projects
-- **Multi-cursor editing** — add cursors above or below with Alt+Shift+Up/Down
+- **Multi-cursor editing** — add cursors above or below with `Alt+Shift+Up/Down`
 - **AST-aware selection** — expand and contract selections along the syntax tree
-- **Language Server Protocol** — completions, hover docs, go-to-definition, and find references
+- **Language Server Protocol** — completions, hover docs, go-to-definition, and find references, with a trust-on-first-use prompt before any LSP binary is launched
 - **Find & replace** with regex and case-sensitive modes
-- **File sidebar** with full file management (create, rename, delete, move)
+- **File sidebar** with full file management (create, rename, delete, move) and full mouse support — click to open, scroll to browse, drag the separator to resize
+- **Free mouse-wheel scrolling** — scroll the viewport past the cursor without dragging it along; the cursor snaps back into view on the next edit
+- **Configurable keybindings** — drop a `~/.config/txt/keybindings.toml`, or pick a preset for VS Code or IntelliJ IDEA from the settings UI
 - **File watching** — automatically reloads files changed by external tools
 
 ## Install {#install}
@@ -90,10 +92,14 @@ Opening a directory brings up the file sidebar automatically. Press `F1` at any 
 | `Ctrl+W` | Expand selection to enclosing AST node |
 | `Ctrl+Shift+W` | Shrink selection |
 | `Alt+Shift+Up/Down` | Add cursor above / below |
+| `Alt+M` | Jump to matching bracket |
+| `Alt+L` | Center the viewport on the cursor |
 | `Ctrl+Z` | Undo |
 | `Ctrl+Y` / `Ctrl+Shift+Z` | Redo |
 | `Ctrl+,` | Open settings |
 | `F1` | Show all key bindings |
+
+The default `txt` keymap is shown above. VS Code and IntelliJ IDEA presets are available from the settings UI (`Ctrl+,`), and a `~/.config/txt/keybindings.toml` overrides individual bindings.
 
 ## License
 
