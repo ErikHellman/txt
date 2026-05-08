@@ -90,8 +90,17 @@ impl InputHandler {
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => EditorAction::MouseClick { col, row },
             MouseEventKind::Drag(MouseButton::Left) => EditorAction::MouseDrag { col, row },
-            MouseEventKind::ScrollUp => EditorAction::Scroll(ScrollDir::Up),
-            MouseEventKind::ScrollDown => EditorAction::Scroll(ScrollDir::Down),
+            MouseEventKind::Up(MouseButton::Left) => EditorAction::MouseUp { col, row },
+            MouseEventKind::ScrollUp => EditorAction::MouseScroll {
+                dir: ScrollDir::Up,
+                col,
+                row,
+            },
+            MouseEventKind::ScrollDown => EditorAction::MouseScroll {
+                dir: ScrollDir::Down,
+                col,
+                row,
+            },
             _ => EditorAction::Unhandled,
         }
     }
@@ -473,11 +482,48 @@ mod tests {
         let ih = handler();
         let up = MouseEvent {
             kind: MouseEventKind::ScrollUp,
-            column: 0,
-            row: 0,
+            column: 4,
+            row: 7,
             modifiers: KeyModifiers::NONE,
         };
-        assert_eq!(ih.handle_mouse(up), EditorAction::Scroll(ScrollDir::Up));
+        assert_eq!(
+            ih.handle_mouse(up),
+            EditorAction::MouseScroll {
+                dir: ScrollDir::Up,
+                col: 4,
+                row: 7,
+            }
+        );
+        let down = MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 12,
+            row: 3,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert_eq!(
+            ih.handle_mouse(down),
+            EditorAction::MouseScroll {
+                dir: ScrollDir::Down,
+                col: 12,
+                row: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn mouse_up() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        let ih = handler();
+        let up = MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: 9,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert_eq!(
+            ih.handle_mouse(up),
+            EditorAction::MouseUp { col: 9, row: 2 }
+        );
     }
 
     #[test]

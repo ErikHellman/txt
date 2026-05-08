@@ -19,12 +19,12 @@ use ratatui::{
     style::{Color, Style},
 };
 
-use crate::app::{AppState, ConfirmDelete, SIDEBAR_WIDTH};
+use crate::app::{AppState, ConfirmDelete};
 use crate::theme::ThemeColors;
 
-/// Top-level render function. Called once per frame with an immutable reference
-/// to the application state. Builds the layout and delegates to sub-renderers.
-pub fn render(state: &AppState, frame: &mut Frame) {
+/// Top-level render function. Called once per frame. Stores the rendered
+/// sidebar `Rect` on `state` so the next mouse event can hit-test against it.
+pub fn render(state: &mut AppState, frame: &mut Frame) {
     let area = frame.area();
     let buf = frame.buffer_mut();
     let theme = ThemeColors::for_theme(&state.config.theme);
@@ -70,7 +70,7 @@ pub fn render(state: &AppState, frame: &mut Frame) {
     };
 
     // ── Optional sidebar (left panel) ─────────────────────────────────────────
-    let sidebar_total_w = SIDEBAR_WIDTH + 1; // +1 for separator
+    let sidebar_total_w = state.sidebar_width + 1; // +1 for separator
     let (sidebar_area, editor_area) =
         if state.sidebar.is_some() && editor_content_area.width > sidebar_total_w {
             let side = Rect::new(
@@ -89,6 +89,9 @@ pub fn render(state: &AppState, frame: &mut Frame) {
         } else {
             (None, editor_content_area)
         };
+    // Store the rendered sidebar rect (or `None`) so mouse-event handlers in
+    // the next `update()` call can hit-test against it.
+    state.sidebar_area = sidebar_area;
 
     // ── Compute syntax highlights for visible range ───────────────────────────
     // Prefer LSP semantic tokens when available; fall back to tree-sitter.

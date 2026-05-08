@@ -79,6 +79,18 @@ pub enum EditorAction {
         col: u16,
         row: u16,
     },
+    /// Left-button release. Used to terminate drags (e.g. sidebar resize).
+    MouseUp {
+        col: u16,
+        row: u16,
+    },
+    /// Mouse-wheel scroll. Carries the cursor coordinates so the handler can
+    /// route to the sidebar or editor based on where the wheel was rolled.
+    MouseScroll {
+        dir: ScrollDir,
+        col: u16,
+        row: u16,
+    },
 
     // ── Search / replace ─────────────────────────────────────────────
     /// Open the find bar (Ctrl+F).

@@ -5,6 +5,7 @@ use anyhow::Result;
 use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
 
 use crate::{
     clipboard::ClipboardManager,
@@ -27,8 +28,16 @@ use crate::{
 /// The scroll amount for a single scroll-wheel tick or Ctrl+Up/Down.
 const SCROLL_LINES: usize = 3;
 
-/// Sidebar width in terminal columns.
-pub const SIDEBAR_WIDTH: u16 = 28;
+/// Default sidebar width in terminal columns. The active width is stored on
+/// `AppState::sidebar_width` so the user can resize by dragging the separator.
+pub const DEFAULT_SIDEBAR_WIDTH: u16 = 28;
+
+/// Minimum width the sidebar can be resized to (just enough to show short names).
+pub const MIN_SIDEBAR_WIDTH: u16 = 12;
+
+/// Maximum width the sidebar can be resized to in absolute columns. Also clamped
+/// to half the terminal width so the editor stays usable.
+pub const MAX_SIDEBAR_WIDTH: u16 = 80;
 
 // ── Modal input mode ─────────────────────────────────────────────────────────
 
@@ -205,6 +214,11 @@ pub struct TreeEntry {
 pub struct SidebarState {
     pub entries: Vec<TreeEntry>,
     pub selected: usize,
+    /// Index of the first visible entry. Independent from `selected`:
+    /// scroll-wheel and resize move this without touching `selected`,
+    /// while keyboard navigation calls `ensure_selected_visible` to keep
+    /// the selection on screen.
+    pub scroll_offset: usize,
     pub root: PathBuf,
 }
 
@@ -214,10 +228,46 @@ impl SidebarState {
         let mut state = Self {
             entries: Vec::new(),
             selected: 0,
+            scroll_offset: 0,
             root: root.clone(),
         };
         state.load_root();
         state
+    }
+
+    /// Scroll the visible window by `delta_lines` rows (positive = down).
+    /// Selection is unchanged. Clamped to `[0, max_scroll]` where
+    /// `max_scroll` keeps at least one row visible when `viewport_rows > 0`.
+    pub fn scroll_by(&mut self, delta_lines: isize, viewport_rows: usize) {
+        let max_scroll = if viewport_rows == 0 || self.entries.len() <= viewport_rows {
+            0
+        } else {
+            self.entries.len() - viewport_rows
+        };
+        let new = (self.scroll_offset as isize + delta_lines).max(0) as usize;
+        self.scroll_offset = new.min(max_scroll);
+    }
+
+    /// Adjust `scroll_offset` so the currently-selected entry is on-screen.
+    /// No-op when `viewport_rows == 0`.
+    pub fn ensure_selected_visible(&mut self, viewport_rows: usize) {
+        if viewport_rows == 0 {
+            return;
+        }
+        if self.selected < self.scroll_offset {
+            self.scroll_offset = self.selected;
+        } else if self.selected >= self.scroll_offset + viewport_rows {
+            self.scroll_offset = self.selected + 1 - viewport_rows;
+        }
+    }
+
+    /// Clamp `scroll_offset` so it doesn't point past the end of `entries`.
+    /// Called after operations that shrink or change the entry list.
+    fn clamp_scroll(&mut self) {
+        let max = self.entries.len().saturating_sub(1);
+        if self.scroll_offset > max {
+            self.scroll_offset = max;
+        }
     }
 
     /// Load the top-level entries of the root directory.
@@ -295,6 +345,7 @@ impl SidebarState {
             let mut tmp = Self {
                 entries: Vec::new(),
                 selected: 0,
+                scroll_offset: 0,
                 root: dir.clone(),
             };
             tmp.entries_from_dir(&dir, depth + 1, false);
@@ -304,6 +355,7 @@ impl SidebarState {
                 self.entries.insert(insert_at + i, child);
             }
         }
+        self.clamp_scroll();
     }
 
     /// Collapse the directory entry at `idx` (if expanded), removing its children.
@@ -324,6 +376,7 @@ impl SidebarState {
             .map(|p| start + p)
             .unwrap_or(self.entries.len());
         self.entries.drain(start..end);
+        self.clamp_scroll();
     }
 
     /// Move selection to the nearest ancestor directory and collapse it.
@@ -357,6 +410,7 @@ impl SidebarState {
         let mut tmp = Self {
             entries: Vec::new(),
             selected: 0,
+            scroll_offset: 0,
             root: dir.clone(),
         };
         tmp.entries_from_dir(&dir, depth + 1, false);
@@ -450,9 +504,11 @@ impl SidebarState {
             && let Some(idx) = self.entries.iter().position(|e| &e.path == old)
         {
             self.selected = idx;
+            self.clamp_scroll();
             return;
         }
         self.selected = old_selected.min(self.entries.len().saturating_sub(1));
+        self.clamp_scroll();
     }
 }
 
@@ -639,9 +695,18 @@ impl LspPickerState {
     }
 }
 
+/// State of an in-progress sidebar separator-drag.
+#[derive(Debug, Clone, Copy)]
+pub struct SidebarDrag {
+    /// Column the user pressed the mouse button on (always the separator x).
+    pub start_col: u16,
+    /// Width the sidebar had when the drag began.
+    pub start_width: u16,
+}
+
 // ── AppState ──────────────────────────────────────────────────────────────────
 
-/// All mutable application state. Renderers receive `&AppState` (read-only).
+/// All mutable application state.
 pub struct AppState {
     pub editor: Editor,
     pub clipboard: ClipboardManager,
@@ -649,6 +714,15 @@ pub struct AppState {
     pub fuzzy_picker: Option<FuzzyPickerState>,
     pub sidebar: Option<SidebarState>,
     pub sidebar_focused: bool,
+    /// Current sidebar width in columns (excluding the 1-col separator).
+    /// Mutated when the user drags the separator.
+    pub sidebar_width: u16,
+    /// Outer sidebar rect (including the separator column) from the most recent
+    /// frame. Used by mouse-event routing to translate `(col, row)` into either
+    /// an entry hit, a separator hit, or a fall-through to the editor.
+    pub sidebar_area: Option<Rect>,
+    /// Active separator-drag, if any.
+    pub sidebar_drag: Option<SidebarDrag>,
     saved_sidebar: Option<SidebarState>,
     pub sidebar_clipboard: Option<SidebarClipboard>,
     pub search_state: Option<SearchState>,
@@ -703,6 +777,9 @@ impl AppState {
             fuzzy_picker: None,
             sidebar: None,
             sidebar_focused: false,
+            sidebar_width: DEFAULT_SIDEBAR_WIDTH,
+            sidebar_area: None,
+            sidebar_drag: None,
             saved_sidebar: None,
             sidebar_clipboard: None,
             search_state: None,
@@ -1133,16 +1210,91 @@ impl AppState {
 
             // ── Mouse ─────────────────────────────────────────────────
             EditorAction::MouseClick { col, row } => {
-                if let Some(offset) = self.screen_to_byte(col, row) {
-                    self.editor
-                        .active_mut()
-                        .buffer
-                        .move_cursor_to(offset, false);
+                if self.point_on_separator(col, row) {
+                    // Begin a sidebar resize drag.
+                    self.sidebar_drag = Some(SidebarDrag {
+                        start_col: col,
+                        start_width: self.sidebar_width,
+                    });
+                } else if self.point_in_sidebar(col, row) {
+                    if let Some(idx) = self.sidebar_entry_at(row) {
+                        self.sidebar_focused = true;
+                        let h = self.sidebar_area.map(|r| r.height as usize).unwrap_or(0);
+                        let selected = if let Some(sb) = &mut self.sidebar {
+                            sb.selected = idx;
+                            sb.ensure_selected_visible(h);
+                            sb.entries
+                                .get(sb.selected)
+                                .map(|e| (e.path.clone(), e.is_dir))
+                        } else {
+                            None
+                        };
+                        if let Some((path, is_dir)) = selected {
+                            if is_dir {
+                                if let Some(sb) = &mut self.sidebar {
+                                    sb.toggle_selected();
+                                }
+                            } else {
+                                let _ = self.editor.open_tab(path);
+                                self.after_file_open_or_save();
+                                // Single click on a file moves focus to the editor.
+                                self.sidebar_focused = false;
+                            }
+                        }
+                    }
+                } else {
+                    // Click in the editor area: defocus the sidebar (if focused)
+                    // and move the cursor to the click target.
+                    self.sidebar_focused = false;
+                    if let Some(offset) = self.screen_to_byte(col, row) {
+                        self.editor
+                            .active_mut()
+                            .buffer
+                            .move_cursor_to(offset, false);
+                    }
                 }
             }
             EditorAction::MouseDrag { col, row } => {
-                if let Some(offset) = self.screen_to_byte(col, row) {
+                if let Some(drag) = self.sidebar_drag {
+                    // Resize the sidebar based on cursor delta from drag start.
+                    let max = (self.term_width as i32 / 2).min(MAX_SIDEBAR_WIDTH as i32);
+                    let min = MIN_SIDEBAR_WIDTH as i32;
+                    let delta = col as i32 - drag.start_col as i32;
+                    let new_w = (drag.start_width as i32 + delta).clamp(min, max.max(min)) as u16;
+                    self.sidebar_width = new_w;
+                } else if let Some(offset) = self.screen_to_byte(col, row) {
                     self.editor.active_mut().buffer.move_cursor_to(offset, true);
+                }
+            }
+            EditorAction::MouseUp { .. } => {
+                // End any in-progress separator drag. No editor action required.
+                self.sidebar_drag = None;
+            }
+            EditorAction::MouseScroll { dir, col, row } => {
+                if self.point_in_sidebar(col, row) {
+                    let h = self.sidebar_area.map(|r| r.height as usize).unwrap_or(0);
+                    if let Some(sb) = &mut self.sidebar {
+                        let delta: isize = match dir {
+                            ScrollDir::Up => -(SCROLL_LINES as isize),
+                            ScrollDir::Down => SCROLL_LINES as isize,
+                            _ => 0,
+                        };
+                        sb.scroll_by(delta, h);
+                    }
+                } else {
+                    // Route to the editor scroll just like a keyboard scroll.
+                    let total_lines = self.editor.active().buffer.len_lines();
+                    let vp = &mut self.editor.active_mut().viewport;
+                    match dir {
+                        ScrollDir::Up => {
+                            vp.scroll_row = vp.scroll_row.saturating_sub(SCROLL_LINES);
+                        }
+                        ScrollDir::Down => {
+                            vp.scroll_row =
+                                (vp.scroll_row + SCROLL_LINES).min(total_lines.saturating_sub(1));
+                        }
+                        _ => {}
+                    }
                 }
             }
 
@@ -2052,12 +2204,14 @@ impl AppState {
                 if let Some(sb) = &mut self.sidebar {
                     sb.move_up();
                 }
+                self.ensure_sidebar_selected_visible();
                 true
             }
             EditorAction::MoveCursor(Direction::Down) => {
                 if let Some(sb) = &mut self.sidebar {
                     sb.move_down();
                 }
+                self.ensure_sidebar_selected_visible();
                 true
             }
             EditorAction::InsertNewline => {
@@ -2104,6 +2258,7 @@ impl AppState {
                 if let Some(sb) = &mut self.sidebar {
                     sb.move_to_parent_and_collapse();
                 }
+                self.ensure_sidebar_selected_visible();
                 true
             }
             EditorAction::FocusSidebar => {
@@ -3432,11 +3587,62 @@ impl AppState {
         )
     }
 
+    /// Returns true if the given screen point is inside the sidebar's
+    /// entry-list area (excludes the separator column).
+    fn point_in_sidebar(&self, col: u16, row: u16) -> bool {
+        match self.sidebar_area {
+            Some(area) => {
+                col >= area.x
+                    && col < area.x + self.sidebar_width
+                    && row >= area.y
+                    && row < area.y + area.height
+            }
+            None => false,
+        }
+    }
+
+    /// Returns true if the given screen point is on the sidebar's separator
+    /// column (the 1-column-wide vertical bar between sidebar and editor).
+    fn point_on_separator(&self, col: u16, row: u16) -> bool {
+        match self.sidebar_area {
+            Some(area) => {
+                col == area.x + self.sidebar_width && row >= area.y && row < area.y + area.height
+            }
+            None => false,
+        }
+    }
+
+    /// Map a screen `row` inside the sidebar to the corresponding entry index.
+    /// Returns `None` if the row is outside the sidebar or past the last entry.
+    fn sidebar_entry_at(&self, row: u16) -> Option<usize> {
+        let area = self.sidebar_area?;
+        if row < area.y || row >= area.y + area.height {
+            return None;
+        }
+        let sb = self.sidebar.as_ref()?;
+        let screen_row = (row - area.y) as usize;
+        let idx = sb.scroll_offset + screen_row;
+        if idx < sb.entries.len() {
+            Some(idx)
+        } else {
+            None
+        }
+    }
+
+    /// Sync the sidebar's `scroll_offset` so the selected entry remains visible.
+    /// Called after any keyboard navigation that may move `selected` off-screen.
+    fn ensure_sidebar_selected_visible(&mut self) {
+        let h = self.sidebar_area.map(|r| r.height as usize).unwrap_or(0);
+        if let Some(sb) = &mut self.sidebar {
+            sb.ensure_selected_visible(h);
+        }
+    }
+
     fn screen_to_byte(&self, col: u16, row: u16) -> Option<usize> {
         let editor_area_y: u16 = if self.editor.tab_count() > 1 { 1 } else { 0 };
         // If sidebar is open the editor area starts further right; don't click into sidebar.
         let sidebar_offset: u16 = if self.sidebar.is_some() {
-            SIDEBAR_WIDTH + 1
+            self.sidebar_width + 1
         } else {
             0
         };
@@ -3495,7 +3701,7 @@ impl App {
                 .unwrap_or(0);
             let text_h = term_height.saturating_sub(1 + tab_bar_rows + search_rows) as usize;
             let sidebar_w: u16 = if state.sidebar.is_some() {
-                SIDEBAR_WIDTH + 1
+                state.sidebar_width + 1
             } else {
                 0
             };
@@ -3514,7 +3720,7 @@ impl App {
             // Flush debounced LSP notifications (didChange, semantic tokens).
             state.flush_lsp_debounce();
 
-            terminal.draw(|frame| ui::render(&state, frame))?;
+            terminal.draw(|frame| ui::render(&mut state, frame))?;
 
             if !event::poll(Duration::from_millis(50))? {
                 continue;
@@ -3752,4 +3958,87 @@ fn extract_word_at(text: &str, byte_offset: usize) -> String {
         end += 1;
     }
     text[start..end].to_string()
+}
+
+#[cfg(test)]
+mod sidebar_scroll_tests {
+    use super::*;
+
+    fn dummy_entries(n: usize) -> Vec<TreeEntry> {
+        (0..n)
+            .map(|i| TreeEntry {
+                path: PathBuf::from(format!("entry{}", i)),
+                depth: 0,
+                is_dir: false,
+                expanded: false,
+            })
+            .collect()
+    }
+
+    fn state_with(n: usize) -> SidebarState {
+        SidebarState {
+            entries: dummy_entries(n),
+            selected: 0,
+            scroll_offset: 0,
+            root: PathBuf::from("/"),
+        }
+    }
+
+    #[test]
+    fn scroll_by_clamps_at_zero() {
+        let mut sb = state_with(20);
+        sb.scroll_offset = 5;
+        sb.scroll_by(-100, 10);
+        assert_eq!(sb.scroll_offset, 0);
+    }
+
+    #[test]
+    fn scroll_by_clamps_at_max_keeps_viewport_full() {
+        let mut sb = state_with(20);
+        // viewport_rows=10 → max_scroll = 20 - 10 = 10
+        sb.scroll_by(100, 10);
+        assert_eq!(sb.scroll_offset, 10);
+    }
+
+    #[test]
+    fn scroll_by_no_scroll_when_all_fit() {
+        let mut sb = state_with(5);
+        sb.scroll_by(100, 10);
+        assert_eq!(sb.scroll_offset, 0);
+    }
+
+    #[test]
+    fn scroll_by_zero_viewport_pins_offset() {
+        let mut sb = state_with(20);
+        sb.scroll_by(100, 0);
+        assert_eq!(sb.scroll_offset, 0);
+    }
+
+    #[test]
+    fn ensure_selected_visible_scrolls_down_when_below() {
+        let mut sb = state_with(50);
+        sb.selected = 30;
+        sb.scroll_offset = 0;
+        sb.ensure_selected_visible(10);
+        // selected=30, viewport=10 → scroll_offset = 30 + 1 - 10 = 21
+        assert_eq!(sb.scroll_offset, 21);
+    }
+
+    #[test]
+    fn ensure_selected_visible_scrolls_up_when_above() {
+        let mut sb = state_with(50);
+        sb.selected = 5;
+        sb.scroll_offset = 20;
+        sb.ensure_selected_visible(10);
+        assert_eq!(sb.scroll_offset, 5);
+    }
+
+    #[test]
+    fn ensure_selected_visible_no_op_when_already_in_view() {
+        let mut sb = state_with(50);
+        sb.selected = 25;
+        sb.scroll_offset = 20;
+        sb.ensure_selected_visible(10);
+        assert_eq!(sb.scroll_offset, 20);
+    }
 }

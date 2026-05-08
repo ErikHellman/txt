@@ -43,12 +43,12 @@ pub fn render(
 
     let visible_rows = area.height as usize;
 
-    // Compute scroll offset so the selected entry is always visible.
-    let scroll = if sidebar.selected >= visible_rows {
-        sidebar.selected - visible_rows + 1
-    } else {
-        0
-    };
+    // Use the user-driven scroll offset stored on the sidebar state. Keyboard
+    // navigation calls `ensure_selected_visible` to keep `selected` on screen;
+    // mouse-wheel scroll moves this independently of `selected`.
+    let scroll = sidebar
+        .scroll_offset
+        .min(sidebar.entries.len().saturating_sub(1));
 
     for (screen_row, entry) in sidebar
         .entries
