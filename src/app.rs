@@ -2015,6 +2015,18 @@ impl AppState {
                 self.help_scroll = usize::MAX; // clamped in render
                 true
             }
+            EditorAction::MouseScroll { dir, .. } => {
+                match dir {
+                    ScrollDir::Up => {
+                        self.help_scroll = self.help_scroll.saturating_sub(SCROLL_LINES);
+                    }
+                    ScrollDir::Down => {
+                        self.help_scroll = self.help_scroll.saturating_add(SCROLL_LINES);
+                    }
+                    _ => {}
+                }
+                true
+            }
             EditorAction::ToggleHelp | EditorAction::CloseSearch => {
                 self.show_help = false;
                 true
