@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.1
+
+- Show a welcome panel on first launch and a "What's new" panel after a minor or major upgrade, listing every CHANGELOG section newer than the last dismissed version; patch bumps stay silent
+- Scroll the help overlay with the mouse wheel
+- Surface the F1 Help hint as a dedicated, brighter segment in the status bar
+
 ## v0.3.0
 
 - Add mouse navigation to the sidebar: click to expand/collapse folders or open files, scroll-wheel to scroll independently of the selection, drag the separator column to resize
