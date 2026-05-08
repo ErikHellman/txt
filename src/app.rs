@@ -731,6 +731,16 @@ pub struct AppState {
     pub help_scroll: usize,
     pub show_settings: bool,
     pub settings_cursor: usize,
+    /// First-launch welcome overlay. Set in `AppState::new` when no config
+    /// file exists on disk; cleared (and version persisted) on dismissal.
+    pub show_welcome: bool,
+    pub welcome_scroll: usize,
+    /// Post-upgrade changelog overlay. Set in `AppState::new` when the
+    /// previously seen version is older than the current one (by minor or
+    /// major). The sections to render are computed once at startup.
+    pub show_changelog: bool,
+    pub changelog_scroll: usize,
+    pub changelog_sections: Vec<crate::ui::changelog_overlay::Section>,
     pub lsp_picker: Option<LspPickerState>,
     pub completion: Option<CompletionState>,
     pub hover: Option<HoverState>,
@@ -768,7 +778,42 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(editor: Editor, workspace: PathBuf) -> Self {
-        let config = Config::load();
+        let config_existed = Config::config_file_exists();
+        let mut config = Config::load();
+
+        // Decide what onboarding overlay (if any) to show on this launch:
+        //   - No config file at all → first run → welcome.
+        //   - Config exists with a previously seen version older than the
+        //     current minor/major → changelog.
+        //   - Config exists but no version recorded (pre-existing user from
+        //     before this feature) → silently catch them up.
+        let current_version = env!("CARGO_PKG_VERSION");
+        let mut show_welcome = false;
+        let mut show_changelog = false;
+        let mut changelog_sections = Vec::new();
+        match (&config.last_seen_version, config_existed) {
+            (None, false) => {
+                show_welcome = true;
+            }
+            (None, true) => {
+                config.last_seen_version = Some(current_version.to_string());
+                config.save();
+            }
+            (Some(prev), _) => {
+                if crate::config::is_minor_or_major_upgrade(prev, current_version) {
+                    let sections = crate::ui::changelog_overlay::relevant_sections(prev);
+                    if !sections.is_empty() {
+                        changelog_sections = sections;
+                        show_changelog = true;
+                    } else {
+                        // Nothing parseable since last time — just bump.
+                        config.last_seen_version = Some(current_version.to_string());
+                        config.save();
+                    }
+                }
+            }
+        }
+
         let lsp_config = crate::lsp::config::WorkspaceLspConfig::load(&workspace);
         let mut state = Self {
             editor,
@@ -788,6 +833,11 @@ impl AppState {
             help_scroll: 0,
             show_settings: false,
             settings_cursor: 0,
+            show_welcome,
+            welcome_scroll: 0,
+            show_changelog,
+            changelog_scroll: 0,
+            changelog_sections,
             lsp_picker: None,
             completion: None,
             hover: None,
@@ -861,6 +911,16 @@ impl AppState {
         // Delete confirmation mode
         if self.confirm_delete.is_some() {
             self.handle_confirm_delete(action);
+            return;
+        }
+
+        // Welcome overlay — first-launch onboarding, captures most input.
+        if self.show_welcome && self.handle_welcome(&action) {
+            return;
+        }
+
+        // Changelog overlay — post-upgrade summary, captures most input.
+        if self.show_changelog && self.handle_changelog(&action) {
             return;
         }
 
@@ -1986,6 +2046,102 @@ impl AppState {
     }
 
     // ── Help overlay input handling ───────────────────────────────────────────
+
+    /// Persist `last_seen_version = current` so the same overlay isn't shown
+    /// again until the next minor/major upgrade.
+    fn record_version_seen(&mut self) {
+        let v = env!("CARGO_PKG_VERSION").to_string();
+        if self.config.last_seen_version.as_deref() != Some(v.as_str()) {
+            self.config.last_seen_version = Some(v);
+            self.config.save();
+        }
+    }
+
+    /// Handle input while the welcome overlay is visible. Any "OK" key
+    /// (Enter / Esc / F1 / Ctrl+Q-style ToggleHelp) dismisses it; arrows and
+    /// the mouse wheel scroll its content. Returns `true` to consume.
+    fn handle_welcome(&mut self, action: &EditorAction) -> bool {
+        match action {
+            EditorAction::MoveCursor(Direction::Up) => {
+                self.welcome_scroll = self.welcome_scroll.saturating_sub(1);
+                true
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                self.welcome_scroll = self.welcome_scroll.saturating_add(1);
+                true
+            }
+            EditorAction::MoveCursorPage(Direction::Up) => {
+                self.welcome_scroll = self.welcome_scroll.saturating_sub(10);
+                true
+            }
+            EditorAction::MoveCursorPage(Direction::Down) => {
+                self.welcome_scroll = self.welcome_scroll.saturating_add(10);
+                true
+            }
+            EditorAction::MouseScroll { dir, .. } => {
+                match dir {
+                    ScrollDir::Up => {
+                        self.welcome_scroll = self.welcome_scroll.saturating_sub(SCROLL_LINES);
+                    }
+                    ScrollDir::Down => {
+                        self.welcome_scroll = self.welcome_scroll.saturating_add(SCROLL_LINES);
+                    }
+                    _ => {}
+                }
+                true
+            }
+            EditorAction::InsertNewline | EditorAction::CloseSearch => {
+                self.show_welcome = false;
+                self.record_version_seen();
+                true
+            }
+            // Don't let typing leak through to the editor while the modal is up.
+            EditorAction::InsertChar(_) | EditorAction::InsertTab => true,
+            _ => false,
+        }
+    }
+
+    /// Handle input while the changelog overlay is visible. Same dismiss /
+    /// scroll semantics as the welcome overlay.
+    fn handle_changelog(&mut self, action: &EditorAction) -> bool {
+        match action {
+            EditorAction::MoveCursor(Direction::Up) => {
+                self.changelog_scroll = self.changelog_scroll.saturating_sub(1);
+                true
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                self.changelog_scroll = self.changelog_scroll.saturating_add(1);
+                true
+            }
+            EditorAction::MoveCursorPage(Direction::Up) => {
+                self.changelog_scroll = self.changelog_scroll.saturating_sub(10);
+                true
+            }
+            EditorAction::MoveCursorPage(Direction::Down) => {
+                self.changelog_scroll = self.changelog_scroll.saturating_add(10);
+                true
+            }
+            EditorAction::MouseScroll { dir, .. } => {
+                match dir {
+                    ScrollDir::Up => {
+                        self.changelog_scroll = self.changelog_scroll.saturating_sub(SCROLL_LINES);
+                    }
+                    ScrollDir::Down => {
+                        self.changelog_scroll = self.changelog_scroll.saturating_add(SCROLL_LINES);
+                    }
+                    _ => {}
+                }
+                true
+            }
+            EditorAction::InsertNewline | EditorAction::CloseSearch => {
+                self.show_changelog = false;
+                self.record_version_seen();
+                true
+            }
+            EditorAction::InsertChar(_) | EditorAction::InsertTab => true,
+            _ => false,
+        }
+    }
 
     /// Handle input while the help overlay is visible.
     /// Returns `true` if the action was consumed (caller should `return`).

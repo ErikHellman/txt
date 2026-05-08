@@ -1,3 +1,4 @@
+pub mod changelog_overlay;
 pub mod command_palette;
 pub mod completion_popup;
 pub mod editor_view;
@@ -6,12 +7,14 @@ pub mod help_overlay;
 pub mod hover_popup;
 pub mod lsp_approval;
 pub mod lsp_picker;
+pub mod overlay_chrome;
 pub mod references_list;
 pub mod search_bar;
 pub mod settings_overlay;
 pub mod sidebar;
 pub mod status_bar;
 pub mod tab_bar;
+pub mod welcome_overlay;
 
 use ratatui::{
     Frame,
@@ -168,7 +171,9 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
         && state.fuzzy_picker.is_none()
         && state.command_palette.is_none()
         && !state.show_help
-        && !state.show_settings;
+        && !state.show_settings
+        && !state.show_welcome
+        && !state.show_changelog;
 
     editor_view::render(
         handle,
@@ -238,6 +243,16 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
     // ── Command palette overlay ───────────────────────────────────────────────
     if let Some(palette) = &state.command_palette {
         command_palette::render(palette, &theme, area, buf);
+    }
+
+    // ── Welcome overlay (first launch) ───────────────────────────────────────
+    if state.show_welcome {
+        welcome_overlay::render(area, buf, state.welcome_scroll, env!("CARGO_PKG_VERSION"));
+    }
+
+    // ── Changelog overlay (post-upgrade) ─────────────────────────────────────
+    if state.show_changelog {
+        changelog_overlay::render(area, buf, state.changelog_scroll, &state.changelog_sections);
     }
 
     // ── Help overlay ─────────────────────────────────────────────────────────

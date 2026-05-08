@@ -74,6 +74,11 @@ pub struct Config {
     /// Active keybinding preset.
     #[serde(default)]
     pub keymap_preset: KeymapPreset,
+    /// The last version of `txt` whose welcome / changelog screen the user has
+    /// dismissed. `None` on a brand-new install; updated to the current version
+    /// each time an onboarding overlay is shown.
+    #[serde(default)]
+    pub last_seen_version: Option<String>,
 }
 
 fn default_tab_size() -> usize {
@@ -90,6 +95,7 @@ impl Default for Config {
             show_whitespace: false,
             theme: Theme::Default,
             keymap_preset: KeymapPreset::Default,
+            last_seen_version: None,
         }
     }
 }
@@ -130,6 +136,45 @@ impl Config {
     /// Path to the config file (`~/.config/txt/config.toml`).
     pub fn config_path() -> Option<PathBuf> {
         dirs::home_dir().map(|h| h.join(".config").join("txt").join("config.toml"))
+    }
+
+    /// Whether a config file already exists on disk. Used to distinguish a
+    /// brand-new install (no file) from an existing user (file present, but
+    /// possibly missing newer fields).
+    pub fn config_file_exists() -> bool {
+        Self::config_path().map(|p| p.exists()).unwrap_or(false)
+    }
+}
+
+/// Parse a semver-ish version string into `(major, minor)`. Accepts a leading
+/// `v`. Returns `None` if either component is missing or non-numeric.
+pub fn parse_minor_version(s: &str) -> Option<(u32, u32)> {
+    let s = s.trim().trim_start_matches('v');
+    let mut parts = s.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
+}
+
+/// Parse a semver-ish version string into `(major, minor, patch)`. Accepts a
+/// leading `v`. A missing patch component is treated as `0`. Returns `None`
+/// if major or minor are missing or non-numeric.
+pub fn parse_full_version(s: &str) -> Option<(u32, u32, u32)> {
+    let s = s.trim().trim_start_matches('v');
+    let mut parts = s.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    Some((major, minor, patch))
+}
+
+/// Whether a changelog overlay should be shown when going from `last` to
+/// `current`. True only when both parse and the (major, minor) pair has
+/// advanced — patch-only bumps are silent.
+pub fn is_minor_or_major_upgrade(last: &str, current: &str) -> bool {
+    match (parse_minor_version(last), parse_minor_version(current)) {
+        (Some(l), Some(c)) => l < c,
+        _ => false,
     }
 }
 
@@ -226,6 +271,7 @@ mod tests {
             auto_save: false,
             show_whitespace: true,
             keymap_preset: KeymapPreset::IntellijIdea,
+            last_seen_version: Some("0.3.0".to_string()),
         };
         let serialized = toml::to_string(&original).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();
@@ -285,5 +331,41 @@ mod tests {
     #[test]
     fn keymap_preset_all_covers_all_variants() {
         assert_eq!(KeymapPreset::ALL.len(), 3);
+    }
+
+    #[test]
+    fn parse_minor_version_accepts_leading_v_and_three_parts() {
+        assert_eq!(super::parse_minor_version("v0.3.0"), Some((0, 3)));
+        assert_eq!(super::parse_minor_version("0.3.0"), Some((0, 3)));
+        assert_eq!(super::parse_minor_version("1.10.5"), Some((1, 10)));
+    }
+
+    #[test]
+    fn parse_full_version_handles_two_or_three_parts() {
+        assert_eq!(super::parse_full_version("0.3.0"), Some((0, 3, 0)));
+        assert_eq!(super::parse_full_version("v1.2.4"), Some((1, 2, 4)));
+        // Two-part versions get a 0 patch.
+        assert_eq!(super::parse_full_version("1.5"), Some((1, 5, 0)));
+        // Garbage patch falls back to 0 rather than failing.
+        assert_eq!(super::parse_full_version("0.3.foo"), Some((0, 3, 0)));
+    }
+
+    #[test]
+    fn parse_minor_version_rejects_garbage() {
+        assert_eq!(super::parse_minor_version(""), None);
+        assert_eq!(super::parse_minor_version("foo"), None);
+        assert_eq!(super::parse_minor_version("1"), None);
+    }
+
+    #[test]
+    fn upgrade_detection() {
+        assert!(super::is_minor_or_major_upgrade("0.2.0", "0.3.0"));
+        assert!(super::is_minor_or_major_upgrade("0.2.5", "0.3.0"));
+        assert!(super::is_minor_or_major_upgrade("0.9.0", "1.0.0"));
+        // Patch-only bumps are silent.
+        assert!(!super::is_minor_or_major_upgrade("0.3.0", "0.3.1"));
+        assert!(!super::is_minor_or_major_upgrade("0.3.0", "0.3.0"));
+        // Same or newer minor → no overlay.
+        assert!(!super::is_minor_or_major_upgrade("0.4.0", "0.3.0"));
     }
 }
