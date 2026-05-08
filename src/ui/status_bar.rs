@@ -10,7 +10,7 @@ use crate::theme::ThemeColors;
 /// Render the status bar at the bottom of the screen.
 ///
 /// Normal layout:
-///   [ filename [+]  lang ]  ...spacer...  [ line:col  UTF-8 ]
+///   [ filename [+]  lang ]  ...spacer...  [ line:col  UTF-8 ][ F1 Help ]
 ///
 /// Modal layout:
 ///   [ JumpToLine / OpenFile / SaveAs prompt ]
@@ -63,6 +63,10 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
     let info_style = Style::default()
         .bg(Color::Rgb(60, 60, 80))
         .fg(Color::Rgb(200, 200, 220));
+    let hint_style = Style::default()
+        .bg(Color::Rgb(50, 80, 110))
+        .fg(Color::Rgb(220, 235, 255))
+        .add_modifier(Modifier::BOLD);
 
     // Fill the entire status bar row with the background colour.
     for x in area.x..area.x + area.width {
@@ -91,7 +95,8 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
     } else {
         String::new()
     };
-    let enc = " UTF-8  F1:Help ";
+    let enc = " UTF-8 ";
+    let help_hint = " F1 Help ";
     let wrap_flag = if handle.viewport.word_wrap { " WW" } else { "" };
     let lsp_flag = match &state.lsp {
         Some(registry) if registry.is_ready() => " LSP",
@@ -124,8 +129,11 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
     );
     let width = area.width as usize;
 
-    // Render right side first (rightmost block)
-    let right_x = area.x + (width.saturating_sub(right.len())) as u16;
+    // Render rightmost help hint, then the info block to its left.
+    let hint_x = area.x + (width.saturating_sub(help_hint.len())) as u16;
+    buf.set_string(hint_x, area.y, help_hint, hint_style);
+
+    let right_x = area.x + (width.saturating_sub(right.len() + help_hint.len())) as u16;
     buf.set_string(right_x, area.y, &right, info_style);
 
     // Left side: " filename" — starts after the mode badge
