@@ -317,6 +317,19 @@ fn atomic_kind(node_kind: &str, lang: Lang) -> Option<HighlightKind> {
             "comment" => Some(HighlightKind::Comment),
             _ => None,
         },
+        Lang::Html => match node_kind {
+            "comment" => Some(HighlightKind::Comment),
+            "doctype" => Some(HighlightKind::Keyword),
+            "quoted_attribute_value" => Some(HighlightKind::String),
+            _ => None,
+        },
+        Lang::Css => match node_kind {
+            "comment" => Some(HighlightKind::Comment),
+            "string_value" => Some(HighlightKind::String),
+            "integer_value" | "float_value" | "color_value" => Some(HighlightKind::Number),
+            "class_name" | "id_name" => Some(HighlightKind::Type),
+            _ => None,
+        },
         Lang::Markdown => None,
         Lang::Unknown => None,
     }
@@ -340,6 +353,8 @@ fn leaf_kind(node_kind: &str, parent_kind: &str, lang: Lang) -> Option<Highlight
         Lang::Yaml => yaml_leaf(node_kind),
         Lang::Properties => properties_leaf(node_kind, parent_kind),
         Lang::Toml => toml_leaf(node_kind, parent_kind),
+        Lang::Html => html_leaf(node_kind, parent_kind),
+        Lang::Css => css_leaf(node_kind, parent_kind),
         Lang::Unknown => None,
     }
 }
@@ -587,6 +602,28 @@ fn properties_leaf(kind: &str, parent: &str) -> Option<HighlightKind> {
         "=" | ":" => Some(HighlightKind::Punctuation),
         // Property keys (the LHS of `key=value`) read nicely as Type.
         "name" | "key" if parent == "property" => Some(HighlightKind::Type),
+        _ => None,
+    }
+}
+
+fn html_leaf(kind: &str, _parent: &str) -> Option<HighlightKind> {
+    match kind {
+        "tag_name" | "erroneous_end_tag_name" => Some(HighlightKind::Type),
+        "attribute_name" => Some(HighlightKind::Attribute),
+        "attribute_value" => Some(HighlightKind::String),
+        "<" | ">" | "</" | "/>" | "=" => Some(HighlightKind::Punctuation),
+        _ => None,
+    }
+}
+
+fn css_leaf(kind: &str, _parent: &str) -> Option<HighlightKind> {
+    match kind {
+        "at_keyword" | "important" | "from" | "to" => Some(HighlightKind::Keyword),
+        "tag_name" | "namespace_name" | "feature_name" => Some(HighlightKind::Type),
+        "property_name" | "plain_value" | "function_name" => Some(HighlightKind::Attribute),
+        "{" | "}" | "(" | ")" | "[" | "]" | ":" | ";" | "," | "." | "#" => {
+            Some(HighlightKind::Punctuation)
+        }
         _ => None,
     }
 }
@@ -1441,6 +1478,94 @@ mod tests {
                 .iter()
                 .any(|s| s.kind == HighlightKind::Comment && &src[s.start..s.end] == "# hi"),
             "expected Comment span for '# hi', got: {:?}",
+            spans
+        );
+    }
+
+    // ── HTML ───────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn html_tag_name() {
+        let src = "<div>hi</div>";
+        let tree = parse_with(src, tree_sitter_html::LANGUAGE.into());
+        let spans = spans_for(src, &tree, Lang::Html);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Type && &src[s.start..s.end] == "div"),
+            "expected Type span for 'div', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn html_attribute_and_value() {
+        let src = r#"<a href="x">y</a>"#;
+        let tree = parse_with(src, tree_sitter_html::LANGUAGE.into());
+        let spans = spans_for(src, &tree, Lang::Html);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Attribute && &src[s.start..s.end] == "href"),
+            "expected Attribute span for 'href', got: {:?}",
+            spans
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::String && &src[s.start..s.end] == "\"x\""),
+            "expected String span for '\"x\"', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn html_comment() {
+        let src = "<!-- hi --><p/>";
+        let tree = parse_with(src, tree_sitter_html::LANGUAGE.into());
+        let spans = spans_for(src, &tree, Lang::Html);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Comment && &src[s.start..s.end] == "<!-- hi -->"),
+            "expected Comment span for '<!-- hi -->', got: {:?}",
+            spans
+        );
+    }
+
+    // ── CSS ────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn css_property_and_number() {
+        let src = "div { width: 10px; }";
+        let tree = parse_with(src, tree_sitter_css::LANGUAGE.into());
+        let spans = spans_for(src, &tree, Lang::Css);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Attribute && &src[s.start..s.end] == "width"),
+            "expected Attribute span for 'width', got: {:?}",
+            spans
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Number && &src[s.start..s.end] == "10px"),
+            "expected Number span for '10px', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn css_comment() {
+        let src = "/* hi */ div {}";
+        let tree = parse_with(src, tree_sitter_css::LANGUAGE.into());
+        let spans = spans_for(src, &tree, Lang::Css);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Comment && &src[s.start..s.end] == "/* hi */"),
+            "expected Comment span for '/* hi */', got: {:?}",
             spans
         );
     }

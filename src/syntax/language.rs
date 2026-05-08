@@ -20,6 +20,8 @@ pub enum Lang {
     Yaml,
     Properties,
     Toml,
+    Html,
+    Css,
     #[default]
     Unknown,
 }
@@ -52,6 +54,8 @@ impl Lang {
             "yml" | "yaml" => Self::Yaml,
             "properties" => Self::Properties,
             "toml" => Self::Toml,
+            "html" | "htm" => Self::Html,
+            "css" => Self::Css,
             // Code fence language identifiers (lowercase) for supported grammars only
             "rust" => Self::Rust,
             "python" => Self::Python,
@@ -83,6 +87,8 @@ impl Lang {
             Self::Yaml => Some(tree_sitter_yaml::LANGUAGE.into()),
             Self::Properties => Some(tree_sitter_properties::LANGUAGE.into()),
             Self::Toml => Some(tree_sitter_toml_ng::LANGUAGE.into()),
+            Self::Html => Some(tree_sitter_html::LANGUAGE.into()),
+            Self::Css => Some(tree_sitter_css::LANGUAGE.into()),
             Self::Unknown => None,
         }
     }
@@ -96,6 +102,8 @@ impl Lang {
             Self::Json => "JSON",
             Self::Markdown => "Markdown",
             Self::Sh => "Shell",
+            Self::Html => "HTML",
+            Self::Css => "CSS",
             Self::TypeScript => "TypeScript",
             Self::Tsx => "TSX",
             Self::CSharp => "C#",
@@ -124,7 +132,7 @@ impl Lang {
             | Self::Kotlin
             | Self::Groovy => Some("// "),
             Self::Python | Self::Sh | Self::Yaml | Self::Properties | Self::Toml => Some("# "),
-            Self::Json | Self::Markdown | Self::Unknown => None,
+            Self::Json | Self::Markdown | Self::Html | Self::Css | Self::Unknown => None,
         }
     }
 }
@@ -218,6 +226,18 @@ mod tests {
     #[test]
     fn detect_toml() {
         assert_eq!(Lang::from_extension("toml"), Lang::Toml);
+    }
+
+    #[test]
+    fn detect_html() {
+        assert_eq!(Lang::from_extension("html"), Lang::Html);
+        assert_eq!(Lang::from_extension("htm"), Lang::Html);
+        assert_eq!(Lang::from_path(Path::new("index.html")), Lang::Html);
+    }
+
+    #[test]
+    fn detect_css() {
+        assert_eq!(Lang::from_extension("css"), Lang::Css);
     }
 
     #[test]
