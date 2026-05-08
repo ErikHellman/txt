@@ -624,7 +624,7 @@ impl Buffer {
             .collect();
 
         // Process descending so higher-offset inserts don't shift lower positions.
-        ops.sort_by(|a, b| b.ins_pt.cmp(&a.ins_pt));
+        ops.sort_by_key(|b| std::cmp::Reverse(b.ins_pt));
 
         // new_positions[cursor_idx] = byte offset after the edit.
         let mut new_positions = vec![0usize; n];
@@ -730,7 +730,7 @@ impl Buffer {
         }
 
         // Descending so higher-offset deletes don't affect lower positions.
-        ops.sort_by(|a, b| b.del_start.cmp(&a.del_start));
+        ops.sort_by_key(|b| std::cmp::Reverse(b.del_start));
 
         // Start with current positions (unchanged for cursors with no op).
         let mut new_positions: Vec<usize> = self
@@ -826,7 +826,7 @@ impl Buffer {
             return;
         }
 
-        ops.sort_by(|a, b| b.del_start.cmp(&a.del_start));
+        ops.sort_by_key(|b| std::cmp::Reverse(b.del_start));
 
         let mut new_positions: Vec<usize> = self
             .cursors

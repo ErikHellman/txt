@@ -88,6 +88,64 @@ pub fn prev_word_boundary(rope: &Rope, byte_offset: usize) -> usize {
     idx
 }
 
+/// Find the matching bracket for the bracket character at `cursor_byte`.
+///
+/// Returns `Some((open_byte, close_byte))` if a pair is found, else `None`.
+/// Scans at most 100 000 chars in each direction so we never block on a huge
+/// file with mismatched brackets.
+pub fn find_matching_bracket(rope: &Rope, cursor_byte: usize) -> Option<(usize, usize)> {
+    if cursor_byte >= rope.len_bytes() {
+        return None;
+    }
+    let char_idx = rope.byte_to_char(cursor_byte);
+    let ch = rope.char(char_idx);
+
+    const MAX_SCAN: usize = 100_000;
+    let total_chars = rope.len_chars();
+
+    let (open_ch, close_ch, forward) = match ch {
+        '{' => ('{', '}', true),
+        '(' => ('(', ')', true),
+        '[' => ('[', ']', true),
+        '}' => ('{', '}', false),
+        ')' => ('(', ')', false),
+        ']' => ('[', ']', false),
+        _ => return None,
+    };
+
+    if forward {
+        let mut depth = 0i32;
+        let limit = (char_idx + MAX_SCAN).min(total_chars);
+        for i in char_idx..limit {
+            let c = rope.char(i);
+            if c == open_ch {
+                depth += 1;
+            } else if c == close_ch {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((cursor_byte, rope.char_to_byte(i)));
+                }
+            }
+        }
+    } else {
+        let mut depth = 0i32;
+        let start = char_idx.saturating_sub(MAX_SCAN);
+        for i in (start..=char_idx).rev() {
+            let c = rope.char(i);
+            if c == close_ch {
+                depth += 1;
+            } else if c == open_ch {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((rope.char_to_byte(i), cursor_byte));
+                }
+            }
+        }
+    }
+
+    None
+}
+
 /// Find the byte offset of the start of the next word from `byte_offset`.
 pub fn next_word_boundary(rope: &Rope, byte_offset: usize) -> usize {
     let len = rope.len_bytes();
