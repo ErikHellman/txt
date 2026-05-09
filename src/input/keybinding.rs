@@ -471,6 +471,7 @@ impl KeyBindings {
         bind("ctrl+shift+c", EditorAction::CopyFileReference);
         bind("ctrl+shift+b", EditorAction::ToggleSidebar);
         bind("ctrl+shift+n", EditorAction::SidebarNewFolder);
+        bind("f5", EditorAction::SidebarRefresh);
         bind("ctrl+shift+i", EditorAction::FormatBuffer);
         bind("ctrl+shift+g", EditorAction::OpenGitDialog);
 

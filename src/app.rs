@@ -1680,6 +1680,7 @@ impl AppState {
             }
             EditorAction::SidebarRename
             | EditorAction::SidebarNewFolder
+            | EditorAction::SidebarRefresh
             | EditorAction::Unhandled => {}
         }
 
@@ -3043,6 +3044,10 @@ impl AppState {
                 if let Some(parent) = parent {
                     self.input_mode = InputMode::NewFolderName(parent, String::new());
                 }
+                true
+            }
+            EditorAction::SidebarRefresh => {
+                self.refresh_sidebar();
                 true
             }
             // Swallow all text-insertion actions so they don't reach the editor.

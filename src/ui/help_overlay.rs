@@ -295,6 +295,10 @@ const TEMPLATE: &[HelpEntry] = &[
         actions: &["sidebar_new_folder"],
         desc: "New folder (sidebar)",
     },
+    HelpEntry::Binding {
+        actions: &["sidebar_refresh"],
+        desc: "Refresh file tree (sidebar)",
+    },
     // ── View & App ───────────────────────────────────────────────────
     HelpEntry::Section("View & App"),
     HelpEntry::Binding {
