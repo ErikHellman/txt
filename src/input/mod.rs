@@ -47,9 +47,12 @@ impl InputHandler {
 
         // ── Phase 1: non-remappable hardcoded actions ────────────────────
 
-        // Ctrl+1..9 → GoToTab (index-parameterized, not configurable)
+        // Ctrl+1..9 → GoToTab (index-parameterized, not configurable).
+        // SHIFT is allowed because on AZERTY (French) and several other
+        // layouts, digits live on the shifted layer of the number row, so
+        // pressing what the user thinks of as "Ctrl+1" arrives as
+        // Ctrl+Shift+1.
         if ctrl
-            && !shift
             && !alt
             && let KeyCode::Char(c) = event.code
             && let Some(n) = c.to_digit(10)
@@ -546,6 +549,21 @@ mod tests {
         );
         assert_eq!(
             ih.handle_key(ctrl(KeyCode::Char('9'))),
+            EditorAction::GoToTab(8)
+        );
+    }
+
+    #[test]
+    fn go_to_tab_shortcuts_with_shift_for_azerty() {
+        // On AZERTY (French) keyboards, digits are on the shifted layer of
+        // the number row, so Ctrl+1 arrives as Ctrl+Shift+1.
+        let ih = handler();
+        assert_eq!(
+            ih.handle_key(ctrl_shift(KeyCode::Char('1'))),
+            EditorAction::GoToTab(0)
+        );
+        assert_eq!(
+            ih.handle_key(ctrl_shift(KeyCode::Char('9'))),
             EditorAction::GoToTab(8)
         );
     }
