@@ -10,7 +10,7 @@ use crate::theme::ThemeColors;
 /// Render the status bar at the bottom of the screen.
 ///
 /// Normal layout:
-///   [ filename [+]  lang ]  ...spacer...  [ line:col  UTF-8 ][ F1 Help ]
+///   [ filename [+]  lang ]  ...spacer...  [ ⎇ branch  line:col  UTF-8 ][ F1 Help ]
 ///
 /// Modal layout:
 ///   [ JumpToLine / OpenFile / SaveAs prompt ]
@@ -112,9 +112,16 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
         String::new()
     };
 
-    // Right side: word-wrap flag + LSP/TS mode + diagnostics + language + position + memory + encoding
+    let branch_str = state
+        .git_branch
+        .as_deref()
+        .map(|b| format!(" ⎇ {}", b))
+        .unwrap_or_default();
+
+    // Right side: branch + word-wrap flag + LSP/TS mode + diagnostics + language + position + memory + encoding
     let right = format!(
-        "{}{}{}{}  {}{}{}",
+        "{}{}{}{}{}  {}{}{}",
+        branch_str,
         wrap_flag,
         lsp_flag,
         diag_str,
