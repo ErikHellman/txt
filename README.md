@@ -178,6 +178,7 @@ All editing and navigation operations apply to every cursor simultaneously.
 | F2 | Rename file/directory |
 | Delete | Delete file/directory |
 | Ctrl+Shift+N | New folder |
+| F5 | Refresh file tree |
 
 ### Search & replace
 
