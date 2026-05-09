@@ -219,6 +219,8 @@ pub enum EditorAction {
     SidebarRename,
     /// Create a new folder in the sidebar (Ctrl+Shift+N).
     SidebarNewFolder,
+    /// Refresh the sidebar file tree (F5).
+    SidebarRefresh,
 
     // ── Placeholder for unrecognised / unimplemented keys ─────────────
     Unhandled,
@@ -335,6 +337,7 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::Quit => "quit",
         // Sidebar
         EditorAction::SidebarNewFolder => "sidebar_new_folder",
+        EditorAction::SidebarRefresh => "sidebar_refresh",
         // Non-remappable
         _ => return None,
     })
@@ -448,6 +451,7 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "quit" => EditorAction::Quit,
         // Sidebar
         "sidebar_new_folder" => EditorAction::SidebarNewFolder,
+        "sidebar_refresh" => EditorAction::SidebarRefresh,
         _ => return None,
     })
 }
