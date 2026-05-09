@@ -135,6 +135,14 @@ const TEMPLATE: &[HelpEntry] = &[
         actions: &["toggle_line_comment"],
         desc: "Toggle line comment",
     },
+    HelpEntry::Static {
+        key: "Tab / Shift+Tab",
+        desc: "Indent / dedent selection",
+    },
+    HelpEntry::Binding {
+        actions: &["format_buffer"],
+        desc: "Format buffer (external tool)",
+    },
     // ── Clipboard ────────────────────────────────────────────────────
     HelpEntry::Section("Clipboard"),
     HelpEntry::Binding {

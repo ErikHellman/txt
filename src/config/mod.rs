@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::formatting::FormattingConfig;
+
 const MAX_RECENT: usize = 50;
 
 /// Predefined colour themes. Serialises as snake_case strings in TOML.
@@ -79,6 +81,10 @@ pub struct Config {
     /// each time an onboarding overlay is shown.
     #[serde(default)]
     pub last_seen_version: Option<String>,
+    /// Live indent rules and external formatter commands. See
+    /// `crate::formatting::FormattingConfig` for the schema.
+    #[serde(default)]
+    pub formatting: FormattingConfig,
 }
 
 fn default_tab_size() -> usize {
@@ -96,6 +102,7 @@ impl Default for Config {
             theme: Theme::Default,
             keymap_preset: KeymapPreset::Default,
             last_seen_version: None,
+            formatting: FormattingConfig::default(),
         }
     }
 }
@@ -272,6 +279,44 @@ mod tests {
             show_whitespace: true,
             keymap_preset: KeymapPreset::IntellijIdea,
             last_seen_version: Some("0.3.0".to_string()),
+            formatting: FormattingConfig::default(),
+        };
+        let serialized = toml::to_string(&original).unwrap();
+        let deserialized: Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn formatting_section_round_trips() {
+        use crate::formatting::{FormatterConfig, IndentSection, IndentStyle, PerLangIndent};
+        let mut languages = std::collections::BTreeMap::new();
+        languages.insert(
+            "javascript".into(),
+            PerLangIndent {
+                style: None,
+                width: Some(2),
+            },
+        );
+        let mut formatters = std::collections::BTreeMap::new();
+        formatters.insert(
+            "rust".into(),
+            FormatterConfig {
+                command: "rustfmt".into(),
+                args: vec![],
+                stdin: true,
+            },
+        );
+        let formatting = FormattingConfig {
+            indent: IndentSection {
+                style: Some(IndentStyle::Spaces),
+                width: Some(4),
+                languages,
+            },
+            formatters,
+        };
+        let original = Config {
+            formatting,
+            ..Config::default()
         };
         let serialized = toml::to_string(&original).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();

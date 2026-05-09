@@ -118,6 +118,32 @@ impl Lang {
         }
     }
 
+    /// Stable lowercase identifier used as a key in TOML config tables
+    /// (e.g. `[indent.rust]`, `[formatters.python]`). `Unknown` returns `""`.
+    pub fn config_key(self) -> &'static str {
+        match self {
+            Self::Rust => "rust",
+            Self::Python => "python",
+            Self::JavaScript => "javascript",
+            Self::Json => "json",
+            Self::Markdown => "markdown",
+            Self::Sh => "sh",
+            Self::TypeScript => "typescript",
+            Self::Tsx => "tsx",
+            Self::CSharp => "csharp",
+            Self::Java => "java",
+            Self::Go => "go",
+            Self::Kotlin => "kotlin",
+            Self::Groovy => "groovy",
+            Self::Yaml => "yaml",
+            Self::Properties => "properties",
+            Self::Toml => "toml",
+            Self::Html => "html",
+            Self::Css => "css",
+            Self::Unknown => "",
+        }
+    }
+
     /// The string to prepend (and remove) when toggling line comments.
     /// Returns `None` for languages that don't support line comments.
     pub fn comment_prefix(self) -> Option<&'static str> {

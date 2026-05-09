@@ -9,6 +9,7 @@ use crate::buffer::{
     edit as rope_edit,
     history::{EditCommand, UndoStack},
 };
+use crate::formatting::{IndentConfig, IndentRules, IndentStyle};
 
 /// High-level text buffer.
 ///
@@ -262,25 +263,202 @@ impl Buffer {
         self.modified = true;
     }
 
-    /// Insert a newline at the primary cursor, applying auto-indent.
-    pub fn insert_newline(&mut self) {
+    /// Insert a newline at the primary cursor, applying language-aware
+    /// auto-indent.
+    ///
+    /// Copies the leading whitespace from the current line and adds one extra
+    /// indent level when the character before the cursor matches one of the
+    /// language's `increase_after` triggers (e.g. `{ ( [` for C-family,
+    /// `:` for Python).
+    pub fn insert_newline(&mut self, indent: &IndentConfig, rules: IndentRules) {
         let cursor = self.cursors.primary();
         let line = cursor.line;
-        let indent = self.leading_indent(line);
+        let leading = self.leading_indent(line);
         let prev_char = self.char_before_cursor(cursor.byte_offset);
-        let extra = if matches!(prev_char, Some('{') | Some('(') | Some('[') | Some(':')) {
-            self.indent_unit()
+        let bump = matches!(prev_char, Some(c) if rules.increase_after.contains(&c));
+        let extra = if bump {
+            indent.one_level()
         } else {
             String::new()
         };
-        let new_text = format!("\n{}{}", indent, extra);
+        let new_text = format!("\n{leading}{extra}");
         self.insert_str(&new_text);
     }
 
-    /// Insert `tab_size` spaces at the primary cursor.
-    pub fn insert_tab(&mut self, tab_size: usize) {
-        let spaces = " ".repeat(tab_size.max(1));
-        self.insert_str(&spaces);
+    /// Insert one indent level at the primary cursor.
+    ///
+    /// With spaces: smart-tab from the current display column to the next
+    /// multiple of `width` (so Tab on column 3 with width 4 inserts one
+    /// space). With tabs: inserts a single `\t`.
+    pub fn insert_tab(&mut self, indent: &IndentConfig) {
+        match indent.style {
+            IndentStyle::Tabs => {
+                self.insert_str("\t");
+            }
+            IndentStyle::Spaces => {
+                let width = indent.width.max(1);
+                let display_col = self.cursors.primary().preferred_col;
+                let count = width - (display_col % width);
+                self.insert_str(&" ".repeat(count));
+            }
+        }
+    }
+
+    /// Indent every line touched by the primary cursor's selection (or the
+    /// current line if there's no selection) by one indent level.
+    /// Recorded as a single undo entry. The cursor and selection move with
+    /// their lines.
+    pub fn indent_lines(&mut self, indent: &IndentConfig) {
+        let unit = indent.one_level();
+        let unit_bytes = unit.len();
+        let (first_line, last_line) = self.touched_line_range();
+
+        let primary = self.cursors.primary();
+        let original_offset = primary.byte_offset;
+        let original_sel = primary.selection;
+        let mut tracked: Vec<usize> = vec![original_offset];
+        if let Some(s) = original_sel {
+            tracked.push(s.anchor);
+            tracked.push(s.active);
+        }
+
+        self.history.begin_batch();
+        // Insert at each line's start, descending so earlier line offsets stay
+        // valid for the next iteration.
+        for line in (first_line..=last_line).rev() {
+            let start = self.line_start_byte(line);
+            rope_edit::insert(&mut self.rope, start, &unit);
+            self.history.record(EditCommand::Insert {
+                at: start,
+                text: unit.clone(),
+            });
+            for off in tracked.iter_mut() {
+                if *off >= start {
+                    *off += unit_bytes;
+                }
+            }
+        }
+        self.history.commit_batch();
+
+        let new_offset = tracked[0];
+        *self.cursors.primary_mut() = Cursor::from_byte_offset(&self.rope, new_offset);
+        if original_sel.is_some() {
+            let new_sel = crate::buffer::cursor::Selection::new(tracked[1], tracked[2]);
+            self.cursors.primary_mut().selection = Some(new_sel);
+        }
+        self.modified = true;
+    }
+
+    /// Dedent every line touched by the primary cursor's selection (or the
+    /// current line) by one indent level. Lines without enough leading
+    /// whitespace are left unchanged. Recorded as a single undo entry.
+    pub fn dedent_lines(&mut self, indent: &IndentConfig) {
+        let (first_line, last_line) = self.touched_line_range();
+
+        // Strip-per-line, computed up front in original-rope coordinates.
+        let mut strips: Vec<(usize, String)> = Vec::new();
+        for line in first_line..=last_line {
+            let line_str = self.line_str(line);
+            let strip = leading_dedent_match(&line_str, indent);
+            if !strip.is_empty() {
+                let start = self.line_start_byte(line);
+                strips.push((start, strip));
+            }
+        }
+
+        if strips.is_empty() {
+            return;
+        }
+
+        let primary = self.cursors.primary();
+        let original_offset = primary.byte_offset;
+        let original_sel = primary.selection;
+        let mut tracked: Vec<usize> = vec![original_offset];
+        if let Some(s) = original_sel {
+            tracked.push(s.anchor);
+            tracked.push(s.active);
+        }
+
+        self.history.begin_batch();
+        // Apply highest-offset deletions first so earlier offsets stay valid.
+        for (start, strip) in strips.iter().rev() {
+            let end = start + strip.len();
+            let deleted = rope_edit::delete(&mut self.rope, *start, end);
+            self.history.record(EditCommand::Delete {
+                start: *start,
+                end,
+                deleted,
+            });
+            let strip_len = strip.len();
+            for off in tracked.iter_mut() {
+                if *off >= end {
+                    *off -= strip_len;
+                } else if *off > *start {
+                    // Was inside the stripped whitespace — clamp to start.
+                    *off = *start;
+                }
+            }
+        }
+        self.history.commit_batch();
+
+        let new_offset = tracked[0];
+        *self.cursors.primary_mut() = Cursor::from_byte_offset(&self.rope, new_offset);
+        if original_sel.is_some() {
+            let new_sel = crate::buffer::cursor::Selection::new(tracked[1], tracked[2]);
+            self.cursors.primary_mut().selection = Some(new_sel);
+        }
+        self.modified = true;
+    }
+
+    /// Insert a single character with optional auto-dedent on closing
+    /// brackets. When `c` is in `rules.decrease_on` and the line up to the
+    /// cursor is whitespace-only, dedent the line by one level before
+    /// inserting `c`. The whole operation is a single undo entry.
+    pub fn insert_char_with_indent(&mut self, c: char, indent: &IndentConfig, rules: IndentRules) {
+        if !rules.decrease_on.contains(&c) {
+            self.insert_char(c);
+            return;
+        }
+        // Auto-dedent only fires for single-cursor edits where the line up
+        // to the cursor is purely whitespace.
+        if self.cursors.is_multi() {
+            self.insert_char(c);
+            return;
+        }
+        let cursor = self.cursors.primary();
+        if cursor.has_selection() {
+            self.insert_char(c);
+            return;
+        }
+        let line = cursor.line;
+        let line_start = self.line_start_byte(line);
+        let prefix_bytes = cursor.byte_offset - line_start;
+        let line_str = self.line_str(line);
+        let prefix = &line_str[..prefix_bytes.min(line_str.len())];
+        if prefix.is_empty() || !prefix.chars().all(|ch| ch == ' ' || ch == '\t') {
+            self.insert_char(c);
+            return;
+        }
+        let strip = leading_dedent_match(prefix, indent);
+        if strip.is_empty() {
+            self.insert_char(c);
+            return;
+        }
+        self.history.begin_batch();
+        let strip_end = line_start + strip.len();
+        let deleted = rope_edit::delete(&mut self.rope, line_start, strip_end);
+        self.history.record(EditCommand::Delete {
+            start: line_start,
+            end: strip_end,
+            deleted,
+        });
+        let new_offset = cursor.byte_offset - strip.len();
+        *self.cursors.primary_mut() = Cursor::from_byte_offset(&self.rope, new_offset);
+        let mut s = String::with_capacity(c.len_utf8());
+        s.push(c);
+        // insert_str handles cursor advance + history recording.
+        self.insert_str(&s);
+        self.history.commit_batch();
     }
 
     /// Duplicate the current line (or selection).
@@ -902,9 +1080,28 @@ impl Buffer {
         ws
     }
 
-    fn indent_unit(&self) -> String {
-        // 4 spaces by default; Phase 8 will read from config.
-        "    ".to_string()
+    /// Range of lines `(first, last)` inclusive that the primary cursor
+    /// (and its selection, if any) touches. Used by indent / dedent.
+    fn touched_line_range(&self) -> (usize, usize) {
+        let cursor = self.cursors.primary();
+        if !cursor.has_selection() {
+            return (cursor.line, cursor.line);
+        }
+        let range = cursor.selection_bytes();
+        let start_line = self.rope.char_to_line(self.rope.byte_to_char(range.start));
+        // If the selection ends exactly at a line start (i.e. the user
+        // selected up to but not into the next line), don't include that
+        // next line — Tab on a 3-line selection that ends at the start of
+        // line 4 should indent lines 1-3.
+        let end_char = self.rope.byte_to_char(range.end);
+        let end_line_raw = self.rope.char_to_line(end_char);
+        let end_line_start_char = self.rope.line_to_char(end_line_raw);
+        let end_line = if range.end > range.start && end_char == end_line_start_char {
+            end_line_raw.saturating_sub(1)
+        } else {
+            end_line_raw
+        };
+        (start_line, end_line.max(start_line))
     }
 
     fn char_before_cursor(&self, byte_offset: usize) -> Option<char> {
@@ -945,6 +1142,27 @@ impl Buffer {
     }
 }
 
+/// Returns the leading whitespace prefix of `line_str` to strip when
+/// dedenting once. Matches one `\t` if the line starts with a tab, otherwise
+/// up to `indent.width` leading spaces. Returns the empty string when there
+/// is no leading whitespace to strip.
+fn leading_dedent_match(line_str: &str, indent: &IndentConfig) -> String {
+    let mut chars = line_str.chars();
+    match chars.next() {
+        Some('\t') => "\t".to_string(),
+        Some(' ') => {
+            let width = indent.width.max(1);
+            let count = line_str
+                .chars()
+                .take(width)
+                .take_while(|c| *c == ' ')
+                .count();
+            " ".repeat(count)
+        }
+        _ => String::new(),
+    }
+}
+
 impl std::fmt::Display for Buffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.rope)
@@ -960,6 +1178,22 @@ impl Default for Buffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::syntax::language::Lang;
+
+    fn spaces(width: usize) -> IndentConfig {
+        IndentConfig {
+            style: IndentStyle::Spaces,
+            width,
+        }
+    }
+
+    fn rust_rules() -> IndentRules {
+        IndentRules::for_lang(Lang::Rust)
+    }
+
+    fn python_rules() -> IndentRules {
+        IndentRules::for_lang(Lang::Python)
+    }
 
     #[test]
     fn insert_and_read() {
@@ -1097,7 +1331,7 @@ mod tests {
     fn newline_with_auto_indent() {
         let mut buf = Buffer::from_str("    hello");
         buf.move_cursor_to(9, false); // end of line
-        buf.insert_newline();
+        buf.insert_newline(&spaces(4), rust_rules());
         // New line should have the same 4-space indent
         assert!(buf.to_string().starts_with("    hello\n    "));
     }
@@ -1106,10 +1340,28 @@ mod tests {
     fn newline_after_brace_increases_indent() {
         let mut buf = Buffer::from_str("fn foo() {");
         buf.move_cursor_to(10, false);
-        buf.insert_newline();
+        buf.insert_newline(&spaces(4), rust_rules());
         let content = buf.to_string();
         // Should add one extra indent level after '{'
         assert!(content.contains("fn foo() {\n    "));
+    }
+
+    #[test]
+    fn newline_python_colon_increases_indent() {
+        let mut buf = Buffer::from_str("def f():");
+        buf.move_cursor_to(8, false);
+        buf.insert_newline(&spaces(4), python_rules());
+        assert_eq!(buf.to_string(), "def f():\n    ");
+    }
+
+    #[test]
+    fn newline_python_brace_does_not_increase_indent() {
+        // In Python, `{ ( [` are dict / list / call literals — not blocks.
+        let mut buf = Buffer::from_str("xs = {");
+        buf.move_cursor_to(6, false);
+        buf.insert_newline(&spaces(4), python_rules());
+        // No extra indent: just the leading whitespace from the previous line (none).
+        assert_eq!(buf.to_string(), "xs = {\n");
     }
 
     #[test]
@@ -1166,25 +1418,98 @@ mod tests {
     }
 
     #[test]
-    fn insert_tab_default_size() {
+    fn insert_tab_spaces_default_at_column_zero() {
         let mut buf = Buffer::new();
-        buf.insert_tab(4);
+        buf.insert_tab(&spaces(4));
         assert_eq!(buf.to_string(), "    ");
         assert_eq!(buf.cursors.primary().byte_offset, 4);
     }
 
     #[test]
-    fn insert_tab_custom_size() {
-        let mut buf = Buffer::new();
-        buf.insert_tab(2);
-        assert_eq!(buf.to_string(), "  ");
+    fn insert_tab_spaces_smart_advances_to_column_boundary() {
+        // At column 1, Tab with width=4 should fill 3 spaces (to column 4).
+        let mut buf = Buffer::from_str("x");
+        buf.move_cursor_to(1, false);
+        buf.insert_tab(&spaces(4));
+        assert_eq!(buf.to_string(), "x   ");
     }
 
     #[test]
-    fn insert_tab_size_one() {
+    fn insert_tab_tabs_inserts_tab_char() {
         let mut buf = Buffer::new();
-        buf.insert_tab(1);
-        assert_eq!(buf.to_string(), " ");
+        buf.insert_tab(&IndentConfig {
+            style: IndentStyle::Tabs,
+            width: 4,
+        });
+        assert_eq!(buf.to_string(), "\t");
+    }
+
+    #[test]
+    fn indent_lines_three_line_selection() {
+        let mut buf = Buffer::from_str("a\nb\nc\n");
+        buf.move_cursor_to(0, false);
+        buf.move_cursor_to(6, true); // select all 3 lines + trailing newline
+        buf.indent_lines(&spaces(4));
+        assert_eq!(buf.to_string(), "    a\n    b\n    c\n");
+        // One undo restores the original.
+        buf.undo();
+        assert_eq!(buf.to_string(), "a\nb\nc\n");
+    }
+
+    #[test]
+    fn indent_lines_no_selection_only_current_line() {
+        let mut buf = Buffer::from_str("a\nb\nc\n");
+        buf.move_cursor_to(2, false); // line 1, col 0 (the 'b')
+        buf.indent_lines(&spaces(4));
+        assert_eq!(buf.to_string(), "a\n    b\nc\n");
+    }
+
+    #[test]
+    fn dedent_lines_handles_tabs_and_spaces() {
+        let mut buf = Buffer::from_str("\tline1\n    line2\n  line3\n");
+        buf.move_cursor_to(0, false);
+        buf.move_cursor_to(buf.rope().len_bytes(), true);
+        buf.dedent_lines(&spaces(4));
+        assert_eq!(buf.to_string(), "line1\nline2\nline3\n");
+    }
+
+    #[test]
+    fn dedent_lines_no_op_on_unindented_lines() {
+        let mut buf = Buffer::from_str("a\nb\nc\n");
+        let before = buf.to_string();
+        buf.move_cursor_to(0, false);
+        buf.move_cursor_to(buf.rope().len_bytes(), true);
+        buf.dedent_lines(&spaces(4));
+        assert_eq!(buf.to_string(), before);
+    }
+
+    #[test]
+    fn insert_close_brace_dedents_when_only_whitespace_before() {
+        // "fn x() {\n    " — typing '}' on the indented line dedents and inserts.
+        let mut buf = Buffer::from_str("fn x() {\n    ");
+        buf.move_cursor_to(13, false); // after the 4 spaces
+        buf.insert_char_with_indent('}', &spaces(4), rust_rules());
+        assert_eq!(buf.to_string(), "fn x() {\n}");
+        // Single undo restores both.
+        buf.undo();
+        assert_eq!(buf.to_string(), "fn x() {\n    ");
+    }
+
+    #[test]
+    fn insert_close_brace_no_dedent_with_content_on_line() {
+        let mut buf = Buffer::from_str("foo");
+        buf.move_cursor_to(3, false);
+        buf.insert_char_with_indent('}', &spaces(4), rust_rules());
+        assert_eq!(buf.to_string(), "foo}");
+    }
+
+    #[test]
+    fn insert_close_brace_python_dedent_works() {
+        // Python's IndentRules also include `}` `)` `]` for literal collections.
+        let mut buf = Buffer::from_str("xs = [\n    ");
+        buf.move_cursor_to(11, false);
+        buf.insert_char_with_indent(']', &spaces(4), python_rules());
+        assert_eq!(buf.to_string(), "xs = [\n]");
     }
 
     // ── Multi-cursor tests ────────────────────────────────────────────────

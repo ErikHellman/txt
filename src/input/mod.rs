@@ -70,7 +70,8 @@ impl InputHandler {
         match event.code {
             KeyCode::Enter if !ctrl && !alt => return EditorAction::InsertNewline,
             KeyCode::Tab if !ctrl && !alt && !shift => return EditorAction::InsertTab,
-            KeyCode::BackTab => return EditorAction::Unhandled,
+            // Shift+Tab dedents the selection or current line.
+            KeyCode::BackTab => return EditorAction::DedentSelection,
             _ => {}
         }
 

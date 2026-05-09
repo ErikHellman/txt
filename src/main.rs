@@ -4,6 +4,7 @@ mod clipboard;
 mod config;
 mod editor;
 mod error;
+mod formatting;
 mod git;
 mod input;
 mod lsp;
