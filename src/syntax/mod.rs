@@ -57,8 +57,13 @@ impl SyntaxHost {
 
     /// (Re-)parse the buffer content using the configured language.
     ///
-    /// Passes the previous tree for incremental re-parsing. If no language is
-    /// configured, or if parsing fails, the stored tree is set to `None`.
+    /// Always performs a full reparse. Tree-sitter's incremental parsing
+    /// requires the previous tree to be informed of edits via `Tree::edit()`
+    /// before being passed back to `parse()`; without that, reused subtrees
+    /// keep stale byte positions and produce highlight spans pointing into the
+    /// wrong locations of the new source. Until edits are tracked through the
+    /// buffer, the only correct option is a full reparse from `None`.
+    /// See `future_syntax_parse_plan.md` for the planned incremental design.
     pub fn reparse_rope(&mut self, rope: &Rope) {
         if self.language == Lang::Unknown {
             self.tree = None;
@@ -69,15 +74,7 @@ impl SyntaxHost {
         // Phase 7 will switch to parse_with() + rope chunk callbacks to avoid
         // this allocation.
         let source = rope.to_string();
-
-        // Use incremental parsing for non-markdown languages.
-        // Markdown requires full reparse due to tree-sitter bus errors with incremental.
-        let old_tree = if self.language == Lang::Markdown {
-            None
-        } else {
-            self.tree.take()
-        };
-        self.tree = self.parser.parse(source.as_bytes(), old_tree.as_ref());
+        self.tree = self.parser.parse(source.as_bytes(), None);
     }
 
     /// Returns true if a valid parse tree is available.
@@ -288,5 +285,43 @@ mod tests {
         host.reparse_rope(&rope2);
         assert!(host.has_tree());
         assert!(!host.tree.as_ref().unwrap().root_node().has_error());
+    }
+
+    /// Regression: highlight span byte offsets must match the *current* source
+    /// after a reparse. A previous incremental-parse implementation reused
+    /// stale node positions from the old tree, causing spans to drift with
+    /// every edit.
+    #[test]
+    fn spans_correct_after_reparse_with_new_content() {
+        use crate::syntax::highlighter::HighlightKind;
+
+        let mut host = SyntaxHost::new();
+        host.set_language(Lang::Rust);
+
+        // Initial parse — establishes a previous tree internally.
+        host.reparse_rope(&Rope::from_str("let x = 1;"));
+
+        // Reparse with content that grew at the front and the back.
+        let src = "fn a() { let x = 1; }";
+        host.reparse_rope(&Rope::from_str(src));
+
+        let spans = host.highlight_spans(src.as_bytes(), 0, src.len());
+
+        // "fn" must be at bytes 0..2.
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.start == 0 && s.end == 2 && s.kind == HighlightKind::Keyword),
+            "expected 'fn' Keyword span at 0..2, got: {:?}",
+            spans
+        );
+        // "let" must be at bytes 9..12 in the new source.
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.start == 9 && s.end == 12 && s.kind == HighlightKind::Keyword),
+            "expected 'let' Keyword span at 9..12, got: {:?}",
+            spans
+        );
     }
 }
