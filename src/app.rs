@@ -774,6 +774,10 @@ pub struct AppState {
     pub term_height: u16,
     pub memory_rss_kb: u64,
     memory_last_checked: Instant,
+    /// Currently checked-out git branch in `workspace`, if any. Refreshed
+    /// on a 2 s cadence so external `git checkout`s are picked up live.
+    pub git_branch: Option<String>,
+    git_branch_last_checked: Instant,
 }
 
 impl AppState {
@@ -815,6 +819,7 @@ impl AppState {
         }
 
         let lsp_config = crate::lsp::config::WorkspaceLspConfig::load(&workspace);
+        let git_branch = crate::git::current_branch(&workspace);
         let mut state = Self {
             editor,
             clipboard: ClipboardManager::new(),
@@ -861,6 +866,8 @@ impl AppState {
             term_height: 24,
             memory_rss_kb: 0,
             memory_last_checked: Instant::now(),
+            git_branch,
+            git_branch_last_checked: Instant::now(),
         };
         // Apply config to initial buffer.
         if state.config.word_wrap {
@@ -2803,6 +2810,17 @@ impl AppState {
         }
     }
 
+    /// Refresh the cached git branch (throttled to every 2 seconds).
+    ///
+    /// Picks up branch changes made outside the editor (e.g. `git checkout`
+    /// from another terminal).
+    pub fn refresh_git_branch(&mut self) {
+        if self.git_branch_last_checked.elapsed() >= Duration::from_secs(2) {
+            self.git_branch = crate::git::current_branch(&self.workspace);
+            self.git_branch_last_checked = Instant::now();
+        }
+    }
+
     /// Reload the active buffer from disk (used after external modification).
     fn reload_active_file(&mut self) {
         let path = match self.editor.active().path.clone() {
@@ -3897,6 +3915,7 @@ impl App {
             state.poll_file_watcher();
             state.poll_auto_save();
             state.refresh_memory();
+            state.refresh_git_branch();
 
             // Drain pending LSP server updates (non-blocking).
             state.poll_lsp_updates();

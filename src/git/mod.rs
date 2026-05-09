@@ -143,6 +143,25 @@ pub fn fetch_head_content(path: &Path) -> Option<String> {
     }
 }
 
+/// Return the name of the currently checked-out branch in `workspace`.
+///
+/// Returns `None` if `workspace` is not inside a git repo, git is unavailable,
+/// or HEAD is detached.
+pub fn current_branch(workspace: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(workspace)
+        .args(["branch", "--show-current"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+    let name = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    if name.is_empty() { None } else { Some(name) }
+}
+
 /// Compute a `GitGutter` for the file at `path` against its HEAD version.
 ///
 /// Returns `None` if the file is not tracked or git is unavailable.
