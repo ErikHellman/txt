@@ -22,6 +22,7 @@ use crate::{
     ui,
     ui::command_palette::CommandPaletteState,
     ui::editor_view::gutter_width,
+    ui::git_dialog::GitDialogState,
     watcher::FileWatcher,
 };
 
@@ -57,6 +58,12 @@ pub enum InputMode {
     NewFolderName(PathBuf, String),
     /// F2: "Rename: {input}" (LSP rename symbol)
     Rename(String),
+    /// Git dialog → "Commit message: {input}". On submit, runs `git commit -m`.
+    GitCommitMessage(String),
+    /// Git dialog → "New branch: {input}". On submit, runs `git checkout -b`.
+    GitNewBranch(String),
+    /// Git dialog → "Stash message: {input}" (optional). On submit, runs `git stash push`.
+    GitStashMessage(String),
 }
 
 impl InputMode {
@@ -746,6 +753,7 @@ pub struct AppState {
     pub hover: Option<HoverState>,
     pub references_list: Option<ReferencesListState>,
     pub git_gutter: Option<GitGutter>,
+    pub git_dialog: Option<GitDialogState>,
     pub config: Config,
     pub input: InputHandler,
     pub workspace: PathBuf,
@@ -843,6 +851,7 @@ impl AppState {
             hover: None,
             references_list: None,
             git_gutter: None,
+            git_dialog: None,
             config,
             input: InputHandler::new(),
             workspace,
@@ -941,8 +950,17 @@ impl AppState {
 
         // Modal input (status-bar prompts) — must come before sidebar so that
         // rename / new-folder prompts receive Enter/typing even while sidebar is focused.
+        // Also takes precedence over the git dialog so InputMode::Git* prompts
+        // (commit message, new branch, stash message) own input while the
+        // dialog stays open behind them.
         if !self.input_mode.is_normal() {
             self.handle_modal_input(action);
+            return;
+        }
+
+        // Git operations dialog — captures all input.
+        if self.git_dialog.is_some() {
+            self.handle_git_dialog(action);
             return;
         }
 
@@ -1488,6 +1506,9 @@ impl AppState {
                     self.lsp_picker = Some(LspPickerState::new(&self.lsp_config));
                 }
             }
+            EditorAction::OpenGitDialog => {
+                self.open_git_dialog();
+            }
             EditorAction::TriggerCompletion => {
                 self.trigger_completion();
             }
@@ -1662,7 +1683,10 @@ impl AppState {
                     | InputMode::SaveAsPath(s)
                     | InputMode::RenamePath(_, s)
                     | InputMode::NewFolderName(_, s)
-                    | InputMode::Rename(s) => {
+                    | InputMode::Rename(s)
+                    | InputMode::GitCommitMessage(s)
+                    | InputMode::GitNewBranch(s)
+                    | InputMode::GitStashMessage(s) => {
                         s.push(c);
                     }
                     _ => {}
@@ -1676,7 +1700,10 @@ impl AppState {
                     | InputMode::SaveAsPath(s)
                     | InputMode::RenamePath(_, s)
                     | InputMode::NewFolderName(_, s)
-                    | InputMode::Rename(s) => {
+                    | InputMode::Rename(s)
+                    | InputMode::GitCommitMessage(s)
+                    | InputMode::GitNewBranch(s)
+                    | InputMode::GitStashMessage(s) => {
                         s.pop();
                     }
                     InputMode::Normal => {}
@@ -1770,6 +1797,15 @@ impl AppState {
                         if !input.is_empty() {
                             self.send_rename(&input);
                         }
+                    }
+                    InputMode::GitCommitMessage(input) => {
+                        self.git_finish_commit(&input);
+                    }
+                    InputMode::GitNewBranch(input) => {
+                        self.git_finish_new_branch(&input);
+                    }
+                    InputMode::GitStashMessage(input) => {
+                        self.git_finish_stash_push(&input);
                     }
                     InputMode::Normal => {}
                 }
@@ -2360,6 +2396,427 @@ impl AppState {
 
         // Start new server if enabled — routed through the trust gate.
         self.request_lsp_start();
+    }
+
+    // ── Git operations dialog ────────────────────────────────────────────────
+
+    fn open_git_dialog(&mut self) {
+        if !crate::git::ops::is_repo(&self.workspace) {
+            self.status_error = Some("Not a git repository".into());
+            return;
+        }
+        self.git_dialog = Some(GitDialogState::new());
+    }
+
+    /// Drive the git dialog. Captures all input until `Esc` from the menu
+    /// closes the overlay. Routes nav keys to `GitScreen::move_*`, and
+    /// handles per-screen actions inline.
+    fn handle_git_dialog(&mut self, action: EditorAction) {
+        use crate::ui::git_dialog::{ConfirmOp, GitScreen, MenuItem};
+
+        // Quit always closes the dialog without doing anything.
+        if matches!(action, EditorAction::Quit | EditorAction::ForceQuit) {
+            self.git_dialog = None;
+            return;
+        }
+
+        // Esc / CloseSearch: step back; if no history, close the dialog.
+        if matches!(action, EditorAction::CloseSearch) {
+            let close = match self.git_dialog.as_mut() {
+                Some(d) => !d.pop(),
+                None => true,
+            };
+            if close {
+                self.git_dialog = None;
+            }
+            return;
+        }
+
+        // Navigation keys are uniform across most screens.
+        match action {
+            EditorAction::MoveCursor(Direction::Up) => {
+                if let Some(d) = self.git_dialog.as_mut() {
+                    d.screen.move_up();
+                    d.screen.scroll_by(-1);
+                }
+                return;
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                if let Some(d) = self.git_dialog.as_mut() {
+                    d.screen.move_down();
+                    d.screen.scroll_by(1);
+                }
+                return;
+            }
+            EditorAction::MoveCursorPage(Direction::Up) | EditorAction::Scroll(ScrollDir::Up) => {
+                if let Some(d) = self.git_dialog.as_mut() {
+                    d.screen.scroll_by(-5);
+                }
+                return;
+            }
+            EditorAction::MoveCursorPage(Direction::Down)
+            | EditorAction::Scroll(ScrollDir::Down) => {
+                if let Some(d) = self.git_dialog.as_mut() {
+                    d.screen.scroll_by(5);
+                }
+                return;
+            }
+            _ => {}
+        }
+
+        // Per-screen handling. We snapshot the current screen kind so we can
+        // borrow self mutably below for I/O without holding a borrow on
+        // `self.git_dialog`.
+        let screen_kind = match self.git_dialog.as_ref() {
+            Some(d) => d.screen.clone(),
+            None => return,
+        };
+
+        match (screen_kind, action) {
+            // ── Menu ──
+            (GitScreen::Menu { selected }, EditorAction::InsertNewline) => {
+                let item = MenuItem::ALL[selected];
+                self.git_open_menu_item(item);
+            }
+
+            // ── Stage ──
+            (
+                GitScreen::Stage { entries, .. },
+                EditorAction::InsertChar(' ') | EditorAction::InsertChar('x'),
+            ) => {
+                if let Some(GitDialogState {
+                    screen:
+                        GitScreen::Stage {
+                            checked, selected, ..
+                        },
+                    ..
+                }) = self.git_dialog.as_mut()
+                    && let Some(slot) = checked.get_mut(*selected)
+                    && !entries.is_empty()
+                {
+                    *slot = !*slot;
+                }
+            }
+            (
+                GitScreen::Stage {
+                    entries, checked, ..
+                },
+                EditorAction::InsertNewline,
+            ) => {
+                self.git_apply_stage(&entries, &checked);
+            }
+
+            // ── Branches ──
+            (GitScreen::Branches { entries, selected }, EditorAction::InsertNewline) => {
+                if let Some(branch) = entries.get(selected) {
+                    if branch.current {
+                        if let Some(d) = self.git_dialog.as_mut() {
+                            d.set_error("Already on this branch");
+                        }
+                    } else {
+                        let name = branch.name.clone();
+                        match crate::git::ops::checkout(&self.workspace, &name) {
+                            Ok(out) => {
+                                self.git_after_branch_change();
+                                self.set_git_output("Checkout", out);
+                            }
+                            Err(e) => self.set_git_error(e),
+                        }
+                    }
+                }
+            }
+            (GitScreen::Branches { .. }, EditorAction::InsertChar('n')) => {
+                self.input_mode = InputMode::GitNewBranch(String::new());
+            }
+            (GitScreen::Branches { entries, selected }, EditorAction::InsertChar('d')) => {
+                if let Some(branch) = entries.get(selected) {
+                    if branch.current {
+                        if let Some(d) = self.git_dialog.as_mut() {
+                            d.set_error("Cannot delete the current branch");
+                        }
+                    } else if let Some(d) = self.git_dialog.as_mut() {
+                        let op = ConfirmOp::DeleteBranch(branch.name.clone());
+                        d.push(GitScreen::Confirm { op });
+                    }
+                }
+            }
+
+            // ── Stashes ──
+            (GitScreen::Stashes { entries, selected }, EditorAction::InsertNewline) => {
+                if let Some(s) = entries.get(selected) {
+                    let idx = s.index;
+                    match crate::git::ops::stash_apply(&self.workspace, idx) {
+                        Ok(out) => self.set_git_output("Stash apply", out),
+                        Err(e) => self.set_git_error(e),
+                    }
+                }
+            }
+            (GitScreen::Stashes { entries, selected }, EditorAction::InsertChar('p')) => {
+                if let Some(s) = entries.get(selected) {
+                    let idx = s.index;
+                    match crate::git::ops::stash_pop(&self.workspace, idx) {
+                        Ok(out) => {
+                            self.git_after_branch_change();
+                            self.set_git_output("Stash pop", out);
+                        }
+                        Err(e) => self.set_git_error(e),
+                    }
+                }
+            }
+            (GitScreen::Stashes { entries, selected }, EditorAction::InsertChar('d')) => {
+                if let Some(s) = entries.get(selected)
+                    && let Some(d) = self.git_dialog.as_mut()
+                {
+                    let op = ConfirmOp::DropStash(s.index);
+                    d.push(GitScreen::Confirm { op });
+                }
+            }
+            (GitScreen::Stashes { .. }, EditorAction::InsertChar('n')) => {
+                self.input_mode = InputMode::GitStashMessage(String::new());
+            }
+
+            // ── Confirm (y/n) ──
+            (GitScreen::Confirm { op }, EditorAction::InsertChar('y' | 'Y')) => {
+                self.git_run_confirm(op);
+            }
+            (GitScreen::Confirm { .. }, EditorAction::InsertChar('n' | 'N')) => {
+                if let Some(d) = self.git_dialog.as_mut() {
+                    d.pop();
+                }
+            }
+
+            _ => {}
+        }
+    }
+
+    fn git_open_menu_item(&mut self, item: crate::ui::git_dialog::MenuItem) {
+        use crate::ui::git_dialog::{GitScreen, MenuItem};
+
+        match item {
+            MenuItem::Status => match crate::git::ops::status_summary(&self.workspace) {
+                Ok(out) => {
+                    if let Some(d) = self.git_dialog.as_mut() {
+                        d.push(GitScreen::Status {
+                            output: out,
+                            scroll: 0,
+                        });
+                    }
+                }
+                Err(e) => self.set_git_error(e),
+            },
+            MenuItem::Stage => match crate::git::ops::status(&self.workspace) {
+                Ok(entries) => {
+                    if let Some(d) = self.git_dialog.as_mut() {
+                        let checked = vec![false; entries.len()];
+                        d.push(GitScreen::Stage {
+                            entries,
+                            checked,
+                            selected: 0,
+                        });
+                    }
+                }
+                Err(e) => self.set_git_error(e),
+            },
+            MenuItem::Commit => {
+                self.input_mode = InputMode::GitCommitMessage(String::new());
+            }
+            MenuItem::Push => match crate::git::ops::push(&self.workspace) {
+                Ok(out) => self.set_git_output("Push", out),
+                Err(e) => self.set_git_error(e),
+            },
+            MenuItem::Pull => match crate::git::ops::pull(&self.workspace) {
+                Ok(out) => {
+                    self.git_after_branch_change();
+                    self.set_git_output("Pull", out);
+                }
+                Err(e) => self.set_git_error(e),
+            },
+            MenuItem::Branches => match crate::git::ops::branches(&self.workspace) {
+                Ok(entries) => {
+                    if let Some(d) = self.git_dialog.as_mut() {
+                        let selected = entries.iter().position(|b| b.current).unwrap_or(0);
+                        d.push(GitScreen::Branches { entries, selected });
+                    }
+                }
+                Err(e) => self.set_git_error(e),
+            },
+            MenuItem::Stashes => match crate::git::ops::stashes(&self.workspace) {
+                Ok(entries) => {
+                    if let Some(d) = self.git_dialog.as_mut() {
+                        d.push(GitScreen::Stashes {
+                            entries,
+                            selected: 0,
+                        });
+                    }
+                }
+                Err(e) => self.set_git_error(e),
+            },
+        }
+    }
+
+    /// Apply staging based on the user's checked/unchecked selections.
+    /// Files that are currently staged become `git reset` targets; files that
+    /// are unstaged or untracked become `git add` targets.
+    fn git_apply_stage(&mut self, entries: &[crate::git::ops::StatusEntry], checked: &[bool]) {
+        let mut to_add: Vec<&std::path::Path> = Vec::new();
+        let mut to_reset: Vec<&std::path::Path> = Vec::new();
+        for (entry, &is_checked) in entries.iter().zip(checked.iter()) {
+            if !is_checked {
+                continue;
+            }
+            if entry.is_staged() {
+                to_reset.push(&entry.path);
+            } else {
+                to_add.push(&entry.path);
+            }
+        }
+
+        if to_add.is_empty() && to_reset.is_empty() {
+            if let Some(d) = self.git_dialog.as_mut() {
+                d.set_error("Nothing selected");
+            }
+            return;
+        }
+
+        if let Err(e) = crate::git::ops::add(&self.workspace, &to_add) {
+            self.set_git_error(e);
+            return;
+        }
+        if let Err(e) = crate::git::ops::reset(&self.workspace, &to_reset) {
+            self.set_git_error(e);
+            return;
+        }
+
+        // Refresh the stage screen with new statuses.
+        match crate::git::ops::status(&self.workspace) {
+            Ok(entries) => {
+                if let Some(d) = self.git_dialog.as_mut() {
+                    let checked = vec![false; entries.len()];
+                    d.replace(crate::ui::git_dialog::GitScreen::Stage {
+                        entries,
+                        checked,
+                        selected: 0,
+                    });
+                }
+            }
+            Err(e) => self.set_git_error(e),
+        }
+        self.refresh_git_gutter();
+    }
+
+    fn git_finish_commit(&mut self, message: &str) {
+        let trimmed = message.trim();
+        if trimmed.is_empty() {
+            if let Some(d) = self.git_dialog.as_mut() {
+                d.set_error("Empty commit message — cancelled");
+            }
+            return;
+        }
+        match crate::git::ops::commit(&self.workspace, trimmed) {
+            Ok(out) => {
+                self.set_git_output("Commit", out);
+                self.refresh_git_gutter();
+            }
+            Err(e) => self.set_git_error(e),
+        }
+    }
+
+    fn git_finish_new_branch(&mut self, name: &str) {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            if let Some(d) = self.git_dialog.as_mut() {
+                d.set_error("Empty branch name — cancelled");
+            }
+            return;
+        }
+        match crate::git::ops::create_branch(&self.workspace, trimmed) {
+            Ok(out) => {
+                self.git_after_branch_change();
+                self.set_git_output("Create branch", out);
+            }
+            Err(e) => self.set_git_error(e),
+        }
+    }
+
+    fn git_finish_stash_push(&mut self, message: &str) {
+        let trimmed = message.trim();
+        let msg = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        };
+        match crate::git::ops::stash_push(&self.workspace, msg) {
+            Ok(out) => {
+                self.git_after_branch_change();
+                self.set_git_output("Stash push", out);
+            }
+            Err(e) => self.set_git_error(e),
+        }
+    }
+
+    fn git_run_confirm(&mut self, op: crate::ui::git_dialog::ConfirmOp) {
+        use crate::ui::git_dialog::ConfirmOp;
+        // Pop the confirm screen first so the result lands on the prior screen.
+        if let Some(d) = self.git_dialog.as_mut() {
+            d.pop();
+        }
+        match op {
+            ConfirmOp::DropStash(idx) => match crate::git::ops::stash_drop(&self.workspace, idx) {
+                Ok(out) => {
+                    // Refresh the stash list under us.
+                    if let Ok(entries) = crate::git::ops::stashes(&self.workspace)
+                        && let Some(d) = self.git_dialog.as_mut()
+                    {
+                        d.replace(crate::ui::git_dialog::GitScreen::Stashes {
+                            entries,
+                            selected: 0,
+                        });
+                    }
+                    self.set_git_output("Stash drop", out);
+                }
+                Err(e) => self.set_git_error(e),
+            },
+            ConfirmOp::DeleteBranch(name) => {
+                match crate::git::ops::delete_branch(&self.workspace, &name) {
+                    Ok(out) => {
+                        if let Ok(entries) = crate::git::ops::branches(&self.workspace)
+                            && let Some(d) = self.git_dialog.as_mut()
+                        {
+                            let selected = entries.iter().position(|b| b.current).unwrap_or(0);
+                            d.replace(crate::ui::git_dialog::GitScreen::Branches {
+                                entries,
+                                selected,
+                            });
+                        }
+                        self.set_git_output("Delete branch", out);
+                    }
+                    Err(e) => self.set_git_error(e),
+                }
+            }
+        }
+    }
+
+    fn set_git_output(&mut self, title: &str, body: String) {
+        if let Some(d) = self.git_dialog.as_mut() {
+            d.push(crate::ui::git_dialog::GitScreen::Output {
+                title: title.into(),
+                body,
+                scroll: 0,
+            });
+        }
+    }
+
+    fn set_git_error(&mut self, err: String) {
+        if let Some(d) = self.git_dialog.as_mut() {
+            d.set_error(err);
+        }
+    }
+
+    /// Called after operations that may change which file is on disk under
+    /// the active buffer (checkout, pull, stash pop, new branch). Refreshes
+    /// the gutter; the existing file watcher will pick up content changes.
+    fn git_after_branch_change(&mut self) {
+        self.refresh_git_gutter();
     }
 
     // ── Sidebar input handling ────────────────────────────────────────────────
