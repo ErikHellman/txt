@@ -8,6 +8,17 @@ pub enum EditorAction {
     InsertChar(char),
     InsertNewline,
     InsertTab,
+    /// Indent every line touched by the selection (or the current line) by
+    /// one indent level. Bound to Tab when there is a multi-line selection,
+    /// and exposed for keymap remapping under the name `indent_selection`.
+    IndentSelection,
+    /// Dedent every line touched by the selection (or the current line) by
+    /// one indent level. Bound to Shift+Tab.
+    DedentSelection,
+    /// Run the configured external formatter for the active buffer's
+    /// language and replace the buffer contents in a single undo entry.
+    /// Default keybinding: Ctrl+Shift+I.
+    FormatBuffer,
 
     // ── Deletion ──────────────────────────────────────────────────────
     DeleteBackward,
@@ -273,6 +284,9 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::DuplicateLine => "duplicate_line",
         EditorAction::MoveLineUp => "move_line_up",
         EditorAction::MoveLineDown => "move_line_down",
+        EditorAction::IndentSelection => "indent_selection",
+        EditorAction::DedentSelection => "dedent_selection",
+        EditorAction::FormatBuffer => "format_buffer",
         // Search / replace
         EditorAction::OpenSearch => "open_search",
         EditorAction::OpenReplace => "open_replace",
@@ -383,6 +397,9 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "duplicate_line" => EditorAction::DuplicateLine,
         "move_line_up" => EditorAction::MoveLineUp,
         "move_line_down" => EditorAction::MoveLineDown,
+        "indent_selection" => EditorAction::IndentSelection,
+        "dedent_selection" => EditorAction::DedentSelection,
+        "format_buffer" => EditorAction::FormatBuffer,
         // Search / replace
         "open_search" => EditorAction::OpenSearch,
         "open_replace" => EditorAction::OpenReplace,

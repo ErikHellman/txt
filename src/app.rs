@@ -766,6 +766,10 @@ pub struct AppState {
     file_watcher: Option<FileWatcher>,
     /// Per-workspace LSP configuration (loaded from `<workspace>/.txt/lsp.toml`).
     pub lsp_config: crate::lsp::config::WorkspaceLspConfig,
+    /// Per-workspace formatting overrides (loaded from
+    /// `<workspace>/.txt/formatters.toml`). `None` when the file is missing
+    /// or unparseable; the global config still applies.
+    pub project_fmt: Option<crate::formatting::FormattingConfig>,
     /// Active LSP server connection (None when LSP is disabled or unavailable).
     pub lsp: Option<crate::lsp::LspRegistry>,
     /// Pending trust-on-first-use approval for the LSP binary, if any.
@@ -827,6 +831,7 @@ impl AppState {
         }
 
         let lsp_config = crate::lsp::config::WorkspaceLspConfig::load(&workspace);
+        let project_fmt = crate::formatting::project::load(&workspace);
         let git_branch = crate::git::current_branch(&workspace);
         let mut state = Self {
             editor,
@@ -866,6 +871,7 @@ impl AppState {
             auto_save_timer: None,
             file_watcher: None,
             lsp_config,
+            project_fmt,
             lsp: None,
             pending_lsp_approval: None,
             status_error: None,
@@ -1072,23 +1078,55 @@ impl AppState {
 
             // ── Text insertion ────────────────────────────────────────
             EditorAction::InsertChar(c) => {
+                let (indent, rules) = self.indent_for_active();
                 if self.editor.active().buffer.cursors.is_multi() {
                     self.editor.active_mut().buffer.multi_insert_char(c);
                 } else {
-                    self.editor.active_mut().buffer.insert_char(c);
+                    self.editor
+                        .active_mut()
+                        .buffer
+                        .insert_char_with_indent(c, &indent, rules);
                 }
             }
             EditorAction::InsertNewline => {
-                self.editor.active_mut().buffer.insert_newline();
+                let (indent, rules) = self.indent_for_active();
+                self.editor
+                    .active_mut()
+                    .buffer
+                    .insert_newline(&indent, rules);
             }
             EditorAction::InsertTab => {
-                let tab_size = self.config.tab_size;
-                if self.editor.active().buffer.cursors.is_multi() {
-                    let spaces = " ".repeat(tab_size.max(1));
-                    self.editor.active_mut().buffer.multi_insert_str(&spaces);
+                let (indent, _) = self.indent_for_active();
+                // Multi-line selection → indent every touched line.
+                let buf = &self.editor.active().buffer;
+                let primary = buf.cursors.primary();
+                let multi_line_selection = primary.has_selection() && {
+                    let r = primary.selection_bytes();
+                    let rope = buf.rope();
+                    rope.char_to_line(rope.byte_to_char(r.start))
+                        != rope.char_to_line(rope.byte_to_char(r.end))
+                };
+                if multi_line_selection {
+                    self.editor.active_mut().buffer.indent_lines(&indent);
+                } else if self.editor.active().buffer.cursors.is_multi() {
+                    self.editor
+                        .active_mut()
+                        .buffer
+                        .multi_insert_str(&indent.one_level());
                 } else {
-                    self.editor.active_mut().buffer.insert_tab(tab_size);
+                    self.editor.active_mut().buffer.insert_tab(&indent);
                 }
+            }
+            EditorAction::IndentSelection => {
+                let (indent, _) = self.indent_for_active();
+                self.editor.active_mut().buffer.indent_lines(&indent);
+            }
+            EditorAction::DedentSelection => {
+                let (indent, _) = self.indent_for_active();
+                self.editor.active_mut().buffer.dedent_lines(&indent);
+            }
+            EditorAction::FormatBuffer => {
+                self.format_buffer();
             }
 
             // ── Deletion ──────────────────────────────────────────────
@@ -1599,6 +1637,7 @@ impl AppState {
             }
             EditorAction::ReloadConfig => {
                 self.config = Config::load();
+                self.project_fmt = crate::formatting::project::load(&self.workspace);
                 self.input.reload_keybindings();
                 for tab in &mut self.editor.tabs {
                     tab.viewport.word_wrap = self.config.word_wrap;
@@ -3132,6 +3171,80 @@ impl AppState {
                 self.command_palette = None;
             }
             _ => {}
+        }
+    }
+
+    // ── Code formatting ───────────────────────────────────────────────────────
+
+    /// Resolve the live indent rules for the active buffer's language,
+    /// merging project + global config and falling back to the legacy
+    /// `tab_size` and built-in defaults.
+    fn indent_for_active(
+        &self,
+    ) -> (
+        crate::formatting::IndentConfig,
+        crate::formatting::IndentRules,
+    ) {
+        let lang = self.editor.active().syntax.language;
+        let resolver = crate::formatting::FormattingResolver {
+            global: &self.config.formatting,
+            project: self.project_fmt.as_ref(),
+            legacy_tab_size: self.config.tab_size,
+        };
+        (
+            resolver.indent(lang),
+            crate::formatting::IndentRules::for_lang(lang),
+        )
+    }
+
+    /// Run the configured external formatter for the active buffer's
+    /// language and replace the buffer atomically. On any error, the buffer
+    /// is left untouched and `status_error` is set.
+    fn format_buffer(&mut self) {
+        let lang = self.editor.active().syntax.language;
+        let path = self.editor.active().path.clone();
+        let resolver = crate::formatting::FormattingResolver {
+            global: &self.config.formatting,
+            project: self.project_fmt.as_ref(),
+            legacy_tab_size: self.config.tab_size,
+        };
+        let fc = match resolver.formatter(lang) {
+            Some(f) => f,
+            None => {
+                let name = lang.name();
+                let display = if name.is_empty() { "this file" } else { name };
+                self.status_error = Some(format!("No formatter configured for {display}"));
+                return;
+            }
+        };
+
+        let input = self.editor.active().buffer.to_string();
+        let (saved_line, saved_col) = {
+            let c = self.editor.active().buffer.cursors.primary();
+            (c.line, c.col)
+        };
+
+        match crate::formatting::run_formatter(&fc, &input, path.as_deref()) {
+            Ok(out) if out == input => {
+                // No-op format — leave the buffer alone, no undo entry.
+            }
+            Ok(out) => {
+                let buf = &mut self.editor.active_mut().buffer;
+                buf.begin_batch();
+                let len = buf.rope().len_bytes();
+                buf.delete_range(0, len);
+                buf.move_cursor_to(0, false);
+                buf.insert_str(&out);
+                buf.commit_batch();
+                // Restore cursor by clamped (line, col).
+                let new_cursor =
+                    crate::buffer::cursor::Cursor::from_line_col(buf.rope(), saved_line, saved_col);
+                buf.move_cursor_to(new_cursor.byte_offset, false);
+                self.editor.active_mut().reparse();
+            }
+            Err(e) => {
+                self.status_error = Some(format!("Formatter failed: {e}"));
+            }
         }
     }
 
