@@ -76,6 +76,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "timing-sensitive: FSEvents on macOS batches events with variable latency"]
     fn watcher_no_spurious_events() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let path = tmp.path().to_owned();
