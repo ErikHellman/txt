@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.0
+
+- Add a git operations dialog (Ctrl+Shift+G) for staging, committing, pushing, and pulling without leaving the editor
+- Show the current git branch in the status bar
+- Add code formatting: live indent rules while typing and integration with external formatters
+- Add F5 to refresh the sidebar file tree
+- Set the terminal title to `txt` and the active filename so windows are easy to identify
+- Block editor-mutating actions while the sidebar is focused so keystrokes don't accidentally edit the buffer
+- Fix Ctrl+1..9 tab shortcuts on AZERTY keyboards
+- Fix syntax-highlighting drift caused by a stale tree-sitter tree
+
 ## v0.3.1
 
 - Show a welcome panel on first launch and a "What's new" panel after a minor or major upgrade, listing every CHANGELOG section newer than the last dismissed version; patch bumps stay silent
