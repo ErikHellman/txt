@@ -3045,9 +3045,37 @@ impl AppState {
                 }
                 true
             }
-            // Swallow all text-insertion actions so they don't reach the editor.
-            EditorAction::InsertChar(_) | EditorAction::InsertTab => true,
-            _ => false,
+            // Global actions that don't touch editor content are allowed to
+            // fall through to the main dispatcher.
+            EditorAction::Quit
+            | EditorAction::ForceQuit
+            | EditorAction::ToggleHelp
+            | EditorAction::ToggleSidebar
+            | EditorAction::OpenSettings
+            | EditorAction::OpenCommandPalette
+            | EditorAction::OpenFuzzyPicker
+            | EditorAction::OpenRecentFiles
+            | EditorAction::OpenLspConfig
+            | EditorAction::OpenGitDialog
+            | EditorAction::ReloadConfig
+            | EditorAction::ToggleWordWrap
+            | EditorAction::OpenFile
+            | EditorAction::SaveFile
+            | EditorAction::SaveFileAs
+            | EditorAction::NewFile
+            | EditorAction::NewTab
+            | EditorAction::CloseTab
+            | EditorAction::NextTab
+            | EditorAction::PrevTab
+            | EditorAction::GoToTab(_)
+            | EditorAction::MouseClick { .. }
+            | EditorAction::MouseDrag { .. }
+            | EditorAction::MouseUp { .. }
+            | EditorAction::MouseScroll { .. }
+            | EditorAction::Unhandled => false,
+            // Swallow everything else so editor content / cursor / search /
+            // LSP state isn't affected while the sidebar has focus.
+            _ => true,
         }
     }
 
