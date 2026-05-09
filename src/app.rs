@@ -3,6 +3,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::execute;
+use crossterm::terminal::SetTitle;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
@@ -4446,6 +4448,7 @@ impl App {
         // both untouched so the cursor is allowed to leave the screen.
         let mut prev_anchor: Option<(usize, usize)> = None; // (active tab, primary byte offset)
         let mut prev_size: Option<(usize, usize)> = None; // (text_h, text_w)
+        let mut prev_title: Option<String> = None;
 
         loop {
             let term_size = terminal.size()?;
@@ -4480,6 +4483,16 @@ impl App {
             }
             prev_anchor = Some(curr_anchor);
             prev_size = Some(curr_size);
+
+            let desired_title = if state.editor.active().path.is_some() {
+                format!("txt - {}", state.editor.active().display_name())
+            } else {
+                "txt".to_string()
+            };
+            if prev_title.as_deref() != Some(desired_title.as_str()) {
+                let _ = execute!(std::io::stdout(), SetTitle(&desired_title));
+                prev_title = Some(desired_title);
+            }
 
             // Check for external file changes (non-blocking).
             state.poll_file_watcher();

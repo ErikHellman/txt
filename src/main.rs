@@ -25,7 +25,9 @@ use crossterm::{
         PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{
+        EnterAlternateScreen, LeaveAlternateScreen, SetTitle, disable_raw_mode, enable_raw_mode,
+    },
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
@@ -86,7 +88,12 @@ fn main() -> Result<()> {
 fn init_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        SetTitle("txt")
+    )?;
     // Enable keyboard enhancements so Ctrl+digit and Ctrl+Tab are transmitted
     // correctly by terminals that support the protocol (kitty, WezTerm, foot,
     // recent iTerm2). Terminals that don't support it silently ignore this.
