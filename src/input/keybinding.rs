@@ -472,6 +472,7 @@ impl KeyBindings {
         bind("ctrl+shift+b", EditorAction::ToggleSidebar);
         bind("ctrl+shift+n", EditorAction::SidebarNewFolder);
         bind("ctrl+shift+i", EditorAction::FormatBuffer);
+        bind("ctrl+shift+g", EditorAction::OpenGitDialog);
 
         KeyBindings { map, reverse }
     }

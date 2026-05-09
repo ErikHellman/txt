@@ -205,6 +205,9 @@ fn modal_prompt(mode: &InputMode) -> Option<String> {
         InputMode::RenamePath(_, s) => Some(format!(" Rename: {}_", s)),
         InputMode::NewFolderName(_, s) => Some(format!(" New folder: {}_", s)),
         InputMode::Rename(s) => Some(format!(" Rename: {}_", s)),
+        InputMode::GitCommitMessage(s) => Some(format!(" Commit message: {}_", s)),
+        InputMode::GitNewBranch(s) => Some(format!(" New branch: {}_", s)),
+        InputMode::GitStashMessage(s) => Some(format!(" Stash message (optional): {}_", s)),
     }
 }
 

@@ -1,5 +1,7 @@
 use std::{collections::HashMap, path::Path, process::Command};
 
+pub mod ops;
+
 /// Status of a single line in the git gutter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GutterMark {

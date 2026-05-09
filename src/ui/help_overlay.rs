@@ -313,6 +313,12 @@ const TEMPLATE: &[HelpEntry] = &[
         actions: &["open_lsp_config"],
         desc: "Configure LSP server",
     },
+    // ── Git ──────────────────────────────────────────────────────────
+    HelpEntry::Section("Git"),
+    HelpEntry::Binding {
+        actions: &["open_git_dialog"],
+        desc: "Open git operations dialog",
+    },
     HelpEntry::Static {
         key: "y / n",
         desc: "Approve / reject LSP binary (when prompted)",
