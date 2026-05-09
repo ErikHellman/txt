@@ -173,6 +173,8 @@ pub enum EditorAction {
     OpenBufferSwitcher,
     /// Open the LSP server configuration overlay (Ctrl+L).
     OpenLspConfig,
+    /// Open the git operations dialog (Ctrl+Shift+G).
+    OpenGitDialog,
 
     // ── LSP features ─────────────────────────────────────────────────
     /// Trigger code completion (Ctrl+Space).
@@ -307,6 +309,7 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::OpenCommandPalette => "open_command_palette",
         EditorAction::OpenBufferSwitcher => "open_buffer_switcher",
         EditorAction::OpenLspConfig => "open_lsp_config",
+        EditorAction::OpenGitDialog => "open_git_dialog",
         // LSP features
         EditorAction::TriggerCompletion => "trigger_completion",
         EditorAction::ShowHover => "show_hover",
@@ -416,6 +419,7 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "open_command_palette" => EditorAction::OpenCommandPalette,
         "open_buffer_switcher" => EditorAction::OpenBufferSwitcher,
         "open_lsp_config" => EditorAction::OpenLspConfig,
+        "open_git_dialog" => EditorAction::OpenGitDialog,
         // LSP features
         "trigger_completion" => EditorAction::TriggerCompletion,
         "show_hover" => EditorAction::ShowHover,

@@ -187,6 +187,11 @@ pub static COMMANDS: &[CommandEntry] = &[
         action: || EditorAction::LspStop,
     },
     CommandEntry {
+        name: "Git: Operations…",
+        key_hint: "Ctrl+Shift+G",
+        action: || EditorAction::OpenGitDialog,
+    },
+    CommandEntry {
         name: "Quit",
         key_hint: "Ctrl+Q",
         action: || EditorAction::Quit,

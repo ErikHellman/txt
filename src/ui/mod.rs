@@ -3,6 +3,7 @@ pub mod command_palette;
 pub mod completion_popup;
 pub mod editor_view;
 pub mod fuzzy_picker;
+pub mod git_dialog;
 pub mod help_overlay;
 pub mod hover_popup;
 pub mod lsp_approval;
@@ -268,6 +269,11 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
     // ── LSP picker overlay ───────────────────────────────────────────────────
     if let Some(picker) = &state.lsp_picker {
         lsp_picker::render(picker, area, buf);
+    }
+
+    // ── Git operations dialog ────────────────────────────────────────────────
+    if let Some(dialog) = &state.git_dialog {
+        git_dialog::render(dialog, &theme, area, buf);
     }
 
     // ── LSP-binary trust approval overlay (security-critical, render last) ───
