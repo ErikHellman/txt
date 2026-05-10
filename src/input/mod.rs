@@ -48,17 +48,19 @@ impl InputHandler {
         // ── Phase 1: non-remappable hardcoded actions ────────────────────
 
         // Ctrl+1..9 → GoToTab (index-parameterized, not configurable).
-        // SHIFT is allowed because on AZERTY (French) and several other
-        // layouts, digits live on the shifted layer of the number row, so
-        // pressing what the user thinks of as "Ctrl+1" arrives as
-        // Ctrl+Shift+1.
+        //
+        // We accept both QWERTY digits and the AZERTY layer-1 (unshifted)
+        // top-row glyphs because terminals do not translate the keystroke
+        // back to the digit on AZERTY: pressing what the user thinks of as
+        // "Ctrl+1" delivers `Char('&')`, with or without SHIFT depending on
+        // whether Shift was held. SHIFT is therefore ignored — only CTRL
+        // and the absence of ALT matter.
         if ctrl
             && !alt
             && let KeyCode::Char(c) = event.code
-            && let Some(n) = c.to_digit(10)
-            && (1..=9).contains(&n)
+            && let Some(n) = digit_for_tab_shortcut(c)
         {
-            return EditorAction::GoToTab(n as usize - 1);
+            return EditorAction::GoToTab(n - 1);
         }
 
         // Plain printable chars (no ctrl/alt) → InsertChar
@@ -113,6 +115,27 @@ impl InputHandler {
 impl Default for InputHandler {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Map a character delivered with Ctrl held to the tab number 1..=9.
+///
+/// QWERTY layouts deliver `'1'..'9'`; AZERTY layouts deliver the layer-1
+/// (unshifted) glyph from the top row, since the digit is on the shifted
+/// layer and terminals report the base glyph regardless of Shift state.
+fn digit_for_tab_shortcut(c: char) -> Option<usize> {
+    match c {
+        '1'..='9' => Some(c as usize - '0' as usize),
+        '&' => Some(1),
+        'é' => Some(2),
+        '"' => Some(3),
+        '\'' => Some(4),
+        '(' => Some(5),
+        '-' => Some(6),
+        'è' => Some(7),
+        '_' => Some(8),
+        'ç' => Some(9),
+        _ => None,
     }
 }
 
@@ -554,17 +577,34 @@ mod tests {
     }
 
     #[test]
-    fn go_to_tab_shortcuts_with_shift_for_azerty() {
-        // On AZERTY (French) keyboards, digits are on the shifted layer of
-        // the number row, so Ctrl+1 arrives as Ctrl+Shift+1.
+    fn go_to_tab_shortcuts_azerty_layer_1_chars() {
+        // On AZERTY, terminals deliver the unshifted top-row glyph
+        // regardless of Shift. Verified empirically with Ghostty: pressing
+        // "Ctrl+1" arrives as Char('&') + CONTROL; pressing
+        // "Ctrl+Shift+1" arrives as Char('&') + CONTROL|SHIFT.
         let ih = handler();
-        assert_eq!(
-            ih.handle_key(ctrl_shift(KeyCode::Char('1'))),
-            EditorAction::GoToTab(0)
-        );
-        assert_eq!(
-            ih.handle_key(ctrl_shift(KeyCode::Char('9'))),
-            EditorAction::GoToTab(8)
-        );
+        let cases = [
+            ('&', 0),
+            ('é', 1),
+            ('"', 2),
+            ('\'', 3),
+            ('(', 4),
+            ('-', 5),
+            ('è', 6),
+            ('_', 7),
+            ('ç', 8),
+        ];
+        for (ch, tab) in cases {
+            assert_eq!(
+                ih.handle_key(ctrl(KeyCode::Char(ch))),
+                EditorAction::GoToTab(tab),
+                "Ctrl+{ch} should map to tab {tab}"
+            );
+            assert_eq!(
+                ih.handle_key(ctrl_shift(KeyCode::Char(ch))),
+                EditorAction::GoToTab(tab),
+                "Ctrl+Shift+{ch} should map to tab {tab}"
+            );
+        }
     }
 }
