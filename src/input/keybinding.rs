@@ -499,6 +499,9 @@ impl KeyBindings {
             EditorAction::BoxSelectExtend(super::action::Direction::Right),
         );
 
+        // ── Filter selection through shell command ───────────────────
+        bind("ctrl+alt+\\", EditorAction::FilterSelection);
+
         KeyBindings { map, reverse }
     }
 

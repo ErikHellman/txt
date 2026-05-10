@@ -66,6 +66,10 @@ pub enum InputMode {
     GitNewBranch(String),
     /// Git dialog → "Stash message: {input}" (optional). On submit, runs `git stash push`.
     GitStashMessage(String),
+    /// Ctrl+Alt+\ → "Shell filter (selection): {cmd}". On Enter, runs the
+    /// command via `sh -c` with the selection on stdin and replaces the
+    /// selection with the captured stdout.
+    ShellFilter(String),
 }
 
 impl InputMode {
@@ -1481,6 +1485,15 @@ impl AppState {
             EditorAction::BoxSelectExtend(dir) => {
                 self.editor.active_mut().buffer.extend_box_selection(dir);
             }
+            EditorAction::FilterSelection => {
+                if self.config.disable_shell_filter {
+                    self.status_error = Some("Shell filter disabled by config".to_string());
+                } else if self.selected_text().is_some() {
+                    self.input_mode = InputMode::ShellFilter(String::new());
+                } else {
+                    self.status_error = Some("Filter requires a non-empty selection".to_string());
+                }
+            }
             EditorAction::MouseScroll { dir, col, row } => {
                 if self.point_in_sidebar(col, row) {
                     let h = self.sidebar_area.map(|r| r.height as usize).unwrap_or(0);
@@ -1816,6 +1829,79 @@ impl AppState {
         }
     }
 
+    /// Run `command` (via `sh -c`) with the current selection on stdin and
+    /// replace the selection with the captured stdout. Single undo entry.
+    fn apply_shell_filter(&mut self, command: &str) {
+        if self.config.disable_shell_filter {
+            self.status_error = Some("Shell filter disabled by config".to_string());
+            return;
+        }
+        let trimmed = command.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let buf = &self.editor.active().buffer;
+        let primary = buf.cursors.primary();
+        let range = match primary.selection {
+            Some(s) => s.as_byte_range(),
+            None => return,
+        };
+        if range.is_empty() {
+            return;
+        }
+        let selection_text = {
+            let rope = buf.rope();
+            let cs = rope.byte_to_char(range.start);
+            let ce = rope.byte_to_char(range.end);
+            rope.slice(cs..ce).to_string()
+        };
+
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let mut child = match Command::new("sh")
+            .arg("-c")
+            .arg(trimmed)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                self.status_error = Some(format!("filter spawn failed: {e}"));
+                return;
+            }
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(selection_text.as_bytes());
+            // Drop stdin to signal EOF to the child.
+        }
+        let output = match child.wait_with_output() {
+            Ok(o) => o,
+            Err(e) => {
+                self.status_error = Some(format!("filter wait failed: {e}"));
+                return;
+            }
+        };
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let trimmed_err = stderr.trim();
+            self.status_error = Some(if trimmed_err.is_empty() {
+                format!("filter exited {}", output.status)
+            } else {
+                format!("filter: {trimmed_err}")
+            });
+            return;
+        }
+        let new_text = String::from_utf8_lossy(&output.stdout).to_string();
+        let buf = &mut self.editor.active_mut().buffer;
+        buf.begin_batch();
+        buf.move_cursor_to(range.start, false);
+        buf.move_cursor_to(range.end, true);
+        buf.insert_str(&new_text);
+        buf.commit_batch();
+    }
+
     // ── Modal input handling ─────────────────────────────────────────────────
 
     fn handle_modal_input(&mut self, action: EditorAction) {
@@ -1833,7 +1919,8 @@ impl AppState {
                     | InputMode::Rename(s)
                     | InputMode::GitCommitMessage(s)
                     | InputMode::GitNewBranch(s)
-                    | InputMode::GitStashMessage(s) => {
+                    | InputMode::GitStashMessage(s)
+                    | InputMode::ShellFilter(s) => {
                         s.push(c);
                     }
                     _ => {}
@@ -1850,7 +1937,8 @@ impl AppState {
                     | InputMode::Rename(s)
                     | InputMode::GitCommitMessage(s)
                     | InputMode::GitNewBranch(s)
-                    | InputMode::GitStashMessage(s) => {
+                    | InputMode::GitStashMessage(s)
+                    | InputMode::ShellFilter(s) => {
                         s.pop();
                     }
                     InputMode::Normal => {}
@@ -1953,6 +2041,9 @@ impl AppState {
                     }
                     InputMode::GitStashMessage(input) => {
                         self.git_finish_stash_push(&input);
+                    }
+                    InputMode::ShellFilter(input) => {
+                        self.apply_shell_filter(&input);
                     }
                     InputMode::Normal => {}
                 }

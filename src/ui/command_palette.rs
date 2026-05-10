@@ -137,6 +137,11 @@ pub static COMMANDS: &[CommandEntry] = &[
         action: || EditorAction::UndoLastCursor,
     },
     CommandEntry {
+        name: "Filter Selection Through Command…",
+        key_hint: "Ctrl+Alt+\\",
+        action: || EditorAction::FilterSelection,
+    },
+    CommandEntry {
         name: "Toggle Line Comment",
         key_hint: "Ctrl+/",
         action: || EditorAction::ToggleLineComment,

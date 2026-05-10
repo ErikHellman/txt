@@ -119,6 +119,10 @@ pub enum EditorAction {
     },
     /// Ctrl+Alt+arrow: extend the rectangular selection by one cell in `dir`.
     BoxSelectExtend(Direction),
+    /// Ctrl+Alt+\: open a status-bar prompt; on Enter, run the command via
+    /// `sh -c` with the current selection on stdin and replace the selection
+    /// with the captured stdout.
+    FilterSelection,
 
     // ── Search / replace ─────────────────────────────────────────────
     /// Open the find bar (Ctrl+F).
@@ -333,6 +337,7 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::BoxSelectExtend(Direction::Down) => "box_select_extend_down",
         EditorAction::BoxSelectExtend(Direction::Left) => "box_select_extend_left",
         EditorAction::BoxSelectExtend(Direction::Right) => "box_select_extend_right",
+        EditorAction::FilterSelection => "filter_selection",
         // File / tab management
         EditorAction::NewFile => "new_file",
         EditorAction::NewTab => "new_tab",
@@ -455,6 +460,7 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "box_select_extend_down" => EditorAction::BoxSelectExtend(Direction::Down),
         "box_select_extend_left" => EditorAction::BoxSelectExtend(Direction::Left),
         "box_select_extend_right" => EditorAction::BoxSelectExtend(Direction::Right),
+        "filter_selection" => EditorAction::FilterSelection,
         // File / tab management
         "new_file" => EditorAction::NewFile,
         "new_tab" => EditorAction::NewTab,

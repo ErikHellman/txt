@@ -142,6 +142,10 @@ const TEMPLATE: &[HelpEntry] = &[
         key: "Alt+Drag",
         desc: "Box / column selection (mouse)",
     },
+    HelpEntry::Binding {
+        actions: &["filter_selection"],
+        desc: "Filter selection through shell command",
+    },
     // ── Editing ──────────────────────────────────────────────────────
     HelpEntry::Section("Editing"),
     HelpEntry::Binding {
