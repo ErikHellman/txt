@@ -118,8 +118,23 @@ pub static COMMANDS: &[CommandEntry] = &[
     },
     CommandEntry {
         name: "Duplicate Line",
-        key_hint: "Ctrl+D",
+        key_hint: "Ctrl+Shift+D",
         action: || EditorAction::DuplicateLine,
+    },
+    CommandEntry {
+        name: "Add Cursor at Next Match",
+        key_hint: "Ctrl+D",
+        action: || EditorAction::AddCursorNextMatch,
+    },
+    CommandEntry {
+        name: "Skip Current Match",
+        key_hint: "Ctrl+Alt+D",
+        action: || EditorAction::SkipCurrentMatch,
+    },
+    CommandEntry {
+        name: "Undo Last Cursor",
+        key_hint: "Ctrl+U",
+        action: || EditorAction::UndoLastCursor,
     },
     CommandEntry {
         name: "Toggle Line Comment",

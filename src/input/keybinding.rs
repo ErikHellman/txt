@@ -437,7 +437,11 @@ impl KeyBindings {
         bind("ctrl+q", EditorAction::Quit);
         bind("ctrl+z", EditorAction::Undo);
         bind("ctrl+y", EditorAction::Redo);
-        bind("ctrl+d", EditorAction::DuplicateLine);
+        // Ctrl+D selects the current word / adds a cursor at the next match
+        // (Sublime/VS Code convention). DuplicateLine is moved to Ctrl+Shift+D.
+        bind("ctrl+d", EditorAction::AddCursorNextMatch);
+        bind("ctrl+u", EditorAction::UndoLastCursor);
+        bind("ctrl+alt+d", EditorAction::SkipCurrentMatch);
         bind("ctrl+a", EditorAction::SelectAll);
         bind("ctrl+w", EditorAction::AstExpandSelection);
         bind("ctrl+c", EditorAction::Copy);
@@ -466,6 +470,7 @@ impl KeyBindings {
         bind("ctrl+shift+w", EditorAction::AstContractSelection);
         bind("ctrl+shift+s", EditorAction::SaveFileAs);
         bind("ctrl+shift+l", EditorAction::SelectAllOccurrences);
+        bind("ctrl+shift+d", EditorAction::DuplicateLine);
         bind("ctrl+shift+p", EditorAction::OpenCommandPalette);
         bind("ctrl+shift+e", EditorAction::OpenBufferSwitcher);
         bind("ctrl+shift+c", EditorAction::CopyFileReference);
@@ -643,8 +648,15 @@ impl KeyBindings {
         //  this editor; ctrl+k is free so we keep the readline convention)
         // (inherited from defaults)
 
-        // ── Duplicate Line: Cmd+D → ctrl+d (same as default) ───────────
-        // (already the default)
+        // ── Duplicate Line: Cmd+D → ctrl+d (IntelliJ convention) ───────
+        // The default keymap binds ctrl+d to AddCursorNextMatch; IntelliJ
+        // users expect ctrl+d to duplicate, so swap them and use alt+j for
+        // the multi-cursor motion (IntelliJ's "Add selection for next
+        // occurrence" shortcut).
+        kb.rebind("duplicate_line", "ctrl+d");
+        kb.rebind("add_cursor_next_match", "alt+j");
+        kb.rebind("undo_last_cursor", "alt+shift+j");
+        kb.rebind("skip_current_match", "alt+ctrl+j");
 
         // ── Extend/Shrink Selection: Cmd+W / Cmd+Shift+W ───────────────
         // (already the default: ctrl+w / ctrl+shift+w)
@@ -663,9 +675,9 @@ impl KeyBindings {
         // ── Find & Replace: Cmd+Opt+F → ctrl+alt+f ─────────────────────
         kb.rebind("open_replace", "ctrl+alt+f");
 
-        // ── Duplicate Line: Opt+Shift+Down in VS Code, but that conflicts
-        //    with spawn_cursor_down, so use Ctrl+Shift+D ─────────────────
-        kb.rebind("duplicate_line", "ctrl+shift+d");
+        // ── Duplicate Line / Add-cursor-on-next-match ──────────────────
+        // VS Code: ctrl+d adds a cursor at the next match (matches default
+        // keymap). DuplicateLine lives at ctrl+shift+d (already in default).
 
         // ── Word navigation: Opt+Arrow (VS Code macOS uses Opt for word nav)
         kb.rebind("move_cursor_word_left", "alt+left");
@@ -960,6 +972,29 @@ mod tests {
         let kb = KeyBindings::vscode_defaults();
         let combo: KeyCombo = "ctrl+shift+d".parse().unwrap();
         assert_eq!(kb.lookup(&combo), Some(&EditorAction::DuplicateLine));
+    }
+
+    #[test]
+    fn defaults_ctrl_d_is_add_cursor_next_match() {
+        let kb = KeyBindings::defaults();
+        let combo: KeyCombo = "ctrl+d".parse().unwrap();
+        assert_eq!(kb.lookup(&combo), Some(&EditorAction::AddCursorNextMatch));
+    }
+
+    #[test]
+    fn defaults_ctrl_shift_d_is_duplicate_line() {
+        let kb = KeyBindings::defaults();
+        let combo: KeyCombo = "ctrl+shift+d".parse().unwrap();
+        assert_eq!(kb.lookup(&combo), Some(&EditorAction::DuplicateLine));
+    }
+
+    #[test]
+    fn intellij_keeps_ctrl_d_as_duplicate() {
+        let kb = KeyBindings::intellij_defaults();
+        let combo: KeyCombo = "ctrl+d".parse().unwrap();
+        assert_eq!(kb.lookup(&combo), Some(&EditorAction::DuplicateLine));
+        let alt_j: KeyCombo = "alt+j".parse().unwrap();
+        assert_eq!(kb.lookup(&alt_j), Some(&EditorAction::AddCursorNextMatch));
     }
 
     #[test]

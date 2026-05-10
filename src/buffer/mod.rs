@@ -5,7 +5,9 @@ pub mod history;
 use ropey::Rope;
 
 use crate::buffer::{
-    cursor::{Cursor, MultiCursor, byte_col_at_display_col, line_byte_len_no_newline},
+    cursor::{
+        Cursor, MultiCursor, byte_col_at_display_col, line_byte_len_no_newline, word_span_at,
+    },
     edit as rope_edit,
     history::{EditCommand, UndoStack},
 };
@@ -745,6 +747,135 @@ impl Buffer {
     /// Collapse all cursors to only the primary cursor.
     pub fn collapse_cursors(&mut self) {
         self.cursors.collapse_to_primary();
+    }
+
+    /// Sublime/VS Code "Ctrl+D" motion.
+    ///
+    /// If the primary cursor has no selection, expand it to the surrounding
+    /// word (identifier-like run of `\w` chars). Otherwise, find the next
+    /// occurrence of the primary cursor's selection text — searching forward
+    /// from the highest existing cursor's selection end and wrapping to the
+    /// start of the buffer — and add a new cursor with that selection,
+    /// promoting it to primary so the viewport follows.
+    ///
+    /// Returns `true` if a cursor was added or selection grew.
+    pub fn add_cursor_at_next_match(&mut self) -> bool {
+        // Phase 1: no selection → expand primary to surrounding word.
+        if !self.cursors.primary().has_selection() {
+            let cursor = *self.cursors.primary();
+            if let Some((start, end)) = word_span_at(&self.rope, cursor.byte_offset) {
+                self.move_cursor_to(start, false);
+                self.move_cursor_to(end, true);
+                return start != end;
+            }
+            return false;
+        }
+
+        // Phase 2: selection present → find next occurrence.
+        let needle = match self.cursors.primary().selection {
+            Some(sel) => self.text_in_range(sel.as_byte_range().start, sel.as_byte_range().end),
+            None => return false,
+        };
+        if needle.is_empty() {
+            return false;
+        }
+        // Search starts after the highest cursor's selection end (or its byte_offset).
+        let max_end = self
+            .cursors
+            .cursors()
+            .iter()
+            .map(|c| match c.selection {
+                Some(s) => s.as_byte_range().end,
+                None => c.byte_offset,
+            })
+            .max()
+            .unwrap_or(0);
+        let text = self.rope.to_string();
+        let pos = match text.get(max_end..).and_then(|s| s.find(&needle)) {
+            Some(p) => Some(max_end + p),
+            None => text.find(&needle), // wrap to start
+        };
+        let Some(start) = pos else {
+            return false;
+        };
+        let end = start + needle.len();
+        // If the wrapped match equals an existing cursor's selection, don't re-add.
+        if self.cursors.cursors().iter().any(|c| match c.selection {
+            Some(s) => {
+                let r = s.as_byte_range();
+                r.start == start && r.end == end
+            }
+            None => false,
+        }) {
+            return false;
+        }
+        self.cursors
+            .add_cursor_with_selection(&self.rope, start, end);
+        true
+    }
+
+    /// Like `add_cursor_at_next_match`, but first removes the primary cursor
+    /// (so the user "skips" the current match instead of adding to it).
+    pub fn skip_current_match_to_next(&mut self) -> bool {
+        if !self.cursors.is_multi() {
+            // With one cursor, just behave like add-next.
+            return self.add_cursor_at_next_match();
+        }
+        let added = self.add_cursor_at_next_match();
+        if added {
+            // Find the cursor that was the primary *before* the add — it's the
+            // second-newest in add_stack. We need to remove it.
+            // Simpler: remove the lowest-byte cursor that has a selection
+            // matching the needle, since we'll have added the new one ahead.
+            // We just remove the cursor with the lowest byte offset that is
+            // not the new primary.
+            let new_primary_off = self.cursors.primary().byte_offset;
+            let lowest_idx = self
+                .cursors
+                .cursors()
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.byte_offset != new_primary_off)
+                .min_by_key(|(_, c)| c.byte_offset)
+                .map(|(i, _)| i);
+            if let Some(idx) = lowest_idx {
+                let off = self.cursors.cursors()[idx].byte_offset;
+                // Direct removal via cursors_mut to keep invariants and stack tidy.
+                self.cursors.cursors_mut().remove(idx);
+                let new_primary_idx = self
+                    .cursors
+                    .cursors()
+                    .iter()
+                    .position(|c| c.byte_offset == new_primary_off)
+                    .unwrap_or(0);
+                // Rebuild internals via from_cursors_with_primary while
+                // preserving the recently-added stack on the new MultiCursor.
+                let preserved_stack: Vec<usize> = self
+                    .cursors
+                    .recent_adds()
+                    .iter()
+                    .copied()
+                    .filter(|o| *o != off)
+                    .collect();
+                let new_cursors = self.cursors.cursors().to_vec();
+                let mut mc = MultiCursor::from_cursors_with_primary(new_cursors, new_primary_idx);
+                mc.set_recent_adds(preserved_stack);
+                self.cursors = mc;
+            }
+        }
+        added
+    }
+
+    /// Pop the most-recently-added cursor.
+    pub fn pop_last_cursor(&mut self) {
+        self.cursors.pop_added_cursor();
+    }
+
+    /// Slice text in `[start, end)` as a `String`.
+    fn text_in_range(&self, start: usize, end: usize) -> String {
+        let cs = self.rope.byte_to_char(start);
+        let ce = self.rope.byte_to_char(end);
+        self.rope.slice(cs..ce).to_string()
     }
 
     /// Insert `ch` at every cursor position (multi-cursor broadcast).
@@ -1636,5 +1767,77 @@ mod tests {
         for c in buf.cursors.cursors() {
             assert_eq!(c.col, 0, "cursor on line {} should stay at col 0", c.line);
         }
+    }
+
+    // ── add_cursor_at_next_match (Ctrl+D) ───────────────────────────────
+
+    #[test]
+    fn add_cursor_next_match_no_selection_selects_word() {
+        let mut buf = Buffer::from_str("foo bar foo bar");
+        buf.move_cursor_to(1, false); // mid-"foo"
+        let added = buf.add_cursor_at_next_match();
+        assert!(added);
+        // Single cursor with selection 0..3.
+        assert_eq!(buf.cursors.len(), 1);
+        let sel = buf.cursors.primary().selection.unwrap();
+        assert_eq!(sel.as_byte_range().start, 0);
+        assert_eq!(sel.as_byte_range().end, 3);
+    }
+
+    #[test]
+    fn add_cursor_next_match_finds_next_occurrence() {
+        let mut buf = Buffer::from_str("foo bar foo bar");
+        // Select the first "foo" (0..3).
+        buf.move_cursor_to(0, false);
+        buf.move_cursor_to(3, true);
+        // Add cursor at next "foo" → should appear at 8..11.
+        let added = buf.add_cursor_at_next_match();
+        assert!(added);
+        assert_eq!(buf.cursors.len(), 2);
+        // Primary should be the newly-added one (offset 11 after selection).
+        assert_eq!(buf.cursors.primary().byte_offset, 11);
+    }
+
+    #[test]
+    fn add_cursor_next_match_wraps_around() {
+        let mut buf = Buffer::from_str("foo bar foo");
+        buf.move_cursor_to(8, false); // before second "foo"
+        buf.move_cursor_to(11, true);
+        // No "foo" after offset 11 → should wrap and add cursor at 0..3.
+        let added = buf.add_cursor_at_next_match();
+        assert!(added);
+        assert_eq!(buf.cursors.len(), 2);
+    }
+
+    #[test]
+    fn pop_last_cursor_removes_added() {
+        let mut buf = Buffer::from_str("foo bar foo bar");
+        buf.move_cursor_to(0, false);
+        buf.move_cursor_to(3, true);
+        buf.add_cursor_at_next_match();
+        assert_eq!(buf.cursors.len(), 2);
+        buf.pop_last_cursor();
+        assert_eq!(buf.cursors.len(), 1);
+    }
+
+    #[test]
+    fn skip_current_match_replaces_cursor() {
+        let mut buf = Buffer::from_str("foo foo foo");
+        buf.move_cursor_to(0, false);
+        buf.move_cursor_to(3, true);
+        buf.add_cursor_at_next_match(); // now have cursors at 0..3 and 4..7
+        assert_eq!(buf.cursors.len(), 2);
+        // Skip the "current" → drop the lower one, add the third "foo".
+        buf.skip_current_match_to_next();
+        assert_eq!(buf.cursors.len(), 2);
+        // Cursors should be at 4..7 and 8..11 now.
+        let offsets: Vec<usize> = buf
+            .cursors
+            .cursors()
+            .iter()
+            .map(|c| c.byte_offset)
+            .collect();
+        assert!(offsets.contains(&7));
+        assert!(offsets.contains(&11));
     }
 }

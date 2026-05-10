@@ -1726,6 +1726,15 @@ impl AppState {
             EditorAction::OpenProjectSearch => {
                 self.project_search = Some(ProjectSearchState::new());
             }
+            EditorAction::AddCursorNextMatch => {
+                self.editor.active_mut().buffer.add_cursor_at_next_match();
+            }
+            EditorAction::SkipCurrentMatch => {
+                self.editor.active_mut().buffer.skip_current_match_to_next();
+            }
+            EditorAction::UndoLastCursor => {
+                self.editor.active_mut().buffer.pop_last_cursor();
+            }
 
             // ── App lifecycle ─────────────────────────────────────────
             EditorAction::Quit => {

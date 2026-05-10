@@ -208,6 +208,54 @@ pub fn display_col_at(rope: &Rope, line: usize, byte_col: usize) -> usize {
     prefix.graphemes(true).map(UnicodeWidthStr::width).sum()
 }
 
+/// Returns the byte span `(start, end)` of the word identifier surrounding
+/// `byte_offset`, or `None` if the offset is not on a word character.
+///
+/// "Word" matches `\w`-like characters (alphanumeric or `_`) — the standard
+/// notion used by the Sublime/VS Code "Ctrl+D" motion.
+pub fn word_span_at(rope: &Rope, byte_offset: usize) -> Option<(usize, usize)> {
+    let len = rope.len_bytes();
+    if len == 0 {
+        return None;
+    }
+    let at = byte_offset.min(len);
+    let text = rope.to_string();
+    // Walk back to start of word.
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    // If the cursor is past the end of a word (e.g. just after a closing
+    // identifier), step back one char so we still grab the word.
+    let mut start = at;
+    while start > 0 {
+        let prev = text[..start]
+            .chars()
+            .next_back()
+            .map(|c| (c, c.len_utf8()))
+            .unwrap();
+        if is_word(prev.0) {
+            start -= prev.1;
+        } else {
+            break;
+        }
+    }
+    let mut end = at;
+    while end < text.len() {
+        let next = text[end..]
+            .chars()
+            .next()
+            .map(|c| (c, c.len_utf8()))
+            .unwrap();
+        if is_word(next.0) {
+            end += next.1;
+        } else {
+            break;
+        }
+    }
+    if start == end {
+        return None;
+    }
+    Some((start, end))
+}
+
 /// Returns the byte length of a line excluding any trailing newline characters.
 pub fn line_byte_len_no_newline(rope: &Rope, line: usize) -> usize {
     let total_lines = rope.len_lines();
@@ -230,6 +278,10 @@ pub struct MultiCursor {
     cursors: Vec<Cursor>,
     /// Index of the "primary" cursor (the one the viewport follows).
     primary: usize,
+    /// LIFO stack of byte offsets recently added by `add-cursor-next-match`.
+    /// Used to implement the "undo last cursor" motion. Cleared on
+    /// `collapse_to_primary` and any movement that resets cursors.
+    add_stack: Vec<usize>,
 }
 
 impl MultiCursor {
@@ -237,6 +289,7 @@ impl MultiCursor {
         Self {
             cursors: vec![Cursor::at_start()],
             primary: 0,
+            add_stack: Vec::new(),
         }
     }
 
@@ -244,6 +297,7 @@ impl MultiCursor {
         Self {
             cursors: vec![cursor],
             primary: 0,
+            add_stack: Vec::new(),
         }
     }
 
@@ -286,6 +340,7 @@ impl MultiCursor {
         Self {
             cursors,
             primary: primary.min(n.saturating_sub(1)),
+            add_stack: Vec::new(),
         }
     }
 
@@ -296,11 +351,73 @@ impl MultiCursor {
         self.sort_and_dedup();
     }
 
+    /// Add a cursor with an active selection from `anchor` to `active`. Sets
+    /// the new cursor as primary so the viewport follows it. Used by the
+    /// add-cursor-on-next-match motion (Ctrl+D).
+    pub fn add_cursor_with_selection(&mut self, rope: &Rope, anchor: usize, active: usize) {
+        let mut cursor = Cursor::from_byte_offset(rope, active);
+        cursor.selection = Some(Selection::new(anchor, active));
+        self.cursors.push(cursor);
+        self.sort_and_dedup();
+        // Make the newly added cursor the primary so the viewport follows it.
+        self.primary = self
+            .cursors
+            .iter()
+            .position(|c| c.byte_offset == active)
+            .unwrap_or(self.primary);
+        self.add_stack.push(active);
+    }
+
+    /// Pop the most-recently-added cursor (from `add_cursor_with_selection`).
+    /// No-op if the stack is empty or only one cursor remains.
+    pub fn pop_added_cursor(&mut self) {
+        if self.cursors.len() <= 1 {
+            self.add_stack.clear();
+            return;
+        }
+        while let Some(active) = self.add_stack.pop() {
+            if let Some(idx) = self.cursors.iter().position(|c| c.byte_offset == active) {
+                self.cursors.remove(idx);
+                if self.primary >= self.cursors.len() {
+                    self.primary = self.cursors.len().saturating_sub(1);
+                } else if idx <= self.primary {
+                    self.primary =
+                        self.primary
+                            .saturating_sub(if idx < self.primary { 1 } else { 0 });
+                }
+                // Make the next-most-recent added cursor primary, if any.
+                if let Some(prev) = self.add_stack.last()
+                    && let Some(p_idx) = self.cursors.iter().position(|c| c.byte_offset == *prev)
+                {
+                    self.primary = p_idx;
+                }
+                return;
+            }
+            // Otherwise the entry is stale (cursor already removed); pop the next.
+        }
+    }
+
+    /// Remove the primary cursor entirely (used by skip-current-match).
+    /// No-op when only one cursor remains.
+    #[allow(dead_code)]
+    pub fn remove_primary(&mut self) {
+        if self.cursors.len() <= 1 {
+            return;
+        }
+        let removed_offset = self.cursors[self.primary].byte_offset;
+        self.cursors.remove(self.primary);
+        self.add_stack.retain(|&off| off != removed_offset);
+        if self.primary >= self.cursors.len() {
+            self.primary = self.cursors.len() - 1;
+        }
+    }
+
     /// Collapse all cursors to just the primary, clearing all others.
     pub fn collapse_to_primary(&mut self) {
         let primary = self.cursors[self.primary];
         self.cursors = vec![primary];
         self.primary = 0;
+        self.add_stack.clear();
     }
 
     /// Re-sort and deduplicate after any operation that may reorder cursors.
@@ -316,6 +433,19 @@ impl MultiCursor {
             .enumerate()
             .filter(move |(i, _)| *i != primary)
             .map(|(_, c)| c)
+    }
+
+    /// Read-only view of the recently-added cursor stack. Used by
+    /// `Buffer::skip_current_match_to_next` to preserve the stack across a
+    /// rebuild.
+    pub fn recent_adds(&self) -> &[usize] {
+        &self.add_stack
+    }
+
+    /// Replace the recently-added cursor stack. Used by
+    /// `Buffer::skip_current_match_to_next` after a rebuild.
+    pub fn set_recent_adds(&mut self, stack: Vec<usize>) {
+        self.add_stack = stack;
     }
 
     /// Sort cursors by byte offset and remove exact duplicates.
@@ -473,5 +603,48 @@ mod tests {
         assert_eq!(mc.len(), 2);
         mc.collapse_to_primary();
         assert_eq!(mc.len(), 1);
+    }
+
+    #[test]
+    fn word_span_finds_identifier() {
+        let r = rope("foo bar_baz qux");
+        // Cursor inside "bar_baz" — span should cover the whole identifier.
+        let span = word_span_at(&r, 5).unwrap();
+        assert_eq!(&r.to_string()[span.0..span.1], "bar_baz");
+    }
+
+    #[test]
+    fn word_span_returns_none_in_whitespace() {
+        let r = rope("foo  bar");
+        // Between the two spaces.
+        assert!(word_span_at(&r, 4).is_none());
+    }
+
+    #[test]
+    fn add_cursor_with_selection_promotes_to_primary() {
+        let r = rope("abc abc abc");
+        let mut mc = MultiCursor::new();
+        // Make primary a 0..3 selection (anchor=0, active=3).
+        mc.cursors[0].selection = Some(Selection::new(0, 3));
+        mc.cursors[0].byte_offset = 3;
+        mc.add_cursor_with_selection(&r, 4, 7);
+        assert_eq!(mc.len(), 2);
+        // Primary should now be the new one.
+        assert_eq!(mc.primary().byte_offset, 7);
+        assert!(mc.primary().has_selection());
+    }
+
+    #[test]
+    fn pop_added_cursor_undoes_addition() {
+        let r = rope("abc abc abc");
+        let mut mc = MultiCursor::new();
+        mc.cursors[0].selection = Some(Selection::new(0, 3));
+        mc.cursors[0].byte_offset = 3;
+        mc.add_cursor_with_selection(&r, 4, 7);
+        assert_eq!(mc.len(), 2);
+        mc.pop_added_cursor();
+        assert_eq!(mc.len(), 1);
+        // Original cursor remains.
+        assert_eq!(mc.primary().byte_offset, 3);
     }
 }

@@ -128,6 +128,14 @@ pub enum EditorAction {
     SelectAllOccurrences,
     /// Open the project-wide search/replace overlay (Ctrl+Shift+F).
     OpenProjectSearch,
+    /// Sublime/VS Code "Ctrl+D": expand to surrounding word, or add a cursor
+    /// at the next occurrence of the current selection.
+    AddCursorNextMatch,
+    /// Like `AddCursorNextMatch` but skip the current match instead of
+    /// adding to it.
+    SkipCurrentMatch,
+    /// Undo the most recent `AddCursorNextMatch` (Ctrl+U).
+    UndoLastCursor,
 
     // ── File / tab management ─────────────────────────────────────────
     /// Create a new empty buffer in a new tab.
@@ -301,6 +309,9 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::SearchToggleCaseSensitive => "search_toggle_case_sensitive",
         EditorAction::SelectAllOccurrences => "select_all_occurrences",
         EditorAction::OpenProjectSearch => "open_project_search",
+        EditorAction::AddCursorNextMatch => "add_cursor_next_match",
+        EditorAction::SkipCurrentMatch => "skip_current_match",
+        EditorAction::UndoLastCursor => "undo_last_cursor",
         // File / tab management
         EditorAction::NewFile => "new_file",
         EditorAction::NewTab => "new_tab",
@@ -416,6 +427,9 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "search_toggle_case_sensitive" => EditorAction::SearchToggleCaseSensitive,
         "select_all_occurrences" => EditorAction::SelectAllOccurrences,
         "open_project_search" => EditorAction::OpenProjectSearch,
+        "add_cursor_next_match" => EditorAction::AddCursorNextMatch,
+        "skip_current_match" => EditorAction::SkipCurrentMatch,
+        "undo_last_cursor" => EditorAction::UndoLastCursor,
         // File / tab management
         "new_file" => EditorAction::NewFile,
         "new_tab" => EditorAction::NewTab,

@@ -117,6 +117,18 @@ const TEMPLATE: &[HelpEntry] = &[
         actions: &["spawn_cursor_down"],
         desc: "Add cursor below",
     },
+    HelpEntry::Binding {
+        actions: &["add_cursor_next_match"],
+        desc: "Add cursor at next match (or select word)",
+    },
+    HelpEntry::Binding {
+        actions: &["skip_current_match"],
+        desc: "Skip current match, add cursor at next",
+    },
+    HelpEntry::Binding {
+        actions: &["undo_last_cursor"],
+        desc: "Undo last added cursor",
+    },
     // ── Editing ──────────────────────────────────────────────────────
     HelpEntry::Section("Editing"),
     HelpEntry::Binding {
