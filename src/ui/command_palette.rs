@@ -141,6 +141,87 @@ pub static COMMANDS: &[CommandEntry] = &[
         key_hint: "Ctrl+Alt+\\",
         action: || EditorAction::FilterSelection,
     },
+    // ── Line transforms ────────────────────────────────────────────
+    CommandEntry {
+        name: "Sort Lines Ascending",
+        key_hint: "palette",
+        action: || EditorAction::SortLinesAsc,
+    },
+    CommandEntry {
+        name: "Sort Lines Descending",
+        key_hint: "palette",
+        action: || EditorAction::SortLinesDesc,
+    },
+    CommandEntry {
+        name: "Dedupe Adjacent Lines",
+        key_hint: "palette",
+        action: || EditorAction::DedupeLines,
+    },
+    CommandEntry {
+        name: "Reverse Line Order",
+        key_hint: "palette",
+        action: || EditorAction::ReverseLines,
+    },
+    CommandEntry {
+        name: "To Upper Case",
+        key_hint: "palette",
+        action: || EditorAction::ToUpper,
+    },
+    CommandEntry {
+        name: "To Lower Case",
+        key_hint: "palette",
+        action: || EditorAction::ToLower,
+    },
+    CommandEntry {
+        name: "To Title Case",
+        key_hint: "palette",
+        action: || EditorAction::ToTitle,
+    },
+    CommandEntry {
+        name: "Trim Trailing Whitespace",
+        key_hint: "palette",
+        action: || EditorAction::TrimTrailingWhitespace,
+    },
+    CommandEntry {
+        name: "Join Lines",
+        key_hint: "Ctrl+J",
+        action: || EditorAction::JoinLines,
+    },
+    CommandEntry {
+        name: "Increment Number Under Cursor",
+        key_hint: "Alt+=",
+        action: || EditorAction::IncrementNumber,
+    },
+    CommandEntry {
+        name: "Decrement Number Under Cursor",
+        key_hint: "Alt+-",
+        action: || EditorAction::DecrementNumber,
+    },
+    CommandEntry {
+        name: "Convert Indent: Tabs → Spaces",
+        key_hint: "palette",
+        action: || EditorAction::ConvertIndentToSpaces,
+    },
+    CommandEntry {
+        name: "Convert Indent: Spaces → Tabs",
+        key_hint: "palette",
+        action: || EditorAction::ConvertIndentToTabs,
+    },
+    CommandEntry {
+        name: "Convert Line Endings: LF",
+        key_hint: "palette",
+        action: || EditorAction::ConvertEolLf,
+    },
+    CommandEntry {
+        name: "Convert Line Endings: CRLF",
+        key_hint: "palette",
+        action: || EditorAction::ConvertEolCrlf,
+    },
+    CommandEntry {
+        name: "Align Lines On Character…",
+        key_hint: "palette",
+        action: || EditorAction::AlignSelection,
+    },
     CommandEntry {
         name: "Toggle Line Comment",
         key_hint: "Ctrl+/",

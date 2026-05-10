@@ -146,6 +146,16 @@ const TEMPLATE: &[HelpEntry] = &[
         actions: &["filter_selection"],
         desc: "Filter selection through shell command",
     },
+    // ── Line transforms ────────────────────────────────────────────
+    HelpEntry::Section("Line transforms"),
+    HelpEntry::Binding {
+        actions: &["join_lines"],
+        desc: "Join lines (vim-style)",
+    },
+    HelpEntry::Binding {
+        actions: &["increment_number", "decrement_number"],
+        desc: "Increment / decrement number under cursor",
+    },
     // ── Editing ──────────────────────────────────────────────────────
     HelpEntry::Section("Editing"),
     HelpEntry::Binding {

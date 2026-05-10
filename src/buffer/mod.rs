@@ -1279,6 +1279,460 @@ impl Buffer {
     }
 
     // ------------------------------------------------------------------ //
+    // Line transforms (sort, dedupe, case, increment, …)
+    // ------------------------------------------------------------------ //
+
+    /// Replace the lines covered by `touched_line_range()` with `new_lines`.
+    /// Single batched edit; does not touch the trailing newline of the last
+    /// line in the range (so a buffer-final non-newline stays the same).
+    fn replace_lines_in_range(
+        &mut self,
+        first_line: usize,
+        last_line: usize,
+        new_lines: &[String],
+    ) {
+        if first_line > last_line {
+            return;
+        }
+        let start = self.line_start_byte(first_line);
+        // End of the last line content, EXCLUDING its trailing newline.
+        let end = self.line_start_byte(last_line) + line_byte_len_no_newline(&self.rope, last_line);
+        let new_text = new_lines.join("\n");
+        self.history.begin_batch();
+        let old_text = rope_edit::replace(&mut self.rope, start, end, &new_text);
+        self.history.record(EditCommand::Replace {
+            start,
+            end,
+            old_text,
+            new_text: new_text.clone(),
+        });
+        self.history.commit_batch();
+        let new_offset = start + new_text.len();
+        *self.cursors.primary_mut() = Cursor::from_byte_offset(&self.rope, new_offset);
+        self.cursors.primary_mut().selection = None;
+        self.modified = true;
+    }
+
+    /// Collect the current touched-line-range contents as a `Vec<String>`.
+    fn collect_touched_lines(&self) -> (usize, usize, Vec<String>) {
+        let (first, last) = self.touched_line_range();
+        let lines: Vec<String> = (first..=last).map(|l| self.line_str(l)).collect();
+        (first, last, lines)
+    }
+
+    /// Sort the touched lines.
+    pub fn sort_lines(&mut self, descending: bool) {
+        let (first, last, mut lines) = self.collect_touched_lines();
+        if lines.len() < 2 {
+            return;
+        }
+        lines.sort();
+        if descending {
+            lines.reverse();
+        }
+        self.replace_lines_in_range(first, last, &lines);
+    }
+
+    /// Remove adjacent duplicate lines in the touched range.
+    pub fn dedupe_lines(&mut self) {
+        let (first, last, mut lines) = self.collect_touched_lines();
+        if lines.len() < 2 {
+            return;
+        }
+        lines.dedup();
+        self.replace_lines_in_range(first, last, &lines);
+    }
+
+    /// Reverse the order of the touched lines.
+    pub fn reverse_lines(&mut self) {
+        let (first, last, mut lines) = self.collect_touched_lines();
+        if lines.len() < 2 {
+            return;
+        }
+        lines.reverse();
+        self.replace_lines_in_range(first, last, &lines);
+    }
+
+    /// Trim trailing whitespace from each touched line.
+    pub fn trim_trailing_whitespace(&mut self) {
+        let (first, last, lines) = self.collect_touched_lines();
+        let new_lines: Vec<String> = lines
+            .iter()
+            .map(|l| l.trim_end_matches([' ', '\t']).to_string())
+            .collect();
+        if new_lines == lines {
+            return;
+        }
+        self.replace_lines_in_range(first, last, &new_lines);
+    }
+
+    /// Convert the selection (or current line) to upper case.
+    pub fn uppercase_selection(&mut self) {
+        self.transform_selection(|s| s.to_uppercase());
+    }
+
+    /// Convert the selection (or current line) to lower case.
+    pub fn lowercase_selection(&mut self) {
+        self.transform_selection(|s| s.to_lowercase());
+    }
+
+    /// Convert the selection (or current line) to Title Case (each
+    /// whitespace-separated word capitalised).
+    pub fn titlecase_selection(&mut self) {
+        self.transform_selection(|s| {
+            let mut out = String::with_capacity(s.len());
+            let mut at_word_start = true;
+            for c in s.chars() {
+                if c.is_whitespace() {
+                    out.push(c);
+                    at_word_start = true;
+                } else if at_word_start {
+                    for u in c.to_uppercase() {
+                        out.push(u);
+                    }
+                    at_word_start = false;
+                } else {
+                    for u in c.to_lowercase() {
+                        out.push(u);
+                    }
+                }
+            }
+            out
+        });
+    }
+
+    fn transform_selection(&mut self, f: impl FnOnce(&str) -> String) {
+        let primary = self.cursors.primary();
+        let range = if primary.has_selection() {
+            primary.selection_bytes()
+        } else {
+            // Whole current line as fallback.
+            let line = primary.line;
+            let start = self.line_start_byte(line);
+            let end = start + line_byte_len_no_newline(&self.rope, line);
+            crate::buffer::cursor::ByteRange { start, end }
+        };
+        if range.start == range.end {
+            return;
+        }
+        let original = self.text_in_range(range.start, range.end);
+        let transformed = f(&original);
+        if transformed == original {
+            return;
+        }
+        self.history.begin_batch();
+        let old_text = rope_edit::replace(&mut self.rope, range.start, range.end, &transformed);
+        self.history.record(EditCommand::Replace {
+            start: range.start,
+            end: range.end,
+            old_text,
+            new_text: transformed.clone(),
+        });
+        self.history.commit_batch();
+        let new_end = range.start + transformed.len();
+        *self.cursors.primary_mut() = Cursor::from_byte_offset(&self.rope, new_end);
+        self.cursors.primary_mut().selection =
+            Some(crate::buffer::cursor::Selection::new(range.start, new_end));
+        self.modified = true;
+    }
+
+    /// Vim-style line join: when a selection spans multiple lines, collapse
+    /// every newline within the selection into a single space (trimming
+    /// adjacent whitespace). Without a selection, join the current line with
+    /// the next.
+    pub fn join_lines(&mut self) {
+        let primary = self.cursors.primary();
+        let range = if primary.has_selection() {
+            primary.selection_bytes()
+        } else {
+            let line = primary.line;
+            let last_line = self.rope.len_lines().saturating_sub(1);
+            if line >= last_line {
+                return;
+            }
+            let start = self.line_start_byte(line) + line_byte_len_no_newline(&self.rope, line);
+            let next_start = self.line_start_byte(line + 1);
+            let after_indent = self.first_non_whitespace_byte(line + 1);
+            crate::buffer::cursor::ByteRange {
+                start,
+                end: after_indent.max(next_start),
+            }
+        };
+        if range.start >= range.end {
+            return;
+        }
+        let original = self.text_in_range(range.start, range.end);
+        let mut joined = String::with_capacity(original.len());
+        let mut prev_was_newline = false;
+        let mut chars = original.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\n' || c == '\r' {
+                if !prev_was_newline {
+                    joined.push(' ');
+                }
+                prev_was_newline = true;
+                // Skip following whitespace.
+                while matches!(chars.peek(), Some(c2) if c2.is_whitespace()) {
+                    chars.next();
+                }
+            } else {
+                prev_was_newline = false;
+                joined.push(c);
+            }
+        }
+        // Trim trailing space introduced if selection ended with newline.
+        let joined = joined.trim_end_matches(' ').to_string();
+        self.history.begin_batch();
+        let old_text = rope_edit::replace(&mut self.rope, range.start, range.end, &joined);
+        self.history.record(EditCommand::Replace {
+            start: range.start,
+            end: range.end,
+            old_text,
+            new_text: joined.clone(),
+        });
+        self.history.commit_batch();
+        let new_offset = range.start + joined.len();
+        *self.cursors.primary_mut() = Cursor::from_byte_offset(&self.rope, new_offset);
+        self.cursors.primary_mut().selection = None;
+        self.modified = true;
+    }
+
+    /// Align the touched lines on the first occurrence of `ch` in each line.
+    /// Lines without `ch` are left unchanged. The character itself stays in
+    /// place; spaces are inserted before it as needed so the column matches
+    /// across lines.
+    pub fn align_on(&mut self, ch: char) {
+        let (first, last, lines) = self.collect_touched_lines();
+        if lines.is_empty() {
+            return;
+        }
+        // Compute the maximum byte column at which `ch` first appears.
+        let max_col = lines.iter().filter_map(|l| l.find(ch)).max().unwrap_or(0);
+        if max_col == 0 {
+            return;
+        }
+        let new_lines: Vec<String> = lines
+            .iter()
+            .map(|l| match l.find(ch) {
+                Some(pos) if pos < max_col => {
+                    let pad = " ".repeat(max_col - pos);
+                    let mut s = String::with_capacity(l.len() + pad.len());
+                    s.push_str(&l[..pos]);
+                    s.push_str(&pad);
+                    s.push_str(&l[pos..]);
+                    s
+                }
+                _ => l.clone(),
+            })
+            .collect();
+        if new_lines == lines {
+            return;
+        }
+        self.replace_lines_in_range(first, last, &new_lines);
+    }
+
+    /// Increment (or decrement, if `delta` < 0) the integer literal under
+    /// each cursor. With multiple cursors, generates an arithmetic sequence:
+    /// the i-th cursor (in document order) gets `original + i*delta` written
+    /// back, preserving the original digit width when zero-padded.
+    pub fn increment_number(&mut self, delta: i64) {
+        struct Hit {
+            cursor_idx: usize,
+            start: usize,
+            end: usize,
+            original: i64,
+            zero_padded_width: Option<usize>,
+        }
+        let cursors = self.cursors.cursors().to_vec();
+        let text = self.rope.to_string();
+        let mut hits: Vec<Hit> = Vec::new();
+        for (i, c) in cursors.iter().enumerate() {
+            if let Some((s, e)) = digit_span_at(&text, c.byte_offset) {
+                let raw = &text[s..e];
+                let zero_padded_width = if raw.starts_with('0') && raw.len() > 1 {
+                    Some(raw.len())
+                } else if raw.starts_with("-0") && raw.len() > 2 {
+                    Some(raw.len() - 1)
+                } else {
+                    None
+                };
+                if let Ok(n) = raw.parse::<i64>() {
+                    hits.push(Hit {
+                        cursor_idx: i,
+                        start: s,
+                        end: e,
+                        original: n,
+                        zero_padded_width,
+                    });
+                }
+            }
+        }
+        if hits.is_empty() {
+            return;
+        }
+        // Sort by start byte ascending so the i-th in document order gets a
+        // consistent step. With one cursor: just add `delta`. With multiple:
+        // generate an arithmetic sequence starting at the original value of
+        // the first cursor (i.e. the i-th cursor gets `original + i*delta`).
+        hits.sort_by_key(|h| h.start);
+        let n = hits.len();
+        for (i, h) in hits.iter_mut().enumerate() {
+            let step = if n == 1 {
+                delta
+            } else {
+                delta.saturating_mul(i as i64)
+            };
+            h.original = h.original.saturating_add(step);
+            h.cursor_idx = i;
+        }
+        // We need original `cursor_idx` for later? Not really — we only
+        // update positions; cursors are rebuilt from byte offsets.
+        let mut new_positions: Vec<usize> = cursors.iter().map(|c| c.byte_offset).collect();
+        let primary_idx = self.cursors.primary_idx();
+        self.history.begin_batch();
+        // Process descending.
+        let mut hits_desc = hits;
+        hits_desc.sort_by_key(|h| std::cmp::Reverse(h.start));
+        for h in &hits_desc {
+            let new_str = match h.zero_padded_width {
+                Some(w) => format!("{:0>width$}", h.original, width = w),
+                None => format!("{}", h.original),
+            };
+            let old_text = rope_edit::replace(&mut self.rope, h.start, h.end, &new_str);
+            self.history.record(EditCommand::Replace {
+                start: h.start,
+                end: h.end,
+                old_text,
+                new_text: new_str.clone(),
+            });
+            // Adjust new_positions for this edit.
+            let old_len = h.end - h.start;
+            let new_len = new_str.len();
+            let delta_len = new_len as i64 - old_len as i64;
+            for pos in new_positions.iter_mut() {
+                if *pos > h.end {
+                    *pos = ((*pos as i64) + delta_len) as usize;
+                } else if *pos >= h.start {
+                    // Cursor was within the digit run; place at end of new.
+                    *pos = h.start + new_len;
+                }
+            }
+        }
+        self.history.commit_batch();
+        let new_cursors: Vec<Cursor> = new_positions
+            .iter()
+            .map(|&off| Cursor::from_byte_offset(&self.rope, off))
+            .collect();
+        let primary_off = new_cursors
+            .get(primary_idx)
+            .map(|c| c.byte_offset)
+            .unwrap_or(0);
+        let new_primary_idx = new_cursors
+            .iter()
+            .position(|c| c.byte_offset == primary_off)
+            .unwrap_or(0);
+        self.cursors = MultiCursor::from_cursors_with_primary(new_cursors, new_primary_idx);
+        self.modified = true;
+    }
+
+    /// Convert leading tabs in every touched line to `width` spaces (each).
+    pub fn convert_indent_to_spaces(&mut self, width: usize) {
+        let (first, last, lines) = self.collect_touched_lines();
+        let pad = " ".repeat(width.max(1));
+        let new_lines: Vec<String> = lines
+            .iter()
+            .map(|l| {
+                let mut out = String::with_capacity(l.len());
+                let mut chars = l.chars();
+                let mut in_indent = true;
+                for c in chars.by_ref() {
+                    if in_indent && c == '\t' {
+                        out.push_str(&pad);
+                    } else if in_indent && c == ' ' {
+                        out.push(' ');
+                    } else {
+                        in_indent = false;
+                        out.push(c);
+                    }
+                }
+                out
+            })
+            .collect();
+        if new_lines == lines {
+            return;
+        }
+        self.replace_lines_in_range(first, last, &new_lines);
+    }
+
+    /// Convert leading runs of `width` spaces in every touched line to a
+    /// single tab.
+    pub fn convert_indent_to_tabs(&mut self, width: usize) {
+        let w = width.max(1);
+        let (first, last, lines) = self.collect_touched_lines();
+        let new_lines: Vec<String> = lines
+            .iter()
+            .map(|l| {
+                let leading: String = l.chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+                let rest = &l[leading.len()..];
+                let mut tabs = String::new();
+                let mut col = 0usize;
+                for c in leading.chars() {
+                    if c == '\t' {
+                        tabs.push('\t');
+                        col = 0;
+                    } else {
+                        col += 1;
+                        if col == w {
+                            tabs.push('\t');
+                            col = 0;
+                        }
+                    }
+                }
+                if col > 0 {
+                    // Trailing partial: pad with spaces.
+                    for _ in 0..col {
+                        tabs.push(' ');
+                    }
+                }
+                let mut s = tabs;
+                s.push_str(rest);
+                s
+            })
+            .collect();
+        if new_lines == lines {
+            return;
+        }
+        self.replace_lines_in_range(first, last, &new_lines);
+    }
+
+    /// Normalise line endings throughout the buffer to `target`.
+    pub fn convert_eol(&mut self, target: EolStyle) {
+        let original = self.rope.to_string();
+        // Normalise to LF then re-emit using the target.
+        let lf_only: String = original.replace("\r\n", "\n").replace('\r', "\n");
+        let new_text = match target {
+            EolStyle::Lf => lf_only,
+            EolStyle::Crlf => lf_only.replace('\n', "\r\n"),
+        };
+        if new_text == original {
+            return;
+        }
+        let len = self.rope.len_bytes();
+        self.history.begin_batch();
+        let old_text = rope_edit::replace(&mut self.rope, 0, len, &new_text);
+        self.history.record(EditCommand::Replace {
+            start: 0,
+            end: len,
+            old_text,
+            new_text: new_text.clone(),
+        });
+        self.history.commit_batch();
+        *self.cursors.primary_mut() = Cursor::from_byte_offset(&self.rope, 0);
+        self.cursors.primary_mut().selection = None;
+        self.modified = true;
+    }
+
+    // ------------------------------------------------------------------ //
     // Helpers
     // ------------------------------------------------------------------ //
 
@@ -1372,6 +1826,84 @@ impl Buffer {
             old_text: old_a,
             new_text: line_b,
         });
+    }
+}
+
+/// Line-ending style used by `Buffer::convert_eol`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EolStyle {
+    /// Unix line endings (`\n`).
+    Lf,
+    /// Windows line endings (`\r\n`).
+    Crlf,
+}
+
+/// Find the byte span `(start, end)` of the integer literal containing
+/// `at`, or the one immediately to the right if the cursor sits between
+/// runs. Includes a leading `-` only when there is no alphanumeric or `_`
+/// to the left of the digits (so identifiers like `x-1` keep `1` positive).
+fn digit_span_at(text: &str, at: usize) -> Option<(usize, usize)> {
+    let len = text.len();
+    if len == 0 {
+        return None;
+    }
+    let mut start = at.min(len);
+    let mut end = at.min(len);
+    // If the byte at `at` isn't a digit, scan forward to find the next digit on
+    // the same line.
+    if !text[end..]
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_digit())
+    {
+        let line_end = text[end..].find('\n').map(|p| end + p).unwrap_or(len);
+        if let Some(next_digit) = text[end..line_end]
+            .char_indices()
+            .find(|(_, c)| c.is_ascii_digit())
+            .map(|(i, _)| end + i)
+        {
+            start = next_digit;
+            end = next_digit;
+        } else {
+            return None;
+        }
+    }
+    // Walk forward through digits.
+    while end < len
+        && text[end..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+    {
+        end += 1;
+    }
+    // Walk backward through digits.
+    while start > 0 {
+        let prev = text[..start].chars().next_back().unwrap();
+        if prev.is_ascii_digit() {
+            start -= prev.len_utf8();
+        } else {
+            break;
+        }
+    }
+    // Optional leading sign — only if the char before isn't a word char.
+    if start > 0 {
+        let prev = text[..start].chars().next_back().unwrap();
+        if prev == '-' {
+            let prev_prev = text[..start - prev.len_utf8()]
+                .chars()
+                .next_back()
+                .map(|c| c.is_alphanumeric() || c == '_')
+                .unwrap_or(false);
+            if !prev_prev {
+                start -= prev.len_utf8();
+            }
+        }
+    }
+    if start == end {
+        None
+    } else {
+        Some((start, end))
     }
 }
 
@@ -1992,5 +2524,126 @@ mod tests {
         buf.extend_box_selection(crate::input::action::Direction::Right);
         assert_eq!(buf.cursors.len(), 1);
         assert!(buf.cursors.primary().has_selection());
+    }
+
+    // ── Line transforms ──────────────────────────────────────────────────
+
+    fn select_lines(buf: &mut Buffer, first: usize, last: usize) {
+        let r = buf.rope();
+        let start = r.char_to_byte(r.line_to_char(first));
+        let end_line_start = r.char_to_byte(r.line_to_char(last));
+        let end = end_line_start + line_byte_len_no_newline(r, last);
+        buf.move_cursor_to(start, false);
+        buf.move_cursor_to(end, true);
+    }
+
+    #[test]
+    fn sort_lines_ascending() {
+        let mut buf = Buffer::from_str("c\nb\na\n");
+        select_lines(&mut buf, 0, 2);
+        buf.sort_lines(false);
+        assert_eq!(buf.to_string(), "a\nb\nc\n");
+    }
+
+    #[test]
+    fn dedupe_adjacent_lines() {
+        let mut buf = Buffer::from_str("a\na\nb\nb\nc\n");
+        select_lines(&mut buf, 0, 4);
+        buf.dedupe_lines();
+        assert_eq!(buf.to_string(), "a\nb\nc\n");
+    }
+
+    #[test]
+    fn reverse_lines_inverts_order() {
+        let mut buf = Buffer::from_str("a\nb\nc\n");
+        select_lines(&mut buf, 0, 2);
+        buf.reverse_lines();
+        assert_eq!(buf.to_string(), "c\nb\na\n");
+    }
+
+    #[test]
+    fn uppercase_lowercase_round_trip() {
+        let mut buf = Buffer::from_str("Hello World");
+        buf.move_cursor_to(0, false);
+        buf.move_cursor_to(11, true);
+        buf.uppercase_selection();
+        assert_eq!(buf.to_string(), "HELLO WORLD");
+        buf.lowercase_selection();
+        assert_eq!(buf.to_string(), "hello world");
+    }
+
+    #[test]
+    fn titlecase_capitalises_words() {
+        let mut buf = Buffer::from_str("hello world");
+        buf.move_cursor_to(0, false);
+        buf.move_cursor_to(11, true);
+        buf.titlecase_selection();
+        assert_eq!(buf.to_string(), "Hello World");
+    }
+
+    #[test]
+    fn trim_trailing_whitespace_strips_lines() {
+        let mut buf = Buffer::from_str("foo  \nbar\t\nbaz\n");
+        select_lines(&mut buf, 0, 2);
+        buf.trim_trailing_whitespace();
+        assert_eq!(buf.to_string(), "foo\nbar\nbaz\n");
+    }
+
+    #[test]
+    fn join_lines_collapses_whitespace() {
+        let mut buf = Buffer::from_str("hello\n   world\n");
+        // Select bytes 0..15 — whole "hello\n   world\n" minus final newline
+        buf.move_cursor_to(0, false);
+        buf.move_cursor_to(14, true);
+        buf.join_lines();
+        // "hello world" (single space replacing newline + leading whitespace).
+        assert!(buf.to_string().starts_with("hello world"));
+    }
+
+    #[test]
+    fn align_on_pads_to_common_column() {
+        let mut buf = Buffer::from_str("a = 1\nbb = 2\nccc = 3\n");
+        select_lines(&mut buf, 0, 2);
+        buf.align_on('=');
+        assert!(buf.line_str(0).contains("a   ="));
+        assert!(buf.line_str(1).contains("bb  ="));
+        assert!(buf.line_str(2).contains("ccc ="));
+    }
+
+    #[test]
+    fn increment_number_at_cursor() {
+        let mut buf = Buffer::from_str("count = 41");
+        // Cursor on '4'
+        buf.move_cursor_to(8, false);
+        buf.increment_number(1);
+        assert_eq!(buf.to_string(), "count = 42");
+    }
+
+    #[test]
+    fn increment_number_arithmetic_sequence_with_multi_cursor() {
+        let mut buf = Buffer::from_str("0\n0\n0\n");
+        // Place cursors on each '0'.
+        buf.move_cursor_to(0, false);
+        buf.add_cursor_at_display_col(1, 0);
+        buf.add_cursor_at_display_col(2, 0);
+        assert_eq!(buf.cursors.len(), 3);
+        buf.increment_number(1);
+        assert_eq!(buf.to_string(), "0\n1\n2\n");
+    }
+
+    #[test]
+    fn convert_indent_tabs_to_spaces() {
+        let mut buf = Buffer::from_str("\thello\n\t\tworld\n");
+        select_lines(&mut buf, 0, 1);
+        buf.convert_indent_to_spaces(2);
+        assert!(buf.line_str(0).starts_with("  hello"));
+        assert!(buf.line_str(1).starts_with("    world"));
+    }
+
+    #[test]
+    fn convert_eol_lf_to_crlf() {
+        let mut buf = Buffer::from_str("a\nb\nc\n");
+        buf.convert_eol(EolStyle::Crlf);
+        assert_eq!(buf.to_string(), "a\r\nb\r\nc\r\n");
     }
 }

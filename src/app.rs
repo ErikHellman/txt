@@ -70,6 +70,10 @@ pub enum InputMode {
     /// command via `sh -c` with the selection on stdin and replaces the
     /// selection with the captured stdout.
     ShellFilter(String),
+    /// "Align on character: " — `apply_align_on` is invoked with the first
+    /// non-empty character submitted (Enter takes the first char, or aborts
+    /// if empty).
+    AlignChar(String),
 }
 
 impl InputMode {
@@ -1494,6 +1498,70 @@ impl AppState {
                     self.status_error = Some("Filter requires a non-empty selection".to_string());
                 }
             }
+
+            // ── Line transforms ───────────────────────────────────────
+            EditorAction::SortLinesAsc => {
+                self.editor.active_mut().buffer.sort_lines(false);
+            }
+            EditorAction::SortLinesDesc => {
+                self.editor.active_mut().buffer.sort_lines(true);
+            }
+            EditorAction::DedupeLines => {
+                self.editor.active_mut().buffer.dedupe_lines();
+            }
+            EditorAction::ReverseLines => {
+                self.editor.active_mut().buffer.reverse_lines();
+            }
+            EditorAction::ToUpper => {
+                self.editor.active_mut().buffer.uppercase_selection();
+            }
+            EditorAction::ToLower => {
+                self.editor.active_mut().buffer.lowercase_selection();
+            }
+            EditorAction::ToTitle => {
+                self.editor.active_mut().buffer.titlecase_selection();
+            }
+            EditorAction::TrimTrailingWhitespace => {
+                self.editor.active_mut().buffer.trim_trailing_whitespace();
+            }
+            EditorAction::JoinLines => {
+                self.editor.active_mut().buffer.join_lines();
+            }
+            EditorAction::IncrementNumber => {
+                self.editor.active_mut().buffer.increment_number(1);
+            }
+            EditorAction::DecrementNumber => {
+                self.editor.active_mut().buffer.increment_number(-1);
+            }
+            EditorAction::ConvertIndentToSpaces => {
+                let width = self.config.tab_size.max(1);
+                self.editor
+                    .active_mut()
+                    .buffer
+                    .convert_indent_to_spaces(width);
+            }
+            EditorAction::ConvertIndentToTabs => {
+                let width = self.config.tab_size.max(1);
+                self.editor
+                    .active_mut()
+                    .buffer
+                    .convert_indent_to_tabs(width);
+            }
+            EditorAction::ConvertEolLf => {
+                self.editor
+                    .active_mut()
+                    .buffer
+                    .convert_eol(crate::buffer::EolStyle::Lf);
+            }
+            EditorAction::ConvertEolCrlf => {
+                self.editor
+                    .active_mut()
+                    .buffer
+                    .convert_eol(crate::buffer::EolStyle::Crlf);
+            }
+            EditorAction::AlignSelection => {
+                self.input_mode = InputMode::AlignChar(String::new());
+            }
             EditorAction::MouseScroll { dir, col, row } => {
                 if self.point_in_sidebar(col, row) {
                     let h = self.sidebar_area.map(|r| r.height as usize).unwrap_or(0);
@@ -1920,7 +1988,8 @@ impl AppState {
                     | InputMode::GitCommitMessage(s)
                     | InputMode::GitNewBranch(s)
                     | InputMode::GitStashMessage(s)
-                    | InputMode::ShellFilter(s) => {
+                    | InputMode::ShellFilter(s)
+                    | InputMode::AlignChar(s) => {
                         s.push(c);
                     }
                     _ => {}
@@ -1938,7 +2007,8 @@ impl AppState {
                     | InputMode::GitCommitMessage(s)
                     | InputMode::GitNewBranch(s)
                     | InputMode::GitStashMessage(s)
-                    | InputMode::ShellFilter(s) => {
+                    | InputMode::ShellFilter(s)
+                    | InputMode::AlignChar(s) => {
                         s.pop();
                     }
                     InputMode::Normal => {}
@@ -2044,6 +2114,11 @@ impl AppState {
                     }
                     InputMode::ShellFilter(input) => {
                         self.apply_shell_filter(&input);
+                    }
+                    InputMode::AlignChar(input) => {
+                        if let Some(c) = input.chars().next() {
+                            self.editor.active_mut().buffer.align_on(c);
+                        }
                     }
                     InputMode::Normal => {}
                 }

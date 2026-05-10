@@ -502,6 +502,11 @@ impl KeyBindings {
         // ── Filter selection through shell command ───────────────────
         bind("ctrl+alt+\\", EditorAction::FilterSelection);
 
+        // ── Line transforms (1.5) ────────────────────────────────────
+        bind("ctrl+j", EditorAction::JoinLines);
+        bind("alt+=", EditorAction::IncrementNumber);
+        bind("alt+-", EditorAction::DecrementNumber);
+
         KeyBindings { map, reverse }
     }
 
@@ -662,7 +667,10 @@ impl KeyBindings {
 
         // ── Quick Documentation: Ctrl+Q → ctrl+j ───────────────────────
         // (ctrl+q is quit; IntelliJ uses F1 for docs too, but F1 is help)
+        // Ctrl+J is JoinLines in the default keymap; in IntelliJ it's
+        // ShowHover, so move JoinLines to ctrl+shift+j here.
         kb.rebind("show_hover", "ctrl+j");
+        kb.rebind("join_lines", "ctrl+shift+j");
 
         // ── Kill line: ctrl+k (same as Emacs/readline) ─────────────────
         // (IntelliJ default uses ctrl+k for VCS commit, which is not in
