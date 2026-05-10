@@ -129,6 +129,19 @@ const TEMPLATE: &[HelpEntry] = &[
         actions: &["undo_last_cursor"],
         desc: "Undo last added cursor",
     },
+    HelpEntry::Binding {
+        actions: &[
+            "box_select_extend_up",
+            "box_select_extend_down",
+            "box_select_extend_left",
+            "box_select_extend_right",
+        ],
+        desc: "Box / column selection (extend)",
+    },
+    HelpEntry::Static {
+        key: "Alt+Drag",
+        desc: "Box / column selection (mouse)",
+    },
     // ── Editing ──────────────────────────────────────────────────────
     HelpEntry::Section("Editing"),
     HelpEntry::Binding {

@@ -13,7 +13,7 @@ use crate::{
     clipboard::ClipboardManager,
     config::{Config, KeymapPreset, Theme, add_to_recent_files, load_recent_files},
     editor::Editor,
-    editor::viewport::screen_pos_to_byte_offset,
+    editor::viewport::{screen_pos_to_byte_offset, screen_pos_to_line_display_col},
     git::GitGutter,
     input::{
         InputHandler,
@@ -780,6 +780,9 @@ pub struct AppState {
     pub sidebar_area: Option<Rect>,
     /// Active separator-drag, if any.
     pub sidebar_drag: Option<SidebarDrag>,
+    /// Active Alt+drag box-select anchor, in (line, display_col).
+    /// Set on `BoxDragStart`, used by `BoxDragUpdate`, cleared on `BoxDragEnd`.
+    pub box_drag_anchor: Option<(usize, usize)>,
     saved_sidebar: Option<SidebarState>,
     pub sidebar_clipboard: Option<SidebarClipboard>,
     pub search_state: Option<SearchState>,
@@ -894,6 +897,7 @@ impl AppState {
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
             sidebar_area: None,
             sidebar_drag: None,
+            box_drag_anchor: None,
             saved_sidebar: None,
             sidebar_clipboard: None,
             search_state: None,
@@ -1449,6 +1453,33 @@ impl AppState {
             EditorAction::MouseUp { .. } => {
                 // End any in-progress separator drag. No editor action required.
                 self.sidebar_drag = None;
+            }
+            EditorAction::BoxDragStart { col, row } => {
+                if let Some((line, dcol)) = self.screen_to_line_col(col, row) {
+                    self.box_drag_anchor = Some((line, dcol));
+                    // Collapse any existing multi-cursor; start a new box.
+                    self.editor.active_mut().buffer.collapse_cursors();
+                    self.editor
+                        .active_mut()
+                        .buffer
+                        .set_box_cursors(line, dcol, line, dcol);
+                }
+            }
+            EditorAction::BoxDragUpdate { col, row } => {
+                if let (Some((al, ac)), Some((cl, cc))) =
+                    (self.box_drag_anchor, self.screen_to_line_col(col, row))
+                {
+                    self.editor
+                        .active_mut()
+                        .buffer
+                        .set_box_cursors(al, ac, cl, cc);
+                }
+            }
+            EditorAction::BoxDragEnd { .. } => {
+                self.box_drag_anchor = None;
+            }
+            EditorAction::BoxSelectExtend(dir) => {
+                self.editor.active_mut().buffer.extend_box_selection(dir);
             }
             EditorAction::MouseScroll { dir, col, row } => {
                 if self.point_in_sidebar(col, row) {
@@ -4724,6 +4755,31 @@ impl AppState {
         let gutter = gutter_width(self.editor.active().buffer.len_lines());
         let gutter_cols = gutter + 1;
         Some(screen_pos_to_byte_offset(
+            adjusted_col,
+            row,
+            editor_area_y,
+            gutter_cols,
+            &self.editor.active().buffer,
+            &self.editor.active().viewport,
+        ))
+    }
+
+    /// Convert a screen position into `(line, display_col)` for box selection.
+    /// Returns `None` if the click landed in the sidebar.
+    fn screen_to_line_col(&self, col: u16, row: u16) -> Option<(usize, usize)> {
+        let editor_area_y: u16 = if self.editor.tab_count() > 1 { 1 } else { 0 };
+        let sidebar_offset: u16 = if self.sidebar.is_some() {
+            self.sidebar_width + 1
+        } else {
+            0
+        };
+        if self.sidebar.is_some() && col < sidebar_offset {
+            return None;
+        }
+        let adjusted_col = col.saturating_sub(sidebar_offset);
+        let gutter = gutter_width(self.editor.active().buffer.len_lines());
+        let gutter_cols = gutter + 1;
+        Some(screen_pos_to_line_display_col(
             adjusted_col,
             row,
             editor_area_y,

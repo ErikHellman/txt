@@ -102,6 +102,23 @@ pub enum EditorAction {
         col: u16,
         row: u16,
     },
+    /// Alt+left-click: start a box / column selection at the click position.
+    BoxDragStart {
+        col: u16,
+        row: u16,
+    },
+    /// Alt+left-drag: extend the box selection to the new position.
+    BoxDragUpdate {
+        col: u16,
+        row: u16,
+    },
+    /// Alt+left-release: finish a box-select drag.
+    BoxDragEnd {
+        col: u16,
+        row: u16,
+    },
+    /// Ctrl+Alt+arrow: extend the rectangular selection by one cell in `dir`.
+    BoxSelectExtend(Direction),
 
     // ── Search / replace ─────────────────────────────────────────────
     /// Open the find bar (Ctrl+F).
@@ -312,6 +329,10 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::AddCursorNextMatch => "add_cursor_next_match",
         EditorAction::SkipCurrentMatch => "skip_current_match",
         EditorAction::UndoLastCursor => "undo_last_cursor",
+        EditorAction::BoxSelectExtend(Direction::Up) => "box_select_extend_up",
+        EditorAction::BoxSelectExtend(Direction::Down) => "box_select_extend_down",
+        EditorAction::BoxSelectExtend(Direction::Left) => "box_select_extend_left",
+        EditorAction::BoxSelectExtend(Direction::Right) => "box_select_extend_right",
         // File / tab management
         EditorAction::NewFile => "new_file",
         EditorAction::NewTab => "new_tab",
@@ -430,6 +451,10 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "add_cursor_next_match" => EditorAction::AddCursorNextMatch,
         "skip_current_match" => EditorAction::SkipCurrentMatch,
         "undo_last_cursor" => EditorAction::UndoLastCursor,
+        "box_select_extend_up" => EditorAction::BoxSelectExtend(Direction::Up),
+        "box_select_extend_down" => EditorAction::BoxSelectExtend(Direction::Down),
+        "box_select_extend_left" => EditorAction::BoxSelectExtend(Direction::Left),
+        "box_select_extend_right" => EditorAction::BoxSelectExtend(Direction::Right),
         // File / tab management
         "new_file" => EditorAction::NewFile,
         "new_tab" => EditorAction::NewTab,

@@ -146,6 +146,30 @@ pub fn display_col_to_byte(s: &str, target_col: usize) -> usize {
     s.len()
 }
 
+/// Convert a screen position to `(line_index, display_column_in_line)`.
+/// Mirrors `screen_pos_to_byte_offset` but returns the display-column
+/// representation, suitable for box / column selection where each line on
+/// the rectangle wants the same display column regardless of width.
+pub fn screen_pos_to_line_display_col(
+    screen_col: u16,
+    screen_row: u16,
+    editor_area_y: u16,
+    gutter_cols: u16,
+    buffer: &Buffer,
+    viewport: &Viewport,
+) -> (usize, usize) {
+    let row_in_area = (screen_row as usize).saturating_sub(editor_area_y as usize);
+    let line_idx = (viewport.scroll_row + row_in_area).min(buffer.len_lines().saturating_sub(1));
+    let col_in_area = screen_col as usize;
+    let gutter = gutter_cols as usize;
+    let display_col = if col_in_area > gutter {
+        (col_in_area - gutter) + viewport.scroll_col
+    } else {
+        0
+    };
+    (line_idx, display_col)
+}
+
 /// Convert a screen position (absolute terminal column + row) to a rope byte offset.
 ///
 /// Parameters:

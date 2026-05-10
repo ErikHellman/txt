@@ -481,6 +481,24 @@ impl KeyBindings {
         bind("ctrl+shift+g", EditorAction::OpenGitDialog);
         bind("ctrl+shift+f", EditorAction::OpenProjectSearch);
 
+        // ── Box / column selection ────────────────────────────────────
+        bind(
+            "ctrl+alt+up",
+            EditorAction::BoxSelectExtend(super::action::Direction::Up),
+        );
+        bind(
+            "ctrl+alt+down",
+            EditorAction::BoxSelectExtend(super::action::Direction::Down),
+        );
+        bind(
+            "ctrl+alt+left",
+            EditorAction::BoxSelectExtend(super::action::Direction::Left),
+        );
+        bind(
+            "ctrl+alt+right",
+            EditorAction::BoxSelectExtend(super::action::Direction::Right),
+        );
+
         KeyBindings { map, reverse }
     }
 
@@ -695,6 +713,12 @@ impl KeyBindings {
         // ── Multi-cursor: Cmd+Alt+Up/Down → ctrl+alt+up/down ───────────
         kb.rebind("spawn_cursor_up", "ctrl+alt+up");
         kb.rebind("spawn_cursor_down", "ctrl+alt+down");
+        // VS Code preset: spawn_cursor reclaims ctrl+alt+up/down, so the
+        // box-select extend keys move to ctrl+alt+shift+<arrow>.
+        kb.rebind("box_select_extend_up", "ctrl+alt+shift+up");
+        kb.rebind("box_select_extend_down", "ctrl+alt+shift+down");
+        kb.rebind("box_select_extend_left", "ctrl+alt+shift+left");
+        kb.rebind("box_select_extend_right", "ctrl+alt+shift+right");
 
         // ── Smart Select: Ctrl+Shift+Right/Left ────────────────────────
         // (ctrl+shift+left/right freed by word selection moving to alt+shift)

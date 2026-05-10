@@ -871,6 +871,108 @@ impl Buffer {
         self.cursors.pop_added_cursor();
     }
 
+    /// Replace the cursor list with a rectangular ("box") selection from
+    /// `(anchor_line, anchor_display_col)` to `(active_line, active_display_col)`.
+    ///
+    /// One cursor is placed on each line in the inclusive range. Each cursor's
+    /// selection runs between the byte offsets corresponding to the two
+    /// display columns on its own line (lines shorter than `active_display_col`
+    /// land at end-of-line). The cursor on `active_line` becomes primary.
+    pub fn set_box_cursors(
+        &mut self,
+        anchor_line: usize,
+        anchor_display_col: usize,
+        active_line: usize,
+        active_display_col: usize,
+    ) {
+        let last_line = self.rope.len_lines().saturating_sub(1);
+        let active_line = active_line.min(last_line);
+        let anchor_line = anchor_line.min(last_line);
+        let (low, high) = if anchor_line <= active_line {
+            (anchor_line, active_line)
+        } else {
+            (active_line, anchor_line)
+        };
+        let mut cursors: Vec<Cursor> = Vec::with_capacity(high - low + 1);
+        let mut primary_idx = 0usize;
+        for line in low..=high {
+            let line_start = self.line_start_byte(line);
+            let anchor_byte = line_start
+                + crate::buffer::cursor::byte_col_at_display_col(
+                    &self.rope,
+                    line,
+                    anchor_display_col,
+                );
+            let active_byte = line_start
+                + crate::buffer::cursor::byte_col_at_display_col(
+                    &self.rope,
+                    line,
+                    active_display_col,
+                );
+            let mut cursor = Cursor::from_byte_offset(&self.rope, active_byte);
+            if anchor_byte != active_byte {
+                cursor.selection = Some(crate::buffer::cursor::Selection::new(
+                    anchor_byte,
+                    active_byte,
+                ));
+            }
+            cursor.preferred_col = active_display_col;
+            if line == active_line {
+                primary_idx = cursors.len();
+            }
+            cursors.push(cursor);
+        }
+        if cursors.is_empty() {
+            return;
+        }
+        self.cursors = MultiCursor::from_cursors_with_primary(cursors, primary_idx);
+    }
+
+    /// Extend a rectangular selection by one display cell in `dir`.
+    ///
+    /// The "anchor" of the box is inferred from the existing cursor set: it is
+    /// the line/column of the corner opposite to the primary cursor. When only
+    /// one cursor is active, the anchor matches the cursor itself, so the
+    /// first call seeds the box.
+    pub fn extend_box_selection(&mut self, dir: crate::input::action::Direction) {
+        let primary = *self.cursors.primary();
+        let active_line = primary.line;
+        let active_col = primary.preferred_col;
+
+        let cursor_lines: Vec<usize> = self.cursors.cursors().iter().map(|c| c.line).collect();
+        let min_line = *cursor_lines.iter().min().unwrap_or(&active_line);
+        let max_line = *cursor_lines.iter().max().unwrap_or(&active_line);
+        let anchor_line = if !self.cursors.is_multi() {
+            active_line
+        } else if active_line == min_line {
+            max_line
+        } else {
+            min_line
+        };
+
+        // Anchor display col: from primary's selection anchor (if any), else
+        // the primary's current display col.
+        let anchor_col = match primary.selection {
+            Some(sel) => {
+                let anchor_byte = sel.anchor;
+                let anchor_line_idx = self.rope.char_to_line(self.rope.byte_to_char(anchor_byte));
+                let line_start = self.line_start_byte(anchor_line_idx);
+                let byte_col = anchor_byte - line_start;
+                crate::buffer::cursor::display_col_at(&self.rope, anchor_line_idx, byte_col)
+            }
+            None => active_col,
+        };
+
+        let last_line = self.rope.len_lines().saturating_sub(1);
+        let (new_line, new_col) = match dir {
+            crate::input::action::Direction::Up => (active_line.saturating_sub(1), active_col),
+            crate::input::action::Direction::Down => ((active_line + 1).min(last_line), active_col),
+            crate::input::action::Direction::Left => (active_line, active_col.saturating_sub(1)),
+            crate::input::action::Direction::Right => (active_line, active_col + 1),
+        };
+        self.set_box_cursors(anchor_line, anchor_col, new_line, new_col);
+    }
+
     /// Slice text in `[start, end)` as a `String`.
     fn text_in_range(&self, start: usize, end: usize) -> String {
         let cs = self.rope.byte_to_char(start);
@@ -1839,5 +1941,56 @@ mod tests {
             .collect();
         assert!(offsets.contains(&7));
         assert!(offsets.contains(&11));
+    }
+
+    // ── Box / column selection ──────────────────────────────────────────
+
+    #[test]
+    fn set_box_cursors_one_per_line() {
+        // 3 lines, all length >= active_col (3). Box from col 1 to col 3 across
+        // lines 0..=2 should give 3 cursors with selections of length 2.
+        let mut buf = Buffer::from_str("abcdef\n123456\nfoobar");
+        buf.set_box_cursors(0, 1, 2, 3);
+        assert_eq!(buf.cursors.len(), 3);
+        for c in buf.cursors.cursors() {
+            assert!(c.has_selection());
+            let r = c.selection_bytes();
+            assert_eq!(r.end - r.start, 2);
+        }
+    }
+
+    #[test]
+    fn set_box_cursors_clamps_short_lines() {
+        // Line 1 ("hi") shorter than active_col (5).
+        let mut buf = Buffer::from_str("hello\nhi\nworld");
+        buf.set_box_cursors(0, 0, 2, 5);
+        assert_eq!(buf.cursors.len(), 3);
+        // Cursor on line 1 should land at end of "hi".
+        let line1_cursor = buf
+            .cursors
+            .cursors()
+            .iter()
+            .find(|c| c.line == 1)
+            .expect("must have line-1 cursor");
+        assert_eq!(line1_cursor.col, 2);
+    }
+
+    #[test]
+    fn extend_box_selection_grows_down() {
+        let mut buf = Buffer::from_str("abc\ndef\nghi");
+        // Start with a single cursor at line 0, col 1.
+        buf.move_cursor_to(1, false);
+        buf.extend_box_selection(crate::input::action::Direction::Down);
+        // Should now have 2 cursors (line 0 + line 1) at col 1, no selection.
+        assert_eq!(buf.cursors.len(), 2);
+    }
+
+    #[test]
+    fn extend_box_selection_grows_right_creates_selection() {
+        let mut buf = Buffer::from_str("abc\ndef");
+        buf.move_cursor_to(0, false);
+        buf.extend_box_selection(crate::input::action::Direction::Right);
+        assert_eq!(buf.cursors.len(), 1);
+        assert!(buf.cursors.primary().has_selection());
     }
 }
