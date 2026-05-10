@@ -58,16 +58,32 @@ const TEMPLATE: &[HelpEntry] = &[
         desc: "Line start / end",
     },
     HelpEntry::Binding {
+        actions: &["extend_selection_home", "extend_selection_end"],
+        desc: "Extend to line start / end",
+    },
+    HelpEntry::Binding {
         actions: &["move_cursor_file_start", "move_cursor_file_end"],
         desc: "File start / end",
+    },
+    HelpEntry::Binding {
+        actions: &["extend_selection_file_start", "extend_selection_file_end"],
+        desc: "Extend to file start / end",
     },
     HelpEntry::Binding {
         actions: &["move_cursor_page_up", "move_cursor_page_down"],
         desc: "Page up / down",
     },
     HelpEntry::Binding {
+        actions: &["extend_selection_page_up", "extend_selection_page_down"],
+        desc: "Extend page up / down",
+    },
+    HelpEntry::Binding {
         actions: &["go_to_matching_bracket"],
         desc: "Jump to matching bracket",
+    },
+    HelpEntry::Binding {
+        actions: &["scroll_up", "scroll_down"],
+        desc: "Scroll without moving cursor",
     },
     HelpEntry::Binding {
         actions: &["scroll_cursor_center"],
@@ -195,6 +211,10 @@ const TEMPLATE: &[HelpEntry] = &[
         key: "Ctrl+1..9",
         desc: "Go to tab N",
     },
+    HelpEntry::Binding {
+        actions: &["close_tab"],
+        desc: "Close tab",
+    },
     // ── Panels & Pickers ─────────────────────────────────────────────
     HelpEntry::Section("Panels & Pickers"),
     HelpEntry::Binding {
@@ -242,6 +262,10 @@ const TEMPLATE: &[HelpEntry] = &[
     HelpEntry::Binding {
         actions: &["search_toggle_case_sensitive"],
         desc: "Toggle case-sensitive",
+    },
+    HelpEntry::Binding {
+        actions: &["close_search"],
+        desc: "Close find / replace bar",
     },
     // ── LSP ──────────────────────────────────────────────────────────
     HelpEntry::Section("LSP (when active)"),
