@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.1
+
+- Fix Ctrl+1..9 tab shortcuts on AZERTY keyboards — the v0.4.0 fix matched a key event the terminal never sends; this version maps the actual top-row glyphs (`& é " ' ( - è _ ç`) to tabs 1..9
+- Surface six existing shortcuts in the F1 help overlay that were already bound but undocumented: Shift+Home/End and Ctrl+Shift+Home/End and Shift+PageUp/PageDown (extend selection), Ctrl+Up/Down (scroll viewport), Ctrl+F4 (close tab), and Esc (close search)
+
 ## v0.4.0
 
 - Add a git operations dialog (Ctrl+Shift+G) for staging, committing, pushing, and pulling without leaving the editor
