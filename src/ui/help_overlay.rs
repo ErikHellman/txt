@@ -252,6 +252,10 @@ const TEMPLATE: &[HelpEntry] = &[
         desc: "Find & Replace",
     },
     HelpEntry::Binding {
+        actions: &["open_project_search"],
+        desc: "Project search & replace",
+    },
+    HelpEntry::Binding {
         actions: &["search_next", "search_prev"],
         desc: "Next / Prev match",
     },

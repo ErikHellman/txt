@@ -9,6 +9,7 @@ pub mod hover_popup;
 pub mod lsp_approval;
 pub mod lsp_picker;
 pub mod overlay_chrome;
+pub mod project_search;
 pub mod references_list;
 pub mod search_bar;
 pub mod settings_overlay;
@@ -244,6 +245,11 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
     // ── Command palette overlay ───────────────────────────────────────────────
     if let Some(palette) = &state.command_palette {
         command_palette::render(palette, &theme, area, buf);
+    }
+
+    // ── Project search overlay ────────────────────────────────────────────────
+    if let Some(ps) = &state.project_search {
+        project_search::render(ps, &theme, area, buf);
     }
 
     // ── Welcome overlay (first launch) ───────────────────────────────────────

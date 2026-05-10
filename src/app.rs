@@ -20,7 +20,7 @@ use crate::{
         action::{Direction, EditorAction, ScrollDir},
         keybinding::KeyBindings,
     },
-    search::SearchState,
+    search::{SearchState, project::ProjectSearchResults},
     ui,
     ui::command_palette::CommandPaletteState,
     ui::editor_view::gutter_width,
@@ -191,6 +191,54 @@ impl FuzzyPickerState {
         if !self.filtered.is_empty() && self.selected < self.filtered.len() - 1 {
             self.selected += 1;
         }
+    }
+}
+
+// ── Project search overlay state ───────────────────────────────────────────
+
+/// State for the project-wide search-and-replace overlay (Ctrl+Shift+F).
+pub struct ProjectSearchState {
+    pub query: String,
+    pub replace_text: String,
+    pub is_regex: bool,
+    pub case_sensitive: bool,
+    pub show_replace: bool,
+    pub focus_replace: bool,
+    pub results: ProjectSearchResults,
+    /// Index into `results.matches` for the highlighted row.
+    pub selected: usize,
+}
+
+impl ProjectSearchState {
+    pub fn new() -> Self {
+        Self {
+            query: String::new(),
+            replace_text: String::new(),
+            is_regex: false,
+            case_sensitive: false,
+            show_replace: false,
+            focus_replace: false,
+            results: ProjectSearchResults::default(),
+            selected: 0,
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        if !self.results.matches.is_empty() && self.selected + 1 < self.results.matches.len() {
+            self.selected += 1;
+        }
+    }
+}
+
+impl Default for ProjectSearchState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -735,6 +783,7 @@ pub struct AppState {
     saved_sidebar: Option<SidebarState>,
     pub sidebar_clipboard: Option<SidebarClipboard>,
     pub search_state: Option<SearchState>,
+    pub project_search: Option<ProjectSearchState>,
     pub command_palette: Option<CommandPaletteState>,
     pub show_help: bool,
     pub help_scroll: usize,
@@ -848,6 +897,7 @@ impl AppState {
             saved_sidebar: None,
             sidebar_clipboard: None,
             search_state: None,
+            project_search: None,
             command_palette: None,
             show_help: false,
             help_scroll: 0,
@@ -981,6 +1031,11 @@ impl AppState {
 
         // Sidebar focus — intercept navigation when sidebar has focus
         if self.sidebar_focused && self.handle_sidebar_input(&action) {
+            return;
+        }
+
+        // Project search overlay — captured input
+        if self.project_search.is_some() && self.handle_project_search(action.clone()) {
             return;
         }
 
@@ -1668,6 +1723,9 @@ impl AppState {
             EditorAction::SearchReplaceAll => self.replace_all(),
             EditorAction::SearchToggleRegex | EditorAction::SearchToggleCaseSensitive => {}
             EditorAction::SelectAllOccurrences => self.select_all_occurrences(),
+            EditorAction::OpenProjectSearch => {
+                self.project_search = Some(ProjectSearchState::new());
+            }
 
             // ── App lifecycle ─────────────────────────────────────────
             EditorAction::Quit => {
@@ -1914,6 +1972,219 @@ impl AppState {
             }
             _ => {}
         }
+    }
+
+    // ── Project search overlay input handling ────────────────────────────────
+
+    /// Handle keyboard input while the project-search overlay is active.
+    /// Returns `true` when the action was consumed (do not fall through to the
+    /// editor). Global actions like Quit/ToggleHelp fall through.
+    fn handle_project_search(&mut self, action: EditorAction) -> bool {
+        match action {
+            EditorAction::InsertChar(c) => {
+                if let Some(ps) = &mut self.project_search {
+                    if ps.focus_replace {
+                        ps.replace_text.push(c);
+                    } else {
+                        ps.query.push(c);
+                    }
+                }
+                if !self
+                    .project_search
+                    .as_ref()
+                    .map(|s| s.focus_replace)
+                    .unwrap_or(false)
+                {
+                    self.recompute_project_search();
+                }
+                true
+            }
+            EditorAction::DeleteBackward => {
+                if let Some(ps) = &mut self.project_search {
+                    if ps.focus_replace {
+                        ps.replace_text.pop();
+                    } else {
+                        ps.query.pop();
+                    }
+                }
+                if !self
+                    .project_search
+                    .as_ref()
+                    .map(|s| s.focus_replace)
+                    .unwrap_or(false)
+                {
+                    self.recompute_project_search();
+                }
+                true
+            }
+            EditorAction::MoveCursor(Direction::Up) => {
+                if let Some(ps) = &mut self.project_search {
+                    ps.move_up();
+                }
+                true
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                if let Some(ps) = &mut self.project_search {
+                    ps.move_down();
+                }
+                true
+            }
+            EditorAction::InsertTab => {
+                // Tab toggles focus and reveals the replace input.
+                if let Some(ps) = &mut self.project_search {
+                    ps.show_replace = true;
+                    ps.focus_replace = !ps.focus_replace;
+                }
+                true
+            }
+            EditorAction::SearchToggleRegex => {
+                if let Some(ps) = &mut self.project_search {
+                    ps.is_regex = !ps.is_regex;
+                }
+                self.recompute_project_search();
+                true
+            }
+            EditorAction::SearchToggleCaseSensitive => {
+                if let Some(ps) = &mut self.project_search {
+                    ps.case_sensitive = !ps.case_sensitive;
+                }
+                self.recompute_project_search();
+                true
+            }
+            EditorAction::InsertNewline => {
+                let target = self
+                    .project_search
+                    .as_ref()
+                    .and_then(|ps| ps.results.matches.get(ps.selected).cloned());
+                if let Some(m) = target {
+                    let abs = self.workspace.join(&m.path);
+                    self.project_search = None;
+                    let _ = self.editor.open_tab(abs);
+                    self.after_file_open_or_save();
+                    // Move cursor to the start of the match line. Computing the
+                    // exact column requires the file's full byte→line table,
+                    // which we don't cache; landing on the line is the
+                    // standard "go to result" behaviour.
+                    let buf = &mut self.editor.active_mut().buffer;
+                    let rope = buf.rope();
+                    let line_idx = m.line.min(rope.len_lines().saturating_sub(1));
+                    let line_start_char = rope.line_to_char(line_idx);
+                    let target_byte = rope.char_to_byte(line_start_char);
+                    buf.move_cursor_to(target_byte, false);
+                }
+                true
+            }
+            EditorAction::SearchReplaceAll => {
+                self.project_replace_all();
+                true
+            }
+            EditorAction::CloseSearch | EditorAction::Quit | EditorAction::Unhandled => {
+                self.project_search = None;
+                true
+            }
+            // Global actions that should still work while the overlay is open
+            // (toggle help, scroll cursor, etc.).
+            EditorAction::ToggleHelp => false,
+            _ => true,
+        }
+    }
+
+    fn recompute_project_search(&mut self) {
+        let (query, is_regex, case_sensitive) = match &self.project_search {
+            Some(ps) => (ps.query.clone(), ps.is_regex, ps.case_sensitive),
+            None => return,
+        };
+        let results =
+            crate::search::project::run(&self.workspace, &query, is_regex, case_sensitive);
+        if let Some(ps) = &mut self.project_search {
+            ps.results = results;
+            ps.selected = 0;
+        }
+    }
+
+    fn project_replace_all(&mut self) {
+        let (query, replacement, is_regex, case_sensitive) = match &self.project_search {
+            Some(ps) if !ps.query.is_empty() && ps.show_replace => (
+                ps.query.clone(),
+                ps.replace_text.clone(),
+                ps.is_regex,
+                ps.case_sensitive,
+            ),
+            _ => return,
+        };
+
+        // Collect distinct file paths from results.
+        let paths: Vec<PathBuf> = {
+            let ps = match &self.project_search {
+                Some(p) => p,
+                None => return,
+            };
+            let mut seen = std::collections::HashSet::new();
+            ps.results
+                .matches
+                .iter()
+                .filter_map(|m| {
+                    let abs = self.workspace.join(&m.path);
+                    if seen.insert(abs.clone()) {
+                        Some(abs)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+
+        let mut total_replaced = 0usize;
+        for path in &paths {
+            // If the file is currently open in a tab, edit it through the
+            // buffer so undo history is preserved.
+            let open_idx = self
+                .editor
+                .tabs
+                .iter()
+                .position(|t| t.path.as_deref() == Some(path.as_path()));
+            if let Some(idx) = open_idx {
+                let prev_active = self.editor.active_idx;
+                self.editor.go_to_tab(idx);
+                let buf = &mut self.editor.active_mut().buffer;
+                let text = buf.to_string();
+                let pattern = crate::search::build_pattern(&query, is_regex, case_sensitive);
+                let re = match regex::Regex::new(&pattern) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                let ranges: Vec<(usize, usize)> =
+                    re.find_iter(&text).map(|m| (m.start(), m.end())).collect();
+                if ranges.is_empty() {
+                    self.editor.go_to_tab(prev_active);
+                    continue;
+                }
+                buf.begin_batch();
+                for (start, end) in ranges.iter().rev() {
+                    buf.move_cursor_to(*start, false);
+                    buf.move_cursor_to(*end, true);
+                    buf.insert_str(&replacement);
+                }
+                buf.commit_batch();
+                total_replaced += ranges.len();
+                self.editor.go_to_tab(prev_active);
+            } else {
+                // Edit on disk.
+                if let Ok(n) = crate::search::project::replace_all_in_file(
+                    path,
+                    &query,
+                    is_regex,
+                    case_sensitive,
+                    &replacement,
+                ) {
+                    total_replaced += n;
+                }
+            }
+        }
+
+        // Refresh result list and surface a status message.
+        self.recompute_project_search();
+        self.status_error = Some(format!("Replaced {total_replaced} occurrence(s)"));
     }
 
     // ── Search input handling ────────────────────────────────────────────────

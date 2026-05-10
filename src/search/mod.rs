@@ -1,3 +1,5 @@
+pub mod project;
+
 use regex::Regex;
 
 use crate::buffer::cursor::ByteRange;
@@ -120,7 +122,7 @@ impl SearchState {
 }
 
 /// Build a `regex` pattern string from the user's query and search flags.
-fn build_pattern(query: &str, is_regex: bool, case_sensitive: bool) -> String {
+pub(crate) fn build_pattern(query: &str, is_regex: bool, case_sensitive: bool) -> String {
     let base = if is_regex {
         query.to_string()
     } else {

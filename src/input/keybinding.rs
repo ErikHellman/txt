@@ -474,6 +474,7 @@ impl KeyBindings {
         bind("f5", EditorAction::SidebarRefresh);
         bind("ctrl+shift+i", EditorAction::FormatBuffer);
         bind("ctrl+shift+g", EditorAction::OpenGitDialog);
+        bind("ctrl+shift+f", EditorAction::OpenProjectSearch);
 
         KeyBindings { map, reverse }
     }

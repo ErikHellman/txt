@@ -126,6 +126,8 @@ pub enum EditorAction {
     SearchToggleCaseSensitive,
     /// Select all occurrences of the current selection or search query (Ctrl+Shift+L).
     SelectAllOccurrences,
+    /// Open the project-wide search/replace overlay (Ctrl+Shift+F).
+    OpenProjectSearch,
 
     // ── File / tab management ─────────────────────────────────────────
     /// Create a new empty buffer in a new tab.
@@ -298,6 +300,7 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::SearchToggleRegex => "search_toggle_regex",
         EditorAction::SearchToggleCaseSensitive => "search_toggle_case_sensitive",
         EditorAction::SelectAllOccurrences => "select_all_occurrences",
+        EditorAction::OpenProjectSearch => "open_project_search",
         // File / tab management
         EditorAction::NewFile => "new_file",
         EditorAction::NewTab => "new_tab",
@@ -412,6 +415,7 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "search_toggle_regex" => EditorAction::SearchToggleRegex,
         "search_toggle_case_sensitive" => EditorAction::SearchToggleCaseSensitive,
         "select_all_occurrences" => EditorAction::SelectAllOccurrences,
+        "open_project_search" => EditorAction::OpenProjectSearch,
         // File / tab management
         "new_file" => EditorAction::NewFile,
         "new_tab" => EditorAction::NewTab,

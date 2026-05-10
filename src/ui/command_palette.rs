@@ -92,6 +92,11 @@ pub static COMMANDS: &[CommandEntry] = &[
         action: || EditorAction::OpenReplace,
     },
     CommandEntry {
+        name: "Search in Files…",
+        key_hint: "Ctrl+Shift+F",
+        action: || EditorAction::OpenProjectSearch,
+    },
+    CommandEntry {
         name: "Select All",
         key_hint: "Ctrl+A",
         action: || EditorAction::SelectAll,
