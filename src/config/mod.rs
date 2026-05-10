@@ -85,6 +85,11 @@ pub struct Config {
     /// `crate::formatting::FormattingConfig` for the schema.
     #[serde(default)]
     pub formatting: FormattingConfig,
+    /// Disable the "filter selection through shell command" action. Set to
+    /// `true` in restricted environments where running arbitrary shells is
+    /// undesirable; default `false`.
+    #[serde(default)]
+    pub disable_shell_filter: bool,
 }
 
 fn default_tab_size() -> usize {
@@ -103,6 +108,7 @@ impl Default for Config {
             keymap_preset: KeymapPreset::Default,
             last_seen_version: None,
             formatting: FormattingConfig::default(),
+            disable_shell_filter: false,
         }
     }
 }
@@ -280,10 +286,24 @@ mod tests {
             keymap_preset: KeymapPreset::IntellijIdea,
             last_seen_version: Some("0.3.0".to_string()),
             formatting: FormattingConfig::default(),
+            disable_shell_filter: false,
         };
         let serialized = toml::to_string(&original).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();
         assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn disable_shell_filter_default_false() {
+        let cfg = Config::default();
+        assert!(!cfg.disable_shell_filter);
+    }
+
+    #[test]
+    fn disable_shell_filter_round_trips() {
+        let toml_text = "disable_shell_filter = true\n";
+        let cfg: Config = toml::from_str(toml_text).unwrap();
+        assert!(cfg.disable_shell_filter);
     }
 
     #[test]

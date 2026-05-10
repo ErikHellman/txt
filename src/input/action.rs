@@ -102,6 +102,46 @@ pub enum EditorAction {
         col: u16,
         row: u16,
     },
+    /// Alt+left-click: start a box / column selection at the click position.
+    BoxDragStart {
+        col: u16,
+        row: u16,
+    },
+    /// Alt+left-drag: extend the box selection to the new position.
+    BoxDragUpdate {
+        col: u16,
+        row: u16,
+    },
+    /// Alt+left-release: finish a box-select drag.
+    BoxDragEnd {
+        col: u16,
+        row: u16,
+    },
+    /// Ctrl+Alt+arrow: extend the rectangular selection by one cell in `dir`.
+    BoxSelectExtend(Direction),
+    /// Ctrl+Alt+\: open a status-bar prompt; on Enter, run the command via
+    /// `sh -c` with the current selection on stdin and replace the selection
+    /// with the captured stdout.
+    FilterSelection,
+
+    // ── Line transforms (1.5) ─────────────────────────────────────────
+    SortLinesAsc,
+    SortLinesDesc,
+    DedupeLines,
+    ReverseLines,
+    ToUpper,
+    ToLower,
+    ToTitle,
+    TrimTrailingWhitespace,
+    JoinLines,
+    IncrementNumber,
+    DecrementNumber,
+    ConvertIndentToSpaces,
+    ConvertIndentToTabs,
+    ConvertEolLf,
+    ConvertEolCrlf,
+    /// Open a status-bar prompt asking for an alignment character.
+    AlignSelection,
 
     // ── Search / replace ─────────────────────────────────────────────
     /// Open the find bar (Ctrl+F).
@@ -126,6 +166,16 @@ pub enum EditorAction {
     SearchToggleCaseSensitive,
     /// Select all occurrences of the current selection or search query (Ctrl+Shift+L).
     SelectAllOccurrences,
+    /// Open the project-wide search/replace overlay (Ctrl+Shift+F).
+    OpenProjectSearch,
+    /// Sublime/VS Code "Ctrl+D": expand to surrounding word, or add a cursor
+    /// at the next occurrence of the current selection.
+    AddCursorNextMatch,
+    /// Like `AddCursorNextMatch` but skip the current match instead of
+    /// adding to it.
+    SkipCurrentMatch,
+    /// Undo the most recent `AddCursorNextMatch` (Ctrl+U).
+    UndoLastCursor,
 
     // ── File / tab management ─────────────────────────────────────────
     /// Create a new empty buffer in a new tab.
@@ -298,6 +348,31 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::SearchToggleRegex => "search_toggle_regex",
         EditorAction::SearchToggleCaseSensitive => "search_toggle_case_sensitive",
         EditorAction::SelectAllOccurrences => "select_all_occurrences",
+        EditorAction::OpenProjectSearch => "open_project_search",
+        EditorAction::AddCursorNextMatch => "add_cursor_next_match",
+        EditorAction::SkipCurrentMatch => "skip_current_match",
+        EditorAction::UndoLastCursor => "undo_last_cursor",
+        EditorAction::BoxSelectExtend(Direction::Up) => "box_select_extend_up",
+        EditorAction::BoxSelectExtend(Direction::Down) => "box_select_extend_down",
+        EditorAction::BoxSelectExtend(Direction::Left) => "box_select_extend_left",
+        EditorAction::BoxSelectExtend(Direction::Right) => "box_select_extend_right",
+        EditorAction::FilterSelection => "filter_selection",
+        EditorAction::SortLinesAsc => "sort_lines_asc",
+        EditorAction::SortLinesDesc => "sort_lines_desc",
+        EditorAction::DedupeLines => "dedupe_lines",
+        EditorAction::ReverseLines => "reverse_lines",
+        EditorAction::ToUpper => "to_upper",
+        EditorAction::ToLower => "to_lower",
+        EditorAction::ToTitle => "to_title",
+        EditorAction::TrimTrailingWhitespace => "trim_trailing_whitespace",
+        EditorAction::JoinLines => "join_lines",
+        EditorAction::IncrementNumber => "increment_number",
+        EditorAction::DecrementNumber => "decrement_number",
+        EditorAction::ConvertIndentToSpaces => "convert_indent_to_spaces",
+        EditorAction::ConvertIndentToTabs => "convert_indent_to_tabs",
+        EditorAction::ConvertEolLf => "convert_eol_lf",
+        EditorAction::ConvertEolCrlf => "convert_eol_crlf",
+        EditorAction::AlignSelection => "align_selection",
         // File / tab management
         EditorAction::NewFile => "new_file",
         EditorAction::NewTab => "new_tab",
@@ -412,6 +487,31 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "search_toggle_regex" => EditorAction::SearchToggleRegex,
         "search_toggle_case_sensitive" => EditorAction::SearchToggleCaseSensitive,
         "select_all_occurrences" => EditorAction::SelectAllOccurrences,
+        "open_project_search" => EditorAction::OpenProjectSearch,
+        "add_cursor_next_match" => EditorAction::AddCursorNextMatch,
+        "skip_current_match" => EditorAction::SkipCurrentMatch,
+        "undo_last_cursor" => EditorAction::UndoLastCursor,
+        "box_select_extend_up" => EditorAction::BoxSelectExtend(Direction::Up),
+        "box_select_extend_down" => EditorAction::BoxSelectExtend(Direction::Down),
+        "box_select_extend_left" => EditorAction::BoxSelectExtend(Direction::Left),
+        "box_select_extend_right" => EditorAction::BoxSelectExtend(Direction::Right),
+        "filter_selection" => EditorAction::FilterSelection,
+        "sort_lines_asc" => EditorAction::SortLinesAsc,
+        "sort_lines_desc" => EditorAction::SortLinesDesc,
+        "dedupe_lines" => EditorAction::DedupeLines,
+        "reverse_lines" => EditorAction::ReverseLines,
+        "to_upper" => EditorAction::ToUpper,
+        "to_lower" => EditorAction::ToLower,
+        "to_title" => EditorAction::ToTitle,
+        "trim_trailing_whitespace" => EditorAction::TrimTrailingWhitespace,
+        "join_lines" => EditorAction::JoinLines,
+        "increment_number" => EditorAction::IncrementNumber,
+        "decrement_number" => EditorAction::DecrementNumber,
+        "convert_indent_to_spaces" => EditorAction::ConvertIndentToSpaces,
+        "convert_indent_to_tabs" => EditorAction::ConvertIndentToTabs,
+        "convert_eol_lf" => EditorAction::ConvertEolLf,
+        "convert_eol_crlf" => EditorAction::ConvertEolCrlf,
+        "align_selection" => EditorAction::AlignSelection,
         // File / tab management
         "new_file" => EditorAction::NewFile,
         "new_tab" => EditorAction::NewTab,

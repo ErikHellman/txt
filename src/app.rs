@@ -13,14 +13,14 @@ use crate::{
     clipboard::ClipboardManager,
     config::{Config, KeymapPreset, Theme, add_to_recent_files, load_recent_files},
     editor::Editor,
-    editor::viewport::screen_pos_to_byte_offset,
+    editor::viewport::{screen_pos_to_byte_offset, screen_pos_to_line_display_col},
     git::GitGutter,
     input::{
         InputHandler,
         action::{Direction, EditorAction, ScrollDir},
         keybinding::KeyBindings,
     },
-    search::SearchState,
+    search::{SearchState, project::ProjectSearchResults},
     ui,
     ui::command_palette::CommandPaletteState,
     ui::editor_view::gutter_width,
@@ -66,6 +66,14 @@ pub enum InputMode {
     GitNewBranch(String),
     /// Git dialog → "Stash message: {input}" (optional). On submit, runs `git stash push`.
     GitStashMessage(String),
+    /// Ctrl+Alt+\ → "Shell filter (selection): {cmd}". On Enter, runs the
+    /// command via `sh -c` with the selection on stdin and replaces the
+    /// selection with the captured stdout.
+    ShellFilter(String),
+    /// "Align on character: " — `apply_align_on` is invoked with the first
+    /// non-empty character submitted (Enter takes the first char, or aborts
+    /// if empty).
+    AlignChar(String),
 }
 
 impl InputMode {
@@ -191,6 +199,54 @@ impl FuzzyPickerState {
         if !self.filtered.is_empty() && self.selected < self.filtered.len() - 1 {
             self.selected += 1;
         }
+    }
+}
+
+// ── Project search overlay state ───────────────────────────────────────────
+
+/// State for the project-wide search-and-replace overlay (Ctrl+Shift+F).
+pub struct ProjectSearchState {
+    pub query: String,
+    pub replace_text: String,
+    pub is_regex: bool,
+    pub case_sensitive: bool,
+    pub show_replace: bool,
+    pub focus_replace: bool,
+    pub results: ProjectSearchResults,
+    /// Index into `results.matches` for the highlighted row.
+    pub selected: usize,
+}
+
+impl ProjectSearchState {
+    pub fn new() -> Self {
+        Self {
+            query: String::new(),
+            replace_text: String::new(),
+            is_regex: false,
+            case_sensitive: false,
+            show_replace: false,
+            focus_replace: false,
+            results: ProjectSearchResults::default(),
+            selected: 0,
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        if !self.results.matches.is_empty() && self.selected + 1 < self.results.matches.len() {
+            self.selected += 1;
+        }
+    }
+}
+
+impl Default for ProjectSearchState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -732,9 +788,13 @@ pub struct AppState {
     pub sidebar_area: Option<Rect>,
     /// Active separator-drag, if any.
     pub sidebar_drag: Option<SidebarDrag>,
+    /// Active Alt+drag box-select anchor, in (line, display_col).
+    /// Set on `BoxDragStart`, used by `BoxDragUpdate`, cleared on `BoxDragEnd`.
+    pub box_drag_anchor: Option<(usize, usize)>,
     saved_sidebar: Option<SidebarState>,
     pub sidebar_clipboard: Option<SidebarClipboard>,
     pub search_state: Option<SearchState>,
+    pub project_search: Option<ProjectSearchState>,
     pub command_palette: Option<CommandPaletteState>,
     pub show_help: bool,
     pub help_scroll: usize,
@@ -845,9 +905,11 @@ impl AppState {
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
             sidebar_area: None,
             sidebar_drag: None,
+            box_drag_anchor: None,
             saved_sidebar: None,
             sidebar_clipboard: None,
             search_state: None,
+            project_search: None,
             command_palette: None,
             show_help: false,
             help_scroll: 0,
@@ -981,6 +1043,11 @@ impl AppState {
 
         // Sidebar focus — intercept navigation when sidebar has focus
         if self.sidebar_focused && self.handle_sidebar_input(&action) {
+            return;
+        }
+
+        // Project search overlay — captured input
+        if self.project_search.is_some() && self.handle_project_search(action.clone()) {
             return;
         }
 
@@ -1395,6 +1462,106 @@ impl AppState {
                 // End any in-progress separator drag. No editor action required.
                 self.sidebar_drag = None;
             }
+            EditorAction::BoxDragStart { col, row } => {
+                if let Some((line, dcol)) = self.screen_to_line_col(col, row) {
+                    self.box_drag_anchor = Some((line, dcol));
+                    // Collapse any existing multi-cursor; start a new box.
+                    self.editor.active_mut().buffer.collapse_cursors();
+                    self.editor
+                        .active_mut()
+                        .buffer
+                        .set_box_cursors(line, dcol, line, dcol);
+                }
+            }
+            EditorAction::BoxDragUpdate { col, row } => {
+                if let (Some((al, ac)), Some((cl, cc))) =
+                    (self.box_drag_anchor, self.screen_to_line_col(col, row))
+                {
+                    self.editor
+                        .active_mut()
+                        .buffer
+                        .set_box_cursors(al, ac, cl, cc);
+                }
+            }
+            EditorAction::BoxDragEnd { .. } => {
+                self.box_drag_anchor = None;
+            }
+            EditorAction::BoxSelectExtend(dir) => {
+                self.editor.active_mut().buffer.extend_box_selection(dir);
+            }
+            EditorAction::FilterSelection => {
+                if self.config.disable_shell_filter {
+                    self.status_error = Some("Shell filter disabled by config".to_string());
+                } else if self.selected_text().is_some() {
+                    self.input_mode = InputMode::ShellFilter(String::new());
+                } else {
+                    self.status_error = Some("Filter requires a non-empty selection".to_string());
+                }
+            }
+
+            // ── Line transforms ───────────────────────────────────────
+            EditorAction::SortLinesAsc => {
+                self.editor.active_mut().buffer.sort_lines(false);
+            }
+            EditorAction::SortLinesDesc => {
+                self.editor.active_mut().buffer.sort_lines(true);
+            }
+            EditorAction::DedupeLines => {
+                self.editor.active_mut().buffer.dedupe_lines();
+            }
+            EditorAction::ReverseLines => {
+                self.editor.active_mut().buffer.reverse_lines();
+            }
+            EditorAction::ToUpper => {
+                self.editor.active_mut().buffer.uppercase_selection();
+            }
+            EditorAction::ToLower => {
+                self.editor.active_mut().buffer.lowercase_selection();
+            }
+            EditorAction::ToTitle => {
+                self.editor.active_mut().buffer.titlecase_selection();
+            }
+            EditorAction::TrimTrailingWhitespace => {
+                self.editor.active_mut().buffer.trim_trailing_whitespace();
+            }
+            EditorAction::JoinLines => {
+                self.editor.active_mut().buffer.join_lines();
+            }
+            EditorAction::IncrementNumber => {
+                self.editor.active_mut().buffer.increment_number(1);
+            }
+            EditorAction::DecrementNumber => {
+                self.editor.active_mut().buffer.increment_number(-1);
+            }
+            EditorAction::ConvertIndentToSpaces => {
+                let width = self.config.tab_size.max(1);
+                self.editor
+                    .active_mut()
+                    .buffer
+                    .convert_indent_to_spaces(width);
+            }
+            EditorAction::ConvertIndentToTabs => {
+                let width = self.config.tab_size.max(1);
+                self.editor
+                    .active_mut()
+                    .buffer
+                    .convert_indent_to_tabs(width);
+            }
+            EditorAction::ConvertEolLf => {
+                self.editor
+                    .active_mut()
+                    .buffer
+                    .convert_eol(crate::buffer::EolStyle::Lf);
+            }
+            EditorAction::ConvertEolCrlf => {
+                self.editor
+                    .active_mut()
+                    .buffer
+                    .convert_eol(crate::buffer::EolStyle::Crlf);
+            }
+            EditorAction::AlignSelection => {
+                self.input_mode = InputMode::AlignChar(String::new());
+            }
             EditorAction::MouseScroll { dir, col, row } => {
                 if self.point_in_sidebar(col, row) {
                     let h = self.sidebar_area.map(|r| r.height as usize).unwrap_or(0);
@@ -1668,6 +1835,18 @@ impl AppState {
             EditorAction::SearchReplaceAll => self.replace_all(),
             EditorAction::SearchToggleRegex | EditorAction::SearchToggleCaseSensitive => {}
             EditorAction::SelectAllOccurrences => self.select_all_occurrences(),
+            EditorAction::OpenProjectSearch => {
+                self.project_search = Some(ProjectSearchState::new());
+            }
+            EditorAction::AddCursorNextMatch => {
+                self.editor.active_mut().buffer.add_cursor_at_next_match();
+            }
+            EditorAction::SkipCurrentMatch => {
+                self.editor.active_mut().buffer.skip_current_match_to_next();
+            }
+            EditorAction::UndoLastCursor => {
+                self.editor.active_mut().buffer.pop_last_cursor();
+            }
 
             // ── App lifecycle ─────────────────────────────────────────
             EditorAction::Quit => {
@@ -1718,6 +1897,79 @@ impl AppState {
         }
     }
 
+    /// Run `command` (via `sh -c`) with the current selection on stdin and
+    /// replace the selection with the captured stdout. Single undo entry.
+    fn apply_shell_filter(&mut self, command: &str) {
+        if self.config.disable_shell_filter {
+            self.status_error = Some("Shell filter disabled by config".to_string());
+            return;
+        }
+        let trimmed = command.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let buf = &self.editor.active().buffer;
+        let primary = buf.cursors.primary();
+        let range = match primary.selection {
+            Some(s) => s.as_byte_range(),
+            None => return,
+        };
+        if range.is_empty() {
+            return;
+        }
+        let selection_text = {
+            let rope = buf.rope();
+            let cs = rope.byte_to_char(range.start);
+            let ce = rope.byte_to_char(range.end);
+            rope.slice(cs..ce).to_string()
+        };
+
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let mut child = match Command::new("sh")
+            .arg("-c")
+            .arg(trimmed)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                self.status_error = Some(format!("filter spawn failed: {e}"));
+                return;
+            }
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(selection_text.as_bytes());
+            // Drop stdin to signal EOF to the child.
+        }
+        let output = match child.wait_with_output() {
+            Ok(o) => o,
+            Err(e) => {
+                self.status_error = Some(format!("filter wait failed: {e}"));
+                return;
+            }
+        };
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let trimmed_err = stderr.trim();
+            self.status_error = Some(if trimmed_err.is_empty() {
+                format!("filter exited {}", output.status)
+            } else {
+                format!("filter: {trimmed_err}")
+            });
+            return;
+        }
+        let new_text = String::from_utf8_lossy(&output.stdout).to_string();
+        let buf = &mut self.editor.active_mut().buffer;
+        buf.begin_batch();
+        buf.move_cursor_to(range.start, false);
+        buf.move_cursor_to(range.end, true);
+        buf.insert_str(&new_text);
+        buf.commit_batch();
+    }
+
     // ── Modal input handling ─────────────────────────────────────────────────
 
     fn handle_modal_input(&mut self, action: EditorAction) {
@@ -1735,7 +1987,9 @@ impl AppState {
                     | InputMode::Rename(s)
                     | InputMode::GitCommitMessage(s)
                     | InputMode::GitNewBranch(s)
-                    | InputMode::GitStashMessage(s) => {
+                    | InputMode::GitStashMessage(s)
+                    | InputMode::ShellFilter(s)
+                    | InputMode::AlignChar(s) => {
                         s.push(c);
                     }
                     _ => {}
@@ -1752,7 +2006,9 @@ impl AppState {
                     | InputMode::Rename(s)
                     | InputMode::GitCommitMessage(s)
                     | InputMode::GitNewBranch(s)
-                    | InputMode::GitStashMessage(s) => {
+                    | InputMode::GitStashMessage(s)
+                    | InputMode::ShellFilter(s)
+                    | InputMode::AlignChar(s) => {
                         s.pop();
                     }
                     InputMode::Normal => {}
@@ -1856,6 +2112,14 @@ impl AppState {
                     InputMode::GitStashMessage(input) => {
                         self.git_finish_stash_push(&input);
                     }
+                    InputMode::ShellFilter(input) => {
+                        self.apply_shell_filter(&input);
+                    }
+                    InputMode::AlignChar(input) => {
+                        if let Some(c) = input.chars().next() {
+                            self.editor.active_mut().buffer.align_on(c);
+                        }
+                    }
                     InputMode::Normal => {}
                 }
             }
@@ -1914,6 +2178,219 @@ impl AppState {
             }
             _ => {}
         }
+    }
+
+    // ── Project search overlay input handling ────────────────────────────────
+
+    /// Handle keyboard input while the project-search overlay is active.
+    /// Returns `true` when the action was consumed (do not fall through to the
+    /// editor). Global actions like Quit/ToggleHelp fall through.
+    fn handle_project_search(&mut self, action: EditorAction) -> bool {
+        match action {
+            EditorAction::InsertChar(c) => {
+                if let Some(ps) = &mut self.project_search {
+                    if ps.focus_replace {
+                        ps.replace_text.push(c);
+                    } else {
+                        ps.query.push(c);
+                    }
+                }
+                if !self
+                    .project_search
+                    .as_ref()
+                    .map(|s| s.focus_replace)
+                    .unwrap_or(false)
+                {
+                    self.recompute_project_search();
+                }
+                true
+            }
+            EditorAction::DeleteBackward => {
+                if let Some(ps) = &mut self.project_search {
+                    if ps.focus_replace {
+                        ps.replace_text.pop();
+                    } else {
+                        ps.query.pop();
+                    }
+                }
+                if !self
+                    .project_search
+                    .as_ref()
+                    .map(|s| s.focus_replace)
+                    .unwrap_or(false)
+                {
+                    self.recompute_project_search();
+                }
+                true
+            }
+            EditorAction::MoveCursor(Direction::Up) => {
+                if let Some(ps) = &mut self.project_search {
+                    ps.move_up();
+                }
+                true
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                if let Some(ps) = &mut self.project_search {
+                    ps.move_down();
+                }
+                true
+            }
+            EditorAction::InsertTab => {
+                // Tab toggles focus and reveals the replace input.
+                if let Some(ps) = &mut self.project_search {
+                    ps.show_replace = true;
+                    ps.focus_replace = !ps.focus_replace;
+                }
+                true
+            }
+            EditorAction::SearchToggleRegex => {
+                if let Some(ps) = &mut self.project_search {
+                    ps.is_regex = !ps.is_regex;
+                }
+                self.recompute_project_search();
+                true
+            }
+            EditorAction::SearchToggleCaseSensitive => {
+                if let Some(ps) = &mut self.project_search {
+                    ps.case_sensitive = !ps.case_sensitive;
+                }
+                self.recompute_project_search();
+                true
+            }
+            EditorAction::InsertNewline => {
+                let target = self
+                    .project_search
+                    .as_ref()
+                    .and_then(|ps| ps.results.matches.get(ps.selected).cloned());
+                if let Some(m) = target {
+                    let abs = self.workspace.join(&m.path);
+                    self.project_search = None;
+                    let _ = self.editor.open_tab(abs);
+                    self.after_file_open_or_save();
+                    // Move cursor to the start of the match line. Computing the
+                    // exact column requires the file's full byte→line table,
+                    // which we don't cache; landing on the line is the
+                    // standard "go to result" behaviour.
+                    let buf = &mut self.editor.active_mut().buffer;
+                    let rope = buf.rope();
+                    let line_idx = m.line.min(rope.len_lines().saturating_sub(1));
+                    let line_start_char = rope.line_to_char(line_idx);
+                    let target_byte = rope.char_to_byte(line_start_char);
+                    buf.move_cursor_to(target_byte, false);
+                }
+                true
+            }
+            EditorAction::SearchReplaceAll => {
+                self.project_replace_all();
+                true
+            }
+            EditorAction::CloseSearch | EditorAction::Quit | EditorAction::Unhandled => {
+                self.project_search = None;
+                true
+            }
+            // Global actions that should still work while the overlay is open
+            // (toggle help, scroll cursor, etc.).
+            EditorAction::ToggleHelp => false,
+            _ => true,
+        }
+    }
+
+    fn recompute_project_search(&mut self) {
+        let (query, is_regex, case_sensitive) = match &self.project_search {
+            Some(ps) => (ps.query.clone(), ps.is_regex, ps.case_sensitive),
+            None => return,
+        };
+        let results =
+            crate::search::project::run(&self.workspace, &query, is_regex, case_sensitive);
+        if let Some(ps) = &mut self.project_search {
+            ps.results = results;
+            ps.selected = 0;
+        }
+    }
+
+    fn project_replace_all(&mut self) {
+        let (query, replacement, is_regex, case_sensitive) = match &self.project_search {
+            Some(ps) if !ps.query.is_empty() && ps.show_replace => (
+                ps.query.clone(),
+                ps.replace_text.clone(),
+                ps.is_regex,
+                ps.case_sensitive,
+            ),
+            _ => return,
+        };
+
+        // Collect distinct file paths from results.
+        let paths: Vec<PathBuf> = {
+            let ps = match &self.project_search {
+                Some(p) => p,
+                None => return,
+            };
+            let mut seen = std::collections::HashSet::new();
+            ps.results
+                .matches
+                .iter()
+                .filter_map(|m| {
+                    let abs = self.workspace.join(&m.path);
+                    if seen.insert(abs.clone()) {
+                        Some(abs)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+
+        let mut total_replaced = 0usize;
+        for path in &paths {
+            // If the file is currently open in a tab, edit it through the
+            // buffer so undo history is preserved.
+            let open_idx = self
+                .editor
+                .tabs
+                .iter()
+                .position(|t| t.path.as_deref() == Some(path.as_path()));
+            if let Some(idx) = open_idx {
+                let prev_active = self.editor.active_idx;
+                self.editor.go_to_tab(idx);
+                let buf = &mut self.editor.active_mut().buffer;
+                let text = buf.to_string();
+                let pattern = crate::search::build_pattern(&query, is_regex, case_sensitive);
+                let re = match regex::Regex::new(&pattern) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                let ranges: Vec<(usize, usize)> =
+                    re.find_iter(&text).map(|m| (m.start(), m.end())).collect();
+                if ranges.is_empty() {
+                    self.editor.go_to_tab(prev_active);
+                    continue;
+                }
+                buf.begin_batch();
+                for (start, end) in ranges.iter().rev() {
+                    buf.move_cursor_to(*start, false);
+                    buf.move_cursor_to(*end, true);
+                    buf.insert_str(&replacement);
+                }
+                buf.commit_batch();
+                total_replaced += ranges.len();
+                self.editor.go_to_tab(prev_active);
+            } else {
+                // Edit on disk.
+                if let Ok(n) = crate::search::project::replace_all_in_file(
+                    path,
+                    &query,
+                    is_regex,
+                    case_sensitive,
+                    &replacement,
+                ) {
+                    total_replaced += n;
+                }
+            }
+        }
+
+        // Refresh result list and surface a status message.
+        self.recompute_project_search();
+        self.status_error = Some(format!("Replaced {total_replaced} occurrence(s)"));
     }
 
     // ── Search input handling ────────────────────────────────────────────────
@@ -4444,6 +4921,31 @@ impl AppState {
         let gutter = gutter_width(self.editor.active().buffer.len_lines());
         let gutter_cols = gutter + 1;
         Some(screen_pos_to_byte_offset(
+            adjusted_col,
+            row,
+            editor_area_y,
+            gutter_cols,
+            &self.editor.active().buffer,
+            &self.editor.active().viewport,
+        ))
+    }
+
+    /// Convert a screen position into `(line, display_col)` for box selection.
+    /// Returns `None` if the click landed in the sidebar.
+    fn screen_to_line_col(&self, col: u16, row: u16) -> Option<(usize, usize)> {
+        let editor_area_y: u16 = if self.editor.tab_count() > 1 { 1 } else { 0 };
+        let sidebar_offset: u16 = if self.sidebar.is_some() {
+            self.sidebar_width + 1
+        } else {
+            0
+        };
+        if self.sidebar.is_some() && col < sidebar_offset {
+            return None;
+        }
+        let adjusted_col = col.saturating_sub(sidebar_offset);
+        let gutter = gutter_width(self.editor.active().buffer.len_lines());
+        let gutter_cols = gutter + 1;
+        Some(screen_pos_to_line_display_col(
             adjusted_col,
             row,
             editor_area_y,

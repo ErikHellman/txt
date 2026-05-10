@@ -49,17 +49,20 @@ The pattern is clear: `txt` is closer to **Helix in scope** than to micro, but i
 
 ## 3. Proposed features, prioritised
 
-### Tier 1 — biggest editing leverage, modest scope
+### Tier 1 — biggest editing leverage, modest scope ✅ shipped
+
+All five Tier 1 features have been implemented on branch
+`claude/implement-tier-1-features-Rydjl` (one commit per feature).
 
 These are the changes most likely to make a daily user say *"I can't go back to the version without this."*
 
-#### 1.1 Project‑wide search and replace
+#### 1.1 Project‑wide search and replace ✅ implemented
 
 The single largest gap. `Ctrl+Shift+F` should open a project‑wide search overlay backed by ripgrep semantics (or a re‑use of the `ignore` crate, already a dependency, plus `regex`). Results render as a scrollable, fuzzy‑filterable list grouped by file with surrounding context lines; `Enter` opens at the match, `Tab` toggles a replace field, `Ctrl+A` performs an all‑file batched replace with a single transactional undo per buffer.
 
 Why it matters: every other gap on this list can be worked around. This one cannot, and it's the reason most users still drop out to `rg \| sed` or to a heavier editor.
 
-#### 1.2 Add‑cursor‑on‑next‑match (the "Ctrl+D" motion)
+#### 1.2 Add‑cursor‑on‑next‑match (the "Ctrl+D" motion) ✅ implemented
 
 `SelectAllOccurrences` exists but is one‑shot. The far more useful pattern is the iterative one popularised by Sublime / VS Code:
 
@@ -69,17 +72,17 @@ Why it matters: every other gap on this list can be worked around. This one cann
 
 This composes with the existing `MultiCursor` machinery and would reuse the search subsystem. Combined with column/box selection (1.3) it covers ~90 % of the multi‑cursor cases the current editor cannot express.
 
-#### 1.3 Box / column selection
+#### 1.3 Box / column selection ✅ implemented
 
 Block selection at arbitrary rectangles (e.g. `Alt+drag` with the mouse, or a new `Alt+Shift+arrows` mode that extends a rectangular region). Pasting a multi‑line clipboard distributes one line per cursor — this works once `MultiCursor` has co‑linear cursors at distinct columns.
 
-#### 1.4 Filter selection through an external command
+#### 1.4 Filter selection through an external command ✅ implemented
 
 Vim's `!` and Helix's `|`: pipe the selection to `sort`, `jq`, `prettier`, `column -t`, `awk`, etc., and replace it with stdout. A status‑bar prompt that runs the command via `std::process::Command` and writes back atomically is ~150 lines, gated by a `disable_shell_filter` config flag for restricted environments.
 
 This is the single feature that moves `txt` into the *power* category without a plugin system, because every Unix user already has a personal toolbox.
 
-#### 1.5 Built‑in line transforms
+#### 1.5 Built‑in line transforms ✅ implemented
 
 Ten compact actions exposed on the command palette and remappable:
 
@@ -202,8 +205,8 @@ A pragmatic 5‑release roadmap that keeps each release shippable on its own:
 
 | Release | Theme | Headline features |
 |---|---|---|
-| v0.5 | "Find everywhere" | 1.1 project search/replace, 1.5 line transforms, 1.4 shell filter |
-| v0.6 | "Multi‑cursor upgrade" | 1.2 add‑next, 1.3 box selection, 3.3 clipboard ring |
+| v0.5 | "Find everywhere" ✅ shipped | 1.1 project search/replace, 1.5 line transforms, 1.4 shell filter |
+| v0.6 | "Multi‑cursor upgrade" | 1.2 add‑next ✅, 1.3 box selection ✅, 3.3 clipboard ring |
 | v0.7 | "Navigate" | 2.3 marks + jump list, 2.8 file/workspace symbols, 3.5 diff navigation |
 | v0.8 | "Rhythm" | 2.2 macros, 2.1 snippets, 3.4 surround/auto‑pairs |
 | v0.9 | "Polish" | 2.4 folding, 2.5 sticky header, 2.6 indent guides + rulers, 2.7 EditorConfig, 3.1 sessions, 3.2 persistent undo |

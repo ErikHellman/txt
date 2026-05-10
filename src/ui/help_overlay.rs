@@ -117,6 +117,45 @@ const TEMPLATE: &[HelpEntry] = &[
         actions: &["spawn_cursor_down"],
         desc: "Add cursor below",
     },
+    HelpEntry::Binding {
+        actions: &["add_cursor_next_match"],
+        desc: "Add cursor at next match (or select word)",
+    },
+    HelpEntry::Binding {
+        actions: &["skip_current_match"],
+        desc: "Skip current match, add cursor at next",
+    },
+    HelpEntry::Binding {
+        actions: &["undo_last_cursor"],
+        desc: "Undo last added cursor",
+    },
+    HelpEntry::Binding {
+        actions: &[
+            "box_select_extend_up",
+            "box_select_extend_down",
+            "box_select_extend_left",
+            "box_select_extend_right",
+        ],
+        desc: "Box / column selection (extend)",
+    },
+    HelpEntry::Static {
+        key: "Alt+Drag",
+        desc: "Box / column selection (mouse)",
+    },
+    HelpEntry::Binding {
+        actions: &["filter_selection"],
+        desc: "Filter selection through shell command",
+    },
+    // ── Line transforms ────────────────────────────────────────────
+    HelpEntry::Section("Line transforms"),
+    HelpEntry::Binding {
+        actions: &["join_lines"],
+        desc: "Join lines (vim-style)",
+    },
+    HelpEntry::Binding {
+        actions: &["increment_number", "decrement_number"],
+        desc: "Increment / decrement number under cursor",
+    },
     // ── Editing ──────────────────────────────────────────────────────
     HelpEntry::Section("Editing"),
     HelpEntry::Binding {
@@ -250,6 +289,10 @@ const TEMPLATE: &[HelpEntry] = &[
     HelpEntry::Binding {
         actions: &["open_replace"],
         desc: "Find & Replace",
+    },
+    HelpEntry::Binding {
+        actions: &["open_project_search"],
+        desc: "Project search & replace",
     },
     HelpEntry::Binding {
         actions: &["search_next", "search_prev"],

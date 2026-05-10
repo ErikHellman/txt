@@ -93,10 +93,29 @@ impl InputHandler {
     pub fn handle_mouse(&self, event: MouseEvent) -> EditorAction {
         let col = event.column;
         let row = event.row;
+        let alt = event.modifiers.contains(KeyModifiers::ALT);
         match event.kind {
-            MouseEventKind::Down(MouseButton::Left) => EditorAction::MouseClick { col, row },
-            MouseEventKind::Drag(MouseButton::Left) => EditorAction::MouseDrag { col, row },
-            MouseEventKind::Up(MouseButton::Left) => EditorAction::MouseUp { col, row },
+            MouseEventKind::Down(MouseButton::Left) => {
+                if alt {
+                    EditorAction::BoxDragStart { col, row }
+                } else {
+                    EditorAction::MouseClick { col, row }
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if alt {
+                    EditorAction::BoxDragUpdate { col, row }
+                } else {
+                    EditorAction::MouseDrag { col, row }
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if alt {
+                    EditorAction::BoxDragEnd { col, row }
+                } else {
+                    EditorAction::MouseUp { col, row }
+                }
+            }
             MouseEventKind::ScrollUp => EditorAction::MouseScroll {
                 dir: ScrollDir::Up,
                 col,

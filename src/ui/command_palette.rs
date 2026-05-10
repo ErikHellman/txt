@@ -92,6 +92,11 @@ pub static COMMANDS: &[CommandEntry] = &[
         action: || EditorAction::OpenReplace,
     },
     CommandEntry {
+        name: "Search in Files…",
+        key_hint: "Ctrl+Shift+F",
+        action: || EditorAction::OpenProjectSearch,
+    },
+    CommandEntry {
         name: "Select All",
         key_hint: "Ctrl+A",
         action: || EditorAction::SelectAll,
@@ -113,8 +118,109 @@ pub static COMMANDS: &[CommandEntry] = &[
     },
     CommandEntry {
         name: "Duplicate Line",
-        key_hint: "Ctrl+D",
+        key_hint: "Ctrl+Shift+D",
         action: || EditorAction::DuplicateLine,
+    },
+    CommandEntry {
+        name: "Add Cursor at Next Match",
+        key_hint: "Ctrl+D",
+        action: || EditorAction::AddCursorNextMatch,
+    },
+    CommandEntry {
+        name: "Skip Current Match",
+        key_hint: "Ctrl+Alt+D",
+        action: || EditorAction::SkipCurrentMatch,
+    },
+    CommandEntry {
+        name: "Undo Last Cursor",
+        key_hint: "Ctrl+U",
+        action: || EditorAction::UndoLastCursor,
+    },
+    CommandEntry {
+        name: "Filter Selection Through Command…",
+        key_hint: "Ctrl+Alt+\\",
+        action: || EditorAction::FilterSelection,
+    },
+    // ── Line transforms ────────────────────────────────────────────
+    CommandEntry {
+        name: "Sort Lines Ascending",
+        key_hint: "palette",
+        action: || EditorAction::SortLinesAsc,
+    },
+    CommandEntry {
+        name: "Sort Lines Descending",
+        key_hint: "palette",
+        action: || EditorAction::SortLinesDesc,
+    },
+    CommandEntry {
+        name: "Dedupe Adjacent Lines",
+        key_hint: "palette",
+        action: || EditorAction::DedupeLines,
+    },
+    CommandEntry {
+        name: "Reverse Line Order",
+        key_hint: "palette",
+        action: || EditorAction::ReverseLines,
+    },
+    CommandEntry {
+        name: "To Upper Case",
+        key_hint: "palette",
+        action: || EditorAction::ToUpper,
+    },
+    CommandEntry {
+        name: "To Lower Case",
+        key_hint: "palette",
+        action: || EditorAction::ToLower,
+    },
+    CommandEntry {
+        name: "To Title Case",
+        key_hint: "palette",
+        action: || EditorAction::ToTitle,
+    },
+    CommandEntry {
+        name: "Trim Trailing Whitespace",
+        key_hint: "palette",
+        action: || EditorAction::TrimTrailingWhitespace,
+    },
+    CommandEntry {
+        name: "Join Lines",
+        key_hint: "Ctrl+J",
+        action: || EditorAction::JoinLines,
+    },
+    CommandEntry {
+        name: "Increment Number Under Cursor",
+        key_hint: "Alt+=",
+        action: || EditorAction::IncrementNumber,
+    },
+    CommandEntry {
+        name: "Decrement Number Under Cursor",
+        key_hint: "Alt+-",
+        action: || EditorAction::DecrementNumber,
+    },
+    CommandEntry {
+        name: "Convert Indent: Tabs → Spaces",
+        key_hint: "palette",
+        action: || EditorAction::ConvertIndentToSpaces,
+    },
+    CommandEntry {
+        name: "Convert Indent: Spaces → Tabs",
+        key_hint: "palette",
+        action: || EditorAction::ConvertIndentToTabs,
+    },
+    CommandEntry {
+        name: "Convert Line Endings: LF",
+        key_hint: "palette",
+        action: || EditorAction::ConvertEolLf,
+    },
+    CommandEntry {
+        name: "Convert Line Endings: CRLF",
+        key_hint: "palette",
+        action: || EditorAction::ConvertEolCrlf,
+    },
+    CommandEntry {
+        name: "Align Lines On Character…",
+        key_hint: "palette",
+        action: || EditorAction::AlignSelection,
     },
     CommandEntry {
         name: "Toggle Line Comment",
