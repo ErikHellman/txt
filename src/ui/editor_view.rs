@@ -40,6 +40,8 @@ pub fn render(
     focused: bool,
     show_whitespace: bool,
     tab_size: usize,
+    indent_guides: bool,
+    rulers: &[usize],
     theme: &ThemeColors,
     area: Rect,
     buf: &mut TermBuffer,
@@ -367,6 +369,78 @@ pub fn render(
             buf.set_string(text_area.x, y, " ", cursor_style);
         }
     }
+
+    // ── Indent guides and column rulers (post-pass overlay) ───────────────
+    // Both are drawn *after* the main text pass and only on cells that still
+    // show a plain space — they never overwrite cursors, selections, or the
+    // first non-whitespace character of a line.
+    if (indent_guides && tab_size > 0) || !rulers.is_empty() {
+        let guide_style = Style::default().fg(Color::Rgb(70, 70, 95));
+        let max_x = text_area.x + text_area.width;
+        for (screen_row, vl) in visual_lines.iter().enumerate() {
+            let y = area.y + screen_row as u16;
+
+            // Compute first non-whitespace display column for this logical
+            // line (only meaningful on the first visual segment).
+            let first_non_ws = if indent_guides && vl.is_first_seg {
+                first_non_whitespace_display_col(&handle.buffer.line_str(vl.line_idx), tab_size)
+            } else {
+                0
+            };
+
+            if indent_guides && vl.is_first_seg && first_non_ws >= tab_size {
+                let mut col = tab_size;
+                while col < first_non_ws {
+                    let x = text_area.x + col as u16;
+                    if x >= max_x {
+                        break;
+                    }
+                    overlay_guide(buf, x, y, "│", guide_style);
+                    col += tab_size;
+                }
+            }
+
+            for &ruler in rulers {
+                if ruler == 0 || ruler >= text_area.width as usize {
+                    continue;
+                }
+                let x = text_area.x + ruler as u16;
+                if x < max_x {
+                    overlay_guide(buf, x, y, "│", guide_style);
+                }
+            }
+        }
+    }
+}
+
+/// Display column of the first non-whitespace character on `line`. If the line
+/// is entirely whitespace (or empty), returns the display width of all leading
+/// whitespace — i.e. "any indent guide column up to here is fine to draw".
+fn first_non_whitespace_display_col(line: &str, tab_size: usize) -> usize {
+    let mut col = 0usize;
+    for grapheme in line_str_graphemes(line) {
+        match grapheme {
+            " " => col += 1,
+            "\t" => col += tab_size.saturating_sub(col % tab_size).max(1),
+            _ => return col,
+        }
+    }
+    col
+}
+
+/// Overlay a guide glyph at `(x, y)` only when the underlying cell still
+/// shows a plain space and has the default background. Prevents indent/ruler
+/// guides from clobbering cursors, selections, or syntax highlights.
+fn overlay_guide(buf: &mut TermBuffer, x: u16, y: u16, glyph: &str, style: Style) {
+    use ratatui::layout::Position;
+    let pos = Position::new(x, y);
+    if let Some(cell) = buf.cell(pos) {
+        let symbol = cell.symbol();
+        let has_bg_style = cell.bg != Color::Reset;
+        if (symbol == " " || symbol.is_empty()) && !has_bg_style {
+            buf.set_string(x, y, glyph, style);
+        }
+    }
 }
 
 /// Choose the highlight style for a grapheme at `byte_offset`.
@@ -510,6 +584,33 @@ mod tests {
         assert_eq!(gutter_width(99), 2);
         assert_eq!(gutter_width(100), 3);
         assert_eq!(gutter_width(1000), 4);
+    }
+
+    #[test]
+    fn first_non_ws_display_col_blank_line_returns_indent_width() {
+        // 8 spaces, no content → returns 8 so guides span the whole indent.
+        assert_eq!(first_non_whitespace_display_col("        ", 4), 8);
+    }
+
+    #[test]
+    fn first_non_ws_display_col_spaces_then_text() {
+        assert_eq!(first_non_whitespace_display_col("    fn foo()", 4), 4);
+        assert_eq!(first_non_whitespace_display_col("        x", 4), 8);
+    }
+
+    #[test]
+    fn first_non_ws_display_col_tabs_round_to_tab_stop() {
+        // One tab at width 4 → column 4.
+        assert_eq!(first_non_whitespace_display_col("\tfoo", 4), 4);
+        // Two tabs → column 8.
+        assert_eq!(first_non_whitespace_display_col("\t\tfoo", 4), 8);
+        // Tab at width 8.
+        assert_eq!(first_non_whitespace_display_col("\tfoo", 8), 8);
+    }
+
+    #[test]
+    fn first_non_ws_display_col_no_indent_returns_zero() {
+        assert_eq!(first_non_whitespace_display_col("hello", 4), 0);
     }
 
     #[test]

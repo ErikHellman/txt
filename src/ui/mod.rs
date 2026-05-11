@@ -185,6 +185,8 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
         editor_focused,
         state.config.show_whitespace,
         state.config.tab_size,
+        state.config.indent_guides,
+        &state.config.rulers,
         &theme,
         editor_area,
         buf,
