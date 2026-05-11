@@ -507,6 +507,7 @@ impl KeyBindings {
         bind("ctrl+shift+d", EditorAction::DuplicateLine);
         bind("ctrl+shift+p", EditorAction::OpenCommandPalette);
         bind("ctrl+shift+e", EditorAction::OpenBufferSwitcher);
+        bind("ctrl+shift+o", EditorAction::OpenSymbolPicker);
         bind("ctrl+shift+c", EditorAction::CopyFileReference);
         bind("ctrl+shift+b", EditorAction::ToggleSidebar);
         bind("ctrl+shift+n", EditorAction::SidebarNewFolder);

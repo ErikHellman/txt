@@ -202,6 +202,86 @@ impl FuzzyPickerState {
     }
 }
 
+// ── Symbol-in-file picker state ──────────────────────────────────────────
+
+/// State for the Ctrl+Shift+O symbol-in-file picker. Mirrors
+/// [`FuzzyPickerState`] but scores against symbol names rather than file
+/// paths and tracks each symbol's byte range so `Enter` can jump the cursor.
+pub struct SymbolPickerState {
+    pub query: String,
+    /// All symbols collected from the active buffer's parse tree.
+    pub all_symbols: Vec<crate::syntax::Symbol>,
+    /// Scored and sorted (score DESC) indices into `all_symbols`.
+    pub filtered: Vec<(u32, usize)>,
+    /// Currently highlighted row.
+    pub selected: usize,
+}
+
+impl SymbolPickerState {
+    /// Build with the symbols already collected from the active buffer.
+    pub fn new(symbols: Vec<crate::syntax::Symbol>) -> Self {
+        let n = symbols.len();
+        let filtered = (0..n).map(|i| (0u32, i)).collect();
+        Self {
+            query: String::new(),
+            all_symbols: symbols,
+            filtered,
+            selected: 0,
+        }
+    }
+
+    /// Re-score against the current query using nucleo. Empty query shows
+    /// every symbol in source order.
+    pub fn update_query(&mut self, query: String) {
+        self.query = query;
+        self.selected = 0;
+
+        if self.query.is_empty() {
+            let n = self.all_symbols.len();
+            self.filtered = (0..n).map(|i| (0u32, i)).collect();
+            return;
+        }
+
+        use nucleo::pattern::{CaseMatching, Normalization, Pattern};
+        use nucleo::{Config, Matcher, Utf32String};
+
+        let mut matcher = Matcher::new(Config::DEFAULT);
+        let pattern = Pattern::parse(&self.query, CaseMatching::Smart, Normalization::Smart);
+
+        let mut scored: Vec<(u32, usize)> = self
+            .all_symbols
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, sym)| {
+                let haystack = Utf32String::from(sym.name.as_str());
+                pattern
+                    .score(haystack.slice(..), &mut matcher)
+                    .map(|sc| (sc, idx))
+            })
+            .collect();
+        scored.sort_by_key(|b| std::cmp::Reverse(b.0));
+        self.filtered = scored;
+    }
+
+    pub fn selected_symbol(&self) -> Option<&crate::syntax::Symbol> {
+        self.filtered
+            .get(self.selected)
+            .map(|(_, idx)| &self.all_symbols[*idx])
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        if !self.filtered.is_empty() && self.selected < self.filtered.len() - 1 {
+            self.selected += 1;
+        }
+    }
+}
+
 // ── Project search overlay state ───────────────────────────────────────────
 
 /// State for the project-wide search-and-replace overlay (Ctrl+Shift+F).
@@ -777,6 +857,7 @@ pub struct AppState {
     pub clipboard: ClipboardManager,
     pub input_mode: InputMode,
     pub fuzzy_picker: Option<FuzzyPickerState>,
+    pub symbol_picker: Option<SymbolPickerState>,
     pub sidebar: Option<SidebarState>,
     pub sidebar_focused: bool,
     /// Current sidebar width in columns (excluding the 1-col separator).
@@ -900,6 +981,7 @@ impl AppState {
             clipboard: ClipboardManager::new(),
             input_mode: InputMode::Normal,
             fuzzy_picker: None,
+            symbol_picker: None,
             sidebar: None,
             sidebar_focused: false,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
@@ -1060,6 +1142,12 @@ impl AppState {
         // Fuzzy picker — captured input
         if self.fuzzy_picker.is_some() {
             self.handle_fuzzy_picker(action);
+            return;
+        }
+
+        // Symbol picker — captured input
+        if self.symbol_picker.is_some() {
+            self.handle_symbol_picker(action);
             return;
         }
 
@@ -1675,6 +1763,15 @@ impl AppState {
             EditorAction::OpenFuzzyPicker => {
                 self.fuzzy_picker = Some(FuzzyPickerState::new());
             }
+            EditorAction::OpenSymbolPicker => {
+                let active = self.editor.active();
+                let symbols = active.syntax.collect_symbols(active.buffer.rope());
+                if symbols.is_empty() {
+                    self.status_error = Some("No symbols found in this buffer".to_string());
+                } else {
+                    self.symbol_picker = Some(SymbolPickerState::new(symbols));
+                }
+            }
             EditorAction::ToggleSidebar => {
                 if self.sidebar.is_none() {
                     // Restore saved state or create fresh, then expand to current file.
@@ -2175,6 +2272,57 @@ impl AppState {
             }
             EditorAction::Quit | EditorAction::CloseSearch | EditorAction::Unhandled => {
                 self.fuzzy_picker = None;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_symbol_picker(&mut self, action: EditorAction) {
+        if self.symbol_picker.is_none() {
+            return;
+        }
+        match action {
+            EditorAction::InsertChar(c) => {
+                if let Some(picker) = &mut self.symbol_picker {
+                    let mut q = picker.query.clone();
+                    q.push(c);
+                    picker.update_query(q);
+                }
+            }
+            EditorAction::DeleteBackward => {
+                if let Some(picker) = &mut self.symbol_picker {
+                    let mut q = picker.query.clone();
+                    q.pop();
+                    picker.update_query(q);
+                }
+            }
+            EditorAction::MoveCursor(Direction::Up) => {
+                if let Some(picker) = &mut self.symbol_picker {
+                    picker.move_up();
+                }
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                if let Some(picker) = &mut self.symbol_picker {
+                    picker.move_down();
+                }
+            }
+            EditorAction::InsertNewline => {
+                let target = self
+                    .symbol_picker
+                    .as_ref()
+                    .and_then(|p| p.selected_symbol().cloned());
+                self.symbol_picker = None;
+                if let Some(sym) = target {
+                    let handle = self.editor.active_mut();
+                    let rope = handle.buffer.rope();
+                    let bound = sym.byte_range.start.min(rope.len_bytes());
+                    *handle.buffer.cursors.primary_mut() =
+                        crate::buffer::cursor::Cursor::from_byte_offset(rope, bound);
+                    handle.buffer.cursors.collapse_to_primary();
+                }
+            }
+            EditorAction::Quit | EditorAction::CloseSearch | EditorAction::Unhandled => {
+                self.symbol_picker = None;
             }
             _ => {}
         }

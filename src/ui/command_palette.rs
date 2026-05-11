@@ -62,6 +62,11 @@ pub static COMMANDS: &[CommandEntry] = &[
         action: || EditorAction::OpenFuzzyPicker,
     },
     CommandEntry {
+        name: "Go to Symbol in File",
+        key_hint: "Ctrl+Shift+O",
+        action: || EditorAction::OpenSymbolPicker,
+    },
+    CommandEntry {
         name: "Buffer Switcher",
         key_hint: "Ctrl+Shift+E",
         action: || EditorAction::OpenBufferSwitcher,

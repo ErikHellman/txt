@@ -269,6 +269,10 @@ const TEMPLATE: &[HelpEntry] = &[
         desc: "Fuzzy file picker",
     },
     HelpEntry::Binding {
+        actions: &["open_symbol_picker"],
+        desc: "Symbols in file picker",
+    },
+    HelpEntry::Binding {
         actions: &["open_recent_files"],
         desc: "Recent files",
     },

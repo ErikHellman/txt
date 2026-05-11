@@ -16,6 +16,7 @@ pub mod settings_overlay;
 pub mod sidebar;
 pub mod status_bar;
 pub mod sticky_header;
+pub mod symbol_picker;
 pub mod tab_bar;
 pub mod welcome_overlay;
 
@@ -172,6 +173,7 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
 
     let editor_focused = !state.sidebar_focused
         && state.fuzzy_picker.is_none()
+        && state.symbol_picker.is_none()
         && state.command_palette.is_none()
         && !state.show_help
         && !state.show_settings
@@ -271,6 +273,11 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
     // ── Fuzzy picker floating overlay ─────────────────────────────────────────
     if let Some(picker) = &state.fuzzy_picker {
         fuzzy_picker::render(picker, &theme, area, buf);
+    }
+
+    // ── Symbols-in-file picker overlay ────────────────────────────────────────
+    if let Some(picker) = &state.symbol_picker {
+        symbol_picker::render(picker, &theme, area, buf);
     }
 
     // ── Command palette overlay ───────────────────────────────────────────────

@@ -1,8 +1,9 @@
 pub mod highlighter;
 pub mod language;
+pub mod queries;
 
 use ropey::Rope;
-use tree_sitter::{Parser, Tree};
+use tree_sitter::{Parser, Query, QueryCursor, StreamingIterator, Tree};
 
 use crate::buffer::cursor::ByteRange;
 use crate::syntax::language::Lang;
@@ -222,6 +223,122 @@ pub struct EnclosingSymbol {
     pub kind: &'static str,
 }
 
+/// A named definition discovered by a tree-sitter symbols query (used by the
+/// Ctrl+Shift+O picker).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Symbol {
+    /// Display name of the symbol (e.g. `"foo"` for `fn foo`).
+    pub name: String,
+    /// Short kind label such as `"fn"`, `"class"`, `"struct"`. Derived from
+    /// the `@symbol.<kind>` capture in the query.
+    pub kind: &'static str,
+    /// Byte range of the *definition* node — i.e. the `@symbol.kind` capture,
+    /// not just the name. Used to jump the cursor.
+    pub byte_range: ByteRange,
+}
+
+impl SyntaxHost {
+    /// Run the language-specific symbols query over the current parse tree
+    /// and collect every `@symbol.<kind>` match.
+    ///
+    /// Returns an empty `Vec` when no tree is available, when the language has
+    /// no symbols query, or when the query fails to compile (which shouldn't
+    /// happen in production but is recovered from gracefully).
+    pub fn collect_symbols(&self, rope: &Rope) -> Vec<Symbol> {
+        let tree = match &self.tree {
+            Some(t) => t,
+            None => return Vec::new(),
+        };
+        let pattern = match queries::symbols_query_for(self.language) {
+            Some(p) if !p.trim().is_empty() => p,
+            _ => return Vec::new(),
+        };
+        let ts_lang = match self.language.ts_language() {
+            Some(l) => l,
+            None => return Vec::new(),
+        };
+        let query = match Query::new(&ts_lang, pattern) {
+            Ok(q) => q,
+            Err(_) => return Vec::new(),
+        };
+
+        let source = rope.to_string();
+        let bytes = source.as_bytes();
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&query, tree.root_node(), bytes);
+
+        let capture_names: Vec<&str> = query.capture_names().to_vec();
+        let mut out = Vec::new();
+        while let Some(m) = matches.next() {
+            let mut name_text: Option<String> = None;
+            let mut symbol_range: Option<(ByteRange, &'static str)> = None;
+            for cap in m.captures {
+                let cap_name = match capture_names.get(cap.index as usize) {
+                    Some(s) => *s,
+                    None => continue,
+                };
+                if cap_name == "name" {
+                    let start = cap.node.start_byte();
+                    let end = cap.node.end_byte();
+                    let text = std::str::from_utf8(&bytes[start..end])
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    if !text.is_empty() {
+                        name_text = Some(text);
+                    }
+                } else if let Some(rest) = cap_name.strip_prefix("symbol.") {
+                    let kind = symbol_kind_label(rest);
+                    let r = ByteRange::new(cap.node.start_byte(), cap.node.end_byte());
+                    symbol_range = Some((r, kind));
+                }
+            }
+            if let (Some(name), Some((range, kind))) = (name_text, symbol_range) {
+                out.push(Symbol {
+                    name,
+                    kind,
+                    byte_range: range,
+                });
+            }
+        }
+        // Sort by line number for stable display.
+        out.sort_by_key(|s| s.byte_range.start);
+        out
+    }
+}
+
+/// Map a query capture suffix (`fn`, `class`, etc.) to a stable `&'static str`
+/// kind label. Unknown suffixes fall back to `"?"`.
+fn symbol_kind_label(suffix: &str) -> &'static str {
+    match suffix {
+        "fn" => "fn",
+        "impl" => "impl",
+        "struct" => "struct",
+        "enum" => "enum",
+        "trait" => "trait",
+        "mod" => "mod",
+        "const" => "const",
+        "static" => "static",
+        "macro" => "macro",
+        "type" => "type",
+        "class" => "class",
+        "interface" => "interface",
+        "object" => "object",
+        "ns" => "ns",
+        "key" => "key",
+        "tag" => "tag",
+        "rule" => "rule",
+        "table" => "table",
+        "var" => "var",
+        "property" => "property",
+        "h1" => "h1",
+        "h2" => "h2",
+        "h3" => "h3",
+        "h4" => "h4",
+        _ => "?",
+    }
+}
+
 /// Map a tree-sitter node kind to a short label for display, or `None` if the
 /// node kind isn't a "named container" worth showing in breadcrumbs.
 fn container_label(kind: &str) -> Option<&'static str> {
@@ -406,6 +523,27 @@ mod tests {
         let host = SyntaxHost::new();
         let rope = Rope::from_str("anything");
         assert!(host.enclosing_named_path(&rope, 0).is_empty());
+    }
+
+    #[test]
+    fn collect_symbols_rust_finds_functions() {
+        let src = "fn alpha() {}\nfn beta() { let x = 1; }\nstruct Gamma { x: u32 }\n";
+        let (host, rope) = host_for_rust(src);
+        let syms = host.collect_symbols(&rope);
+        let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"alpha"));
+        assert!(names.contains(&"beta"));
+        assert!(names.contains(&"Gamma"));
+        let kinds: Vec<&str> = syms.iter().map(|s| s.kind).collect();
+        assert!(kinds.contains(&"fn"));
+        assert!(kinds.contains(&"struct"));
+    }
+
+    #[test]
+    fn collect_symbols_unknown_language_returns_empty() {
+        let host = SyntaxHost::new();
+        let rope = Rope::from_str("fn foo() {}");
+        assert!(host.collect_symbols(&rope).is_empty());
     }
 
     /// Regression: highlight span byte offsets must match the *current* source
