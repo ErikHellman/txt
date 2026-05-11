@@ -3688,25 +3688,44 @@ impl AppState {
 
     // ── Code formatting ───────────────────────────────────────────────────────
 
+    /// Short status-bar label showing the active indent style, e.g.
+    /// `"spaces:4"` or `"tabs:8"`.
+    pub fn indent_label(&self) -> String {
+        let (indent, _) = self.indent_for_active();
+        match indent.style {
+            crate::formatting::IndentStyle::Tabs => format!("tabs:{}", indent.width),
+            crate::formatting::IndentStyle::Spaces => format!("spaces:{}", indent.width),
+        }
+    }
+
     /// Resolve the live indent rules for the active buffer's language,
     /// merging project + global config and falling back to the legacy
     /// `tab_size` and built-in defaults.
+    ///
+    /// Per-buffer `.editorconfig` overrides win over every config layer.
     fn indent_for_active(
         &self,
     ) -> (
         crate::formatting::IndentConfig,
         crate::formatting::IndentRules,
     ) {
-        let lang = self.editor.active().syntax.language;
+        let active = self.editor.active();
+        let lang = active.syntax.language;
         let resolver = crate::formatting::FormattingResolver {
             global: &self.config.formatting,
             project: self.project_fmt.as_ref(),
             legacy_tab_size: self.config.tab_size,
         };
-        (
-            resolver.indent(lang),
-            crate::formatting::IndentRules::for_lang(lang),
-        )
+        let mut indent = resolver.indent(lang);
+        if let Some(style) = active.editorconfig.indent_style {
+            indent.style = style;
+        }
+        if let Some(width) = active.editorconfig.effective_width()
+            && width > 0
+        {
+            indent.width = width;
+        }
+        (indent, crate::formatting::IndentRules::for_lang(lang))
     }
 
     /// Run the configured external formatter for the active buffer's

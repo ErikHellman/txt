@@ -118,9 +118,11 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
         .map(|b| format!(" ⎇ {}", b))
         .unwrap_or_default();
 
-    // Right side: branch + word-wrap flag + LSP/TS mode + diagnostics + language + position + memory + encoding
+    let indent_str = format!(" {}", state.indent_label());
+
+    // Right side: branch + word-wrap flag + LSP/TS mode + diagnostics + language + indent + position + memory + encoding
     let right = format!(
-        "{}{}{}{}{}  {}{}{}",
+        "{}{}{}{}{}{}  {}{}{}",
         branch_str,
         wrap_flag,
         lsp_flag,
@@ -130,6 +132,7 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
         } else {
             String::new()
         },
+        indent_str,
         pos,
         mem_str,
         enc

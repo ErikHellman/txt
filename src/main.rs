@@ -3,6 +3,7 @@ mod buffer;
 mod clipboard;
 mod config;
 mod editor;
+mod editorconfig;
 mod error;
 mod formatting;
 mod git;
