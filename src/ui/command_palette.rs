@@ -102,6 +102,11 @@ pub static COMMANDS: &[CommandEntry] = &[
         action: || EditorAction::JumpListForward,
     },
     CommandEntry {
+        name: "Expand Snippet at Cursor",
+        key_hint: "Tab",
+        action: || EditorAction::ExpandSnippetAtCursor,
+    },
+    CommandEntry {
         name: "Buffer Switcher",
         key_hint: "Ctrl+Shift+E",
         action: || EditorAction::OpenBufferSwitcher,

@@ -5,6 +5,7 @@ use crate::buffer::folds::FoldState;
 use crate::editor::viewport::Viewport;
 use crate::editorconfig::{EditorConfigOverrides, load_for_file};
 use crate::lsp::types::{DiagSeverity, LspDiagnostic, SemanticTokenSpan};
+use crate::snippet::session::SnippetSession;
 use crate::syntax::{SyntaxHost, language::Lang};
 
 pub type BufferId = usize;
@@ -62,6 +63,9 @@ pub struct BufferHandle {
     /// Code-folding state, derived from the tree-sitter parse tree after
     /// every reparse.
     pub folds: FoldState,
+    /// Active snippet session, if a snippet has been expanded and the user
+    /// hasn't yet finished cycling through its tab stops.
+    pub snippet_session: Option<SnippetSession>,
 }
 
 impl BufferHandle {
@@ -76,6 +80,7 @@ impl BufferHandle {
             lsp_state: LspState::new(),
             editorconfig: EditorConfigOverrides::default(),
             folds: FoldState::new(),
+            snippet_session: None,
         }
     }
 
@@ -103,6 +108,7 @@ impl BufferHandle {
             lsp_state: LspState::new(),
             editorconfig,
             folds,
+            snippet_session: None,
         })
     }
 

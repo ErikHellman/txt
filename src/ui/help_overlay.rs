@@ -301,6 +301,10 @@ const TEMPLATE: &[HelpEntry] = &[
         desc: "Jump-list forward",
     },
     HelpEntry::Binding {
+        actions: &["expand_snippet"],
+        desc: "Expand snippet at cursor (Tab; see ~/.config/txt/snippets/)",
+    },
+    HelpEntry::Binding {
         actions: &["open_recent_files"],
         desc: "Recent files",
     },

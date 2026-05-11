@@ -216,6 +216,15 @@ pub enum EditorAction {
     BeginSetMark,
     /// Begin a jump-to-mark prompt; the next typed character (a–z) selects.
     BeginJumpToMark,
+    /// Look up a snippet whose prefix matches the word before the cursor and
+    /// expand it in-place. Bound to Ctrl+J by default.
+    ExpandSnippetAtCursor,
+    /// While a snippet session is active, advance to the next tab stop.
+    SnippetNextStop,
+    /// While a snippet session is active, walk back to the previous stop.
+    SnippetPrevStop,
+    /// Cancel the active snippet session (Esc).
+    SnippetCancel,
     /// Toggle the file tree sidebar visibility (Ctrl+Shift+B).
     ToggleSidebar,
     /// Focus-jump between the editor and the sidebar (Ctrl+B).
@@ -408,6 +417,10 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::JumpListForward => "jump_list_forward",
         EditorAction::BeginSetMark => "set_mark",
         EditorAction::BeginJumpToMark => "jump_to_mark",
+        EditorAction::ExpandSnippetAtCursor => "expand_snippet",
+        EditorAction::SnippetNextStop => "snippet_next_stop",
+        EditorAction::SnippetPrevStop => "snippet_prev_stop",
+        EditorAction::SnippetCancel => "snippet_cancel",
         EditorAction::ToggleSidebar => "toggle_sidebar",
         EditorAction::FocusSidebar => "focus_sidebar",
         // View / UI toggles
@@ -555,6 +568,10 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "jump_list_forward" => EditorAction::JumpListForward,
         "set_mark" => EditorAction::BeginSetMark,
         "jump_to_mark" => EditorAction::BeginJumpToMark,
+        "expand_snippet" => EditorAction::ExpandSnippetAtCursor,
+        "snippet_next_stop" => EditorAction::SnippetNextStop,
+        "snippet_prev_stop" => EditorAction::SnippetPrevStop,
+        "snippet_cancel" => EditorAction::SnippetCancel,
         "toggle_sidebar" => EditorAction::ToggleSidebar,
         "focus_sidebar" => EditorAction::FocusSidebar,
         // View / UI toggles

@@ -864,6 +864,8 @@ pub struct AppState {
     pub symbol_picker: Option<SymbolPickerState>,
     pub marks: crate::marks::NamedMarks,
     pub jumps: crate::marks::JumpList,
+    /// Lazy-loaded snippet store, populated per language on first use.
+    pub snippets: crate::snippet::SnippetStore,
     pub sidebar: Option<SidebarState>,
     pub sidebar_focused: bool,
     /// Current sidebar width in columns (excluding the 1-col separator).
@@ -990,6 +992,7 @@ impl AppState {
             symbol_picker: None,
             marks: crate::marks::NamedMarks::load(&workspace),
             jumps: crate::marks::JumpList::load(&workspace),
+            snippets: crate::snippet::SnippetStore::new(),
             sidebar: None,
             sidebar_focused: false,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
@@ -1261,6 +1264,16 @@ impl AppState {
                     .insert_newline(&indent, rules);
             }
             EditorAction::InsertTab => {
+                if self.editor.active().snippet_session.is_some() {
+                    self.snippet_advance(true);
+                    return;
+                }
+                // Try to expand a snippet whose prefix matches the word
+                // immediately before the cursor. Falls through to normal
+                // tab-indent behaviour when no snippet is found.
+                if self.try_expand_snippet_silently() {
+                    return;
+                }
                 let (indent, _) = self.indent_for_active();
                 // Multi-line selection → indent every touched line.
                 let buf = &self.editor.active().buffer;
@@ -1287,6 +1300,10 @@ impl AppState {
                 self.editor.active_mut().buffer.indent_lines(&indent);
             }
             EditorAction::DedentSelection => {
+                if self.editor.active().snippet_session.is_some() {
+                    self.snippet_advance(false);
+                    return;
+                }
                 let (indent, _) = self.indent_for_active();
                 self.editor.active_mut().buffer.dedent_lines(&indent);
             }
@@ -1810,6 +1827,18 @@ impl AppState {
             EditorAction::BeginJumpToMark => {
                 self.input_mode = InputMode::JumpToMarkChar;
             }
+            EditorAction::ExpandSnippetAtCursor => {
+                self.expand_snippet_at_cursor();
+            }
+            EditorAction::SnippetNextStop => {
+                self.snippet_advance(true);
+            }
+            EditorAction::SnippetPrevStop => {
+                self.snippet_advance(false);
+            }
+            EditorAction::SnippetCancel => {
+                self.editor.active_mut().snippet_session = None;
+            }
             EditorAction::ToggleSidebar => {
                 if self.sidebar.is_none() {
                     // Restore saved state or create fresh, then expand to current file.
@@ -1961,6 +1990,10 @@ impl AppState {
             EditorAction::SearchNext => self.search_next(),
             EditorAction::SearchPrev => self.search_prev(),
             EditorAction::CloseSearch => {
+                if self.editor.active().snippet_session.is_some() {
+                    self.editor.active_mut().snippet_session = None;
+                    return;
+                }
                 self.search_state = None;
                 // Esc also collapses column-edit multi-cursor when search is not open.
                 if self.editor.active().buffer.cursors.is_multi() {
@@ -2008,16 +2041,22 @@ impl AppState {
         // byte offsets keep tracking after inserts, deletes, and replaces.
         // Drain regardless of `modified` so the queue never grows unbounded.
         let pending = self.editor.active_mut().buffer.drain_pending_edits();
-        if !pending.is_empty()
-            && let Some(path) = self.editor.active().path.clone()
-        {
-            for cmd in &pending {
-                self.marks.rebase_after_edit(&path, cmd);
-                self.jumps.rebase_after_edit(&path, cmd);
-            }
-            if !pending.is_empty() {
+        if !pending.is_empty() {
+            if let Some(path) = self.editor.active().path.clone() {
+                for cmd in &pending {
+                    self.marks.rebase_after_edit(&path, cmd);
+                    self.jumps.rebase_after_edit(&path, cmd);
+                }
                 self.marks.save(&self.workspace);
                 self.jumps.save(&self.workspace);
+            }
+            if let Some(session) = self.editor.active_mut().snippet_session.as_mut() {
+                for cmd in &pending {
+                    session.rebase(cmd);
+                }
+                if session.is_empty() {
+                    self.editor.active_mut().snippet_session = None;
+                }
             }
         }
 
@@ -4089,6 +4128,138 @@ impl AppState {
             self.git_gutter = crate::git::gutter_for_path(&path, &content);
         } else {
             self.git_gutter = None;
+        }
+    }
+
+    /// Same logic as `expand_snippet_at_cursor` but silent: returns `false`
+    /// when no snippet matches so the caller can fall through to its own
+    /// default (e.g. `InsertTab` doing indentation).
+    fn try_expand_snippet_silently(&mut self) -> bool {
+        let lang_id = self.editor.active().syntax.language.config_key();
+        if lang_id.is_empty() {
+            return false;
+        }
+        let cursor_byte = self.editor.active().buffer.cursors.primary().byte_offset;
+        let primary = self.editor.active().buffer.cursors.primary();
+        if primary.has_selection() {
+            return false;
+        }
+        let rope = self.editor.active().buffer.rope();
+        let probe = cursor_byte.saturating_sub(1);
+        let Some((wstart, wend)) = crate::buffer::cursor::word_span_at(rope, probe) else {
+            return false;
+        };
+        if wend < cursor_byte {
+            return false;
+        }
+        let prefix: String = rope.byte_slice(wstart..wend).chars().collect();
+        let matches = self.snippets.lookup(lang_id, &prefix);
+        let Some(snip) = matches.into_iter().next() else {
+            return false;
+        };
+        let parsed = snip.parse_body();
+        let exp = crate::snippet::session::SnippetSession::expand_at(&parsed, wstart);
+        let buf = &mut self.editor.active_mut().buffer;
+        buf.begin_batch();
+        buf.delete_range(wstart, wend);
+        *buf.cursors.primary_mut() =
+            crate::buffer::cursor::Cursor::from_byte_offset(buf.rope(), wstart);
+        buf.cursors.primary_mut().selection = None;
+        buf.insert_str(&exp.text);
+        buf.commit_batch();
+        self.editor.active_mut().snippet_session = exp.session;
+        self.snippet_select_current();
+        true
+    }
+
+    /// Look up the word before the cursor in the active buffer's language
+    /// snippet store; if there's a match, delete the word and expand the
+    /// snippet in its place.
+    fn expand_snippet_at_cursor(&mut self) {
+        let lang_id = self.editor.active().syntax.language.config_key();
+        if lang_id.is_empty() {
+            self.status_error = Some("Snippets need a recognised language".into());
+            return;
+        }
+        let cursor_byte = self.editor.active().buffer.cursors.primary().byte_offset;
+        let rope = self.editor.active().buffer.rope();
+        let probe = cursor_byte.saturating_sub(1);
+        let Some((wstart, wend)) = crate::buffer::cursor::word_span_at(rope, probe) else {
+            self.status_error = Some("Place the cursor after a snippet prefix".into());
+            return;
+        };
+        if wend < cursor_byte {
+            self.status_error = Some("Place the cursor after a snippet prefix".into());
+            return;
+        }
+        let prefix: String = rope.byte_slice(wstart..wend).chars().collect();
+        let matches = self.snippets.lookup(lang_id, &prefix);
+        let Some(snip) = matches.into_iter().next() else {
+            self.status_error = Some(format!("No snippet named '{prefix}'"));
+            return;
+        };
+        let parsed = snip.parse_body();
+        // Compute the expansion text and session at the prefix start position
+        // since we're about to delete the prefix.
+        let exp = crate::snippet::session::SnippetSession::expand_at(&parsed, wstart);
+        let buf = &mut self.editor.active_mut().buffer;
+        buf.begin_batch();
+        buf.delete_range(wstart, wend);
+        // Move the primary cursor to wstart before inserting so insert lands
+        // at the right location regardless of prior selection state.
+        *buf.cursors.primary_mut() =
+            crate::buffer::cursor::Cursor::from_byte_offset(buf.rope(), wstart);
+        buf.cursors.primary_mut().selection = None;
+        buf.insert_str(&exp.text);
+        buf.commit_batch();
+        self.editor.active_mut().snippet_session = exp.session;
+        // Jump cursor to the first tab stop, selecting its default text.
+        self.snippet_select_current();
+    }
+
+    /// Select the byte range of the current snippet tab stop. Called after
+    /// expanding or advancing the session.
+    fn snippet_select_current(&mut self) {
+        let handle = self.editor.active_mut();
+        let range = match &handle.snippet_session {
+            Some(s) => s.current_range(),
+            None => return,
+        };
+        let len = handle.buffer.rope().len_bytes();
+        let bound_start = range.start.min(len);
+        let bound_end = range.end.min(len);
+        let new_cursor = {
+            let rope = handle.buffer.rope();
+            crate::buffer::cursor::Cursor::from_byte_offset(rope, bound_end)
+        };
+        let primary = handle.buffer.cursors.primary_mut();
+        *primary = new_cursor;
+        if bound_end > bound_start {
+            primary.selection = Some(crate::buffer::cursor::Selection {
+                anchor: bound_start,
+                active: bound_end,
+            });
+        } else {
+            primary.selection = None;
+        }
+    }
+
+    /// Move the active snippet session forward (`true`) or backward.
+    fn snippet_advance(&mut self, forward: bool) {
+        let advanced = match self.editor.active_mut().snippet_session.as_mut() {
+            Some(s) => {
+                if forward {
+                    s.next_stop()
+                } else {
+                    s.prev_stop()
+                }
+            }
+            None => false,
+        };
+        if advanced {
+            self.snippet_select_current();
+        } else {
+            self.editor.active_mut().snippet_session = None;
         }
     }
 

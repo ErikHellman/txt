@@ -11,6 +11,7 @@ mod input;
 mod lsp;
 mod marks;
 mod search;
+mod snippet;
 mod syntax;
 mod theme;
 mod ui;
