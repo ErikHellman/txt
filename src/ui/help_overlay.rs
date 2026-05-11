@@ -305,6 +305,14 @@ const TEMPLATE: &[HelpEntry] = &[
         desc: "Expand snippet at cursor (Tab; see ~/.config/txt/snippets/)",
     },
     HelpEntry::Binding {
+        actions: &["record_macro"],
+        desc: "Record/stop keyboard macro (a–z slot)",
+    },
+    HelpEntry::Binding {
+        actions: &["replay_macro"],
+        desc: "Replay keyboard macro (a–z slot)",
+    },
+    HelpEntry::Binding {
         actions: &["open_recent_files"],
         desc: "Recent files",
     },

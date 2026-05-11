@@ -78,6 +78,10 @@ pub enum InputMode {
     SetMarkChar,
     /// Ctrl+': "Jump to mark: " — auto-submits on the next typed char.
     JumpToMarkChar,
+    /// "Record macro into slot: " — next char names the slot a–z.
+    RecordMacroChar,
+    /// "Replay macro from slot: " — next char names the slot a–z.
+    ReplayMacroChar,
 }
 
 impl InputMode {
@@ -866,6 +870,8 @@ pub struct AppState {
     pub jumps: crate::marks::JumpList,
     /// Lazy-loaded snippet store, populated per language on first use.
     pub snippets: crate::snippet::SnippetStore,
+    /// In-memory keyboard macro state (recording, slots, replay flag).
+    pub macros: crate::macros::MacroState,
     pub sidebar: Option<SidebarState>,
     pub sidebar_focused: bool,
     /// Current sidebar width in columns (excluding the 1-col separator).
@@ -993,6 +999,7 @@ impl AppState {
             marks: crate::marks::NamedMarks::load(&workspace),
             jumps: crate::marks::JumpList::load(&workspace),
             snippets: crate::snippet::SnippetStore::new(),
+            macros: crate::macros::MacroState::new(),
             sidebar: None,
             sidebar_focused: false,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
@@ -1059,6 +1066,12 @@ impl AppState {
 
         // Clear transient status error on any user interaction.
         self.status_error = None;
+
+        // Append to the in-progress macro recording (if any). The state's
+        // own `replaying` flag suppresses re-recording during playback.
+        if crate::macros::is_recordable(&action) {
+            self.macros.append(&action);
+        }
 
         // Capture undo depth before dispatch so we can detect actual buffer edits below.
         let pre_undo_depth = self.editor.active().buffer.undo_depth();
@@ -1839,6 +1852,23 @@ impl AppState {
             EditorAction::SnippetCancel => {
                 self.editor.active_mut().snippet_session = None;
             }
+            EditorAction::BeginRecordMacro => {
+                if self.macros.recording_slot().is_some() {
+                    if let Some(slot) = self.macros.stop_recording() {
+                        self.status_error = Some(format!("Recorded macro '{slot}'"));
+                    }
+                } else {
+                    self.input_mode = InputMode::RecordMacroChar;
+                }
+            }
+            EditorAction::StopRecordMacro => {
+                if let Some(slot) = self.macros.stop_recording() {
+                    self.status_error = Some(format!("Recorded macro '{slot}'"));
+                }
+            }
+            EditorAction::BeginReplayMacro => {
+                self.input_mode = InputMode::ReplayMacroChar;
+            }
             EditorAction::ToggleSidebar => {
                 if self.sidebar.is_none() {
                     // Restore saved state or create fresh, then expand to current file.
@@ -2198,6 +2228,16 @@ impl AppState {
                     }
                     return;
                 }
+                InputMode::RecordMacroChar => {
+                    self.input_mode = InputMode::Normal;
+                    self.macros.start_recording(c);
+                    return;
+                }
+                InputMode::ReplayMacroChar => {
+                    self.input_mode = InputMode::Normal;
+                    self.replay_macro_slot(c);
+                    return;
+                }
                 _ => {}
             }
         }
@@ -2239,7 +2279,11 @@ impl AppState {
                     | InputMode::AlignChar(s) => {
                         s.pop();
                     }
-                    InputMode::Normal | InputMode::SetMarkChar | InputMode::JumpToMarkChar => {}
+                    InputMode::Normal
+                    | InputMode::SetMarkChar
+                    | InputMode::JumpToMarkChar
+                    | InputMode::RecordMacroChar
+                    | InputMode::ReplayMacroChar => {}
                 }
                 return;
             }
@@ -2348,7 +2392,11 @@ impl AppState {
                             self.editor.active_mut().buffer.align_on(c);
                         }
                     }
-                    InputMode::Normal | InputMode::SetMarkChar | InputMode::JumpToMarkChar => {}
+                    InputMode::Normal
+                    | InputMode::SetMarkChar
+                    | InputMode::JumpToMarkChar
+                    | InputMode::RecordMacroChar
+                    | InputMode::ReplayMacroChar => {}
                 }
             }
             EditorAction::Quit | EditorAction::Unhandled => {
@@ -4129,6 +4177,25 @@ impl AppState {
         } else {
             self.git_gutter = None;
         }
+    }
+
+    /// Replay the actions stored in macro slot `slot`. Wraps the playback in
+    /// a single undo batch so the entire sequence collapses to one undo step,
+    /// and sets the replay flag so the actions are not re-recorded if the
+    /// user starts a new recording mid-replay.
+    fn replay_macro_slot(&mut self, slot: char) {
+        let Some(actions) = self.macros.play(slot) else {
+            self.status_error = Some(format!("No macro in slot '{slot}'"));
+            return;
+        };
+        let term_h = self.term_height;
+        self.macros.set_replaying(true);
+        self.editor.active_mut().buffer.begin_batch();
+        for action in actions {
+            self.update(action, term_h);
+        }
+        self.editor.active_mut().buffer.commit_batch();
+        self.macros.set_replaying(false);
     }
 
     /// Same logic as `expand_snippet_at_cursor` but silent: returns `false`

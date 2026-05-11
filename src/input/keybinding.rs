@@ -515,6 +515,8 @@ impl KeyBindings {
         bind("alt+right", EditorAction::JumpListForward);
         bind("ctrl+m", EditorAction::BeginSetMark);
         bind("ctrl+'", EditorAction::BeginJumpToMark);
+        bind("ctrl+shift+r", EditorAction::BeginRecordMacro);
+        bind("ctrl+alt+r", EditorAction::BeginReplayMacro);
         bind("ctrl+shift+c", EditorAction::CopyFileReference);
         bind("ctrl+shift+b", EditorAction::ToggleSidebar);
         bind("ctrl+shift+n", EditorAction::SidebarNewFolder);

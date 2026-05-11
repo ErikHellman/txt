@@ -119,10 +119,15 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
         .unwrap_or_default();
 
     let indent_str = format!(" {}", state.indent_label());
+    let rec_str = state
+        .macros
+        .recording_slot()
+        .map(|c| format!(" REC {c}"))
+        .unwrap_or_default();
 
-    // Right side: branch + word-wrap flag + LSP/TS mode + diagnostics + language + indent + position + memory + encoding
+    // Right side: branch + word-wrap flag + LSP/TS mode + diagnostics + language + indent + REC + position + memory + encoding
     let right = format!(
-        "{}{}{}{}{}{}  {}{}{}",
+        "{}{}{}{}{}{}{}  {}{}{}",
         branch_str,
         wrap_flag,
         lsp_flag,
@@ -133,6 +138,7 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
             String::new()
         },
         indent_str,
+        rec_str,
         pos,
         mem_str,
         enc
@@ -242,6 +248,8 @@ fn modal_prompt(mode: &InputMode) -> Option<String> {
         InputMode::AlignChar(s) => Some(format!(" Align lines on character: {}_", s)),
         InputMode::SetMarkChar => Some(" Mark: ".to_string()),
         InputMode::JumpToMarkChar => Some(" Jump to mark: ".to_string()),
+        InputMode::RecordMacroChar => Some(" Record macro into slot: ".to_string()),
+        InputMode::ReplayMacroChar => Some(" Replay macro from slot: ".to_string()),
     }
 }
 

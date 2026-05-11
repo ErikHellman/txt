@@ -107,6 +107,16 @@ pub static COMMANDS: &[CommandEntry] = &[
         action: || EditorAction::ExpandSnippetAtCursor,
     },
     CommandEntry {
+        name: "Record / Stop Macro",
+        key_hint: "Ctrl+Shift+R",
+        action: || EditorAction::BeginRecordMacro,
+    },
+    CommandEntry {
+        name: "Replay Macro…",
+        key_hint: "Ctrl+Alt+R",
+        action: || EditorAction::BeginReplayMacro,
+    },
+    CommandEntry {
         name: "Buffer Switcher",
         key_hint: "Ctrl+Shift+E",
         action: || EditorAction::OpenBufferSwitcher,

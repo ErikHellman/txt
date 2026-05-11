@@ -225,6 +225,15 @@ pub enum EditorAction {
     SnippetPrevStop,
     /// Cancel the active snippet session (Esc).
     SnippetCancel,
+    /// Begin a macro-recording prompt; the next typed character (a–z) names
+    /// the slot. Pressing the same hotkey while a recording is active stops
+    /// it instead of starting a new one.
+    BeginRecordMacro,
+    /// Stop the in-progress macro recording. Bound to Ctrl+Shift+R while a
+    /// recording is active (the same hotkey toggles).
+    StopRecordMacro,
+    /// Begin a replay prompt; the next typed char (a–z) selects the slot.
+    BeginReplayMacro,
     /// Toggle the file tree sidebar visibility (Ctrl+Shift+B).
     ToggleSidebar,
     /// Focus-jump between the editor and the sidebar (Ctrl+B).
@@ -421,6 +430,9 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::SnippetNextStop => "snippet_next_stop",
         EditorAction::SnippetPrevStop => "snippet_prev_stop",
         EditorAction::SnippetCancel => "snippet_cancel",
+        EditorAction::BeginRecordMacro => "record_macro",
+        EditorAction::StopRecordMacro => "stop_recording_macro",
+        EditorAction::BeginReplayMacro => "replay_macro",
         EditorAction::ToggleSidebar => "toggle_sidebar",
         EditorAction::FocusSidebar => "focus_sidebar",
         // View / UI toggles
@@ -572,6 +584,9 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "snippet_next_stop" => EditorAction::SnippetNextStop,
         "snippet_prev_stop" => EditorAction::SnippetPrevStop,
         "snippet_cancel" => EditorAction::SnippetCancel,
+        "record_macro" => EditorAction::BeginRecordMacro,
+        "stop_recording_macro" => EditorAction::StopRecordMacro,
+        "replay_macro" => EditorAction::BeginReplayMacro,
         "toggle_sidebar" => EditorAction::ToggleSidebar,
         "focus_sidebar" => EditorAction::FocusSidebar,
         // View / UI toggles
