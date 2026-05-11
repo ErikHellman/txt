@@ -273,6 +273,18 @@ const TEMPLATE: &[HelpEntry] = &[
         desc: "Symbols in file picker",
     },
     HelpEntry::Binding {
+        actions: &["toggle_fold_at_cursor"],
+        desc: "Toggle fold at cursor",
+    },
+    HelpEntry::Binding {
+        actions: &["fold_all"],
+        desc: "Fold all (Alt+0)",
+    },
+    HelpEntry::Binding {
+        actions: &["unfold_all"],
+        desc: "Unfold all (Alt+Shift+0)",
+    },
+    HelpEntry::Binding {
         actions: &["open_recent_files"],
         desc: "Recent files",
     },

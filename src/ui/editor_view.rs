@@ -20,6 +20,8 @@ const GUTTER_PAD: u16 = 1;
 const GIT_GUTTER_W: u16 = 1;
 /// Width of the diagnostic gutter column (shown when diagnostics are present).
 const DIAG_GUTTER_W: u16 = 1;
+/// Width of the fold-chevron gutter column (shown when any fold candidates exist).
+const FOLD_GUTTER_W: u16 = 1;
 
 /// Render the text editing area into the ratatui terminal buffer.
 ///
@@ -55,8 +57,12 @@ pub fn render(
     let git_col_w: u16 = if has_git { GIT_GUTTER_W } else { 0 };
     let has_diag = !handle.lsp_state.diagnostics.is_empty();
     let diag_col_w: u16 = if has_diag { DIAG_GUTTER_W } else { 0 };
+    // Fold gutter is shown only when the buffer has at least one foldable
+    // candidate range — keeps the gutter tight for plaintext and short files.
+    let has_folds = (0..total_lines).any(|i| handle.folds.is_fold_start_candidate(i));
+    let fold_col_w: u16 = if has_folds { FOLD_GUTTER_W } else { 0 };
     let gw = gutter_width(total_lines);
-    let text_area = text_area(area, gw, git_col_w, diag_col_w);
+    let text_area = text_area(area, gw, git_col_w, diag_col_w, fold_col_w);
 
     // Build per-line diagnostic severity map (highest severity per line).
     let diag_line_severity = if has_diag {
@@ -149,11 +155,16 @@ pub fn render(
     }
 
     let height = area.height as usize;
+    // Walk extra lines so folds collapsing several screen rows don't leave
+    // empty space at the bottom of the editor. 4x is a generous upper bound
+    // for typical fold ratios.
+    let walk_lines = if has_folds { height * 4 } else { height };
     let visual_lines: Vec<VisualLine> = if handle.viewport.word_wrap && text_area.width > 0 {
-        let wrapped =
-            handle
-                .viewport
-                .visible_lines_wrapped(&handle.buffer, height, text_area.width as usize);
+        let wrapped = handle.viewport.visible_lines_wrapped(
+            &handle.buffer,
+            walk_lines,
+            text_area.width as usize,
+        );
         let mut last_line = usize::MAX;
         wrapped
             .into_iter()
@@ -167,11 +178,13 @@ pub fn render(
                     is_first_seg,
                 }
             })
+            .filter(|vl| !handle.folds.is_line_hidden(vl.line_idx))
+            .take(height)
             .collect()
     } else {
         handle
             .viewport
-            .visible_lines(&handle.buffer, height)
+            .visible_lines(&handle.buffer, walk_lines)
             .map(|(line_idx, display)| {
                 let seg_byte = scroll_col_byte_offset(
                     &handle.buffer.line_str(line_idx),
@@ -184,6 +197,8 @@ pub fn render(
                     is_first_seg: true,
                 }
             })
+            .filter(|vl| !handle.folds.is_line_hidden(vl.line_idx))
+            .take(height)
             .collect()
     };
 
@@ -215,8 +230,23 @@ pub fn render(
             buf.set_string(diag_x, y, diag_sym, diag_sty);
         }
 
+        // ── Fold gutter ──────────────────────────────────────────────────────
+        if has_folds && vl.is_first_seg {
+            let fold_x = area.x + git_col_w + diag_col_w;
+            let folded = handle.folds.is_fold_start_folded(line_idx);
+            let candidate = handle.folds.is_fold_start_candidate(line_idx);
+            let (sym, sty) = if folded {
+                ("▸", Style::default().fg(Color::Rgb(220, 180, 80)))
+            } else if candidate {
+                ("▾", Style::default().fg(Color::Rgb(90, 100, 120)))
+            } else {
+                (" ", Style::default())
+            };
+            buf.set_string(fold_x, y, sym, sty);
+        }
+
         // ── Gutter (line number) ─────────────────────────────────────────────
-        let gutter_x = area.x + git_col_w + diag_col_w;
+        let gutter_x = area.x + git_col_w + diag_col_w + fold_col_w;
         let is_current_line = line_idx == cursor.line;
         let num_style = if is_current_line {
             line_num_current_style
@@ -345,6 +375,20 @@ pub fn render(
             && screen_x < max_x
         {
             buf.set_string(screen_x, y, " ", cursor_style);
+        }
+
+        // Append "▸ N lines" marker on the start line of a folded range so
+        // the reader knows the content is hidden, not just blank.
+        if vl.is_first_seg
+            && let Some(end_line) = handle.folds.folded_end_line(line_idx)
+            && screen_x + 2 < max_x
+        {
+            let n = end_line - line_idx;
+            let label = format!("  ▸ {n} lines");
+            let fold_inline_style = Style::default().fg(Color::Rgb(180, 140, 40));
+            let avail = (max_x - screen_x) as usize;
+            let clipped: String = label.chars().take(avail).collect();
+            buf.set_string(screen_x, y, &clipped, fold_inline_style);
         }
         // Draw secondary cursors at end of line.
         if is_last_seg || !handle.viewport.word_wrap {
@@ -527,8 +571,8 @@ pub fn gutter_width(total_lines: usize) -> u16 {
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
-fn text_area(area: Rect, gutter_w: u16, git_col_w: u16, diag_col_w: u16) -> Rect {
-    let gutter_total = git_col_w + diag_col_w + gutter_w + GUTTER_PAD;
+fn text_area(area: Rect, gutter_w: u16, git_col_w: u16, diag_col_w: u16, fold_col_w: u16) -> Rect {
+    let gutter_total = git_col_w + diag_col_w + fold_col_w + gutter_w + GUTTER_PAD;
     if area.width <= gutter_total {
         return Rect::new(area.x + area.width, area.y, 0, area.height);
     }
@@ -616,7 +660,7 @@ mod tests {
     #[test]
     fn text_area_layout_no_git() {
         let area = Rect::new(0, 0, 80, 24);
-        let ta = text_area(area, 3, 0, 0);
+        let ta = text_area(area, 3, 0, 0, 0);
         assert_eq!(ta.x, 4);
         assert_eq!(ta.width, 76);
     }
@@ -624,7 +668,7 @@ mod tests {
     #[test]
     fn text_area_layout_with_git_gutter() {
         let area = Rect::new(0, 0, 80, 24);
-        let ta = text_area(area, 3, GIT_GUTTER_W, 0);
+        let ta = text_area(area, 3, GIT_GUTTER_W, 0, 0);
         // git(1) + line_num(3) + pad(1) = 5
         assert_eq!(ta.x, 5);
         assert_eq!(ta.width, 75);
@@ -633,17 +677,26 @@ mod tests {
     #[test]
     fn text_area_too_narrow() {
         let area = Rect::new(0, 0, 3, 24);
-        let ta = text_area(area, 3, 0, 0);
+        let ta = text_area(area, 3, 0, 0, 0);
         assert_eq!(ta.width, 0);
     }
 
     #[test]
     fn text_area_layout_with_diagnostics() {
         let area = Rect::new(0, 0, 80, 24);
-        let ta = text_area(area, 3, GIT_GUTTER_W, DIAG_GUTTER_W);
+        let ta = text_area(area, 3, GIT_GUTTER_W, DIAG_GUTTER_W, 0);
         // git(1) + diag(1) + line_num(3) + pad(1) = 6
         assert_eq!(ta.x, 6);
         assert_eq!(ta.width, 74);
+    }
+
+    #[test]
+    fn text_area_layout_with_fold_gutter() {
+        let area = Rect::new(0, 0, 80, 24);
+        let ta = text_area(area, 3, GIT_GUTTER_W, DIAG_GUTTER_W, FOLD_GUTTER_W);
+        // git(1) + diag(1) + fold(1) + line_num(3) + pad(1) = 7
+        assert_eq!(ta.x, 7);
+        assert_eq!(ta.width, 73);
     }
 
     #[test]

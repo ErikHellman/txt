@@ -202,6 +202,12 @@ pub enum EditorAction {
     OpenFuzzyPicker,
     /// Open the symbols-in-file picker overlay (Ctrl+Shift+O).
     OpenSymbolPicker,
+    /// Toggle the fold at the cursor's line (Ctrl+Shift+[).
+    ToggleFoldAtCursor,
+    /// Fold every candidate region in the active buffer.
+    FoldAll,
+    /// Unfold every region in the active buffer.
+    UnfoldAll,
     /// Toggle the file tree sidebar visibility (Ctrl+Shift+B).
     ToggleSidebar,
     /// Focus-jump between the editor and the sidebar (Ctrl+B).
@@ -387,6 +393,9 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::JumpToLine => "jump_to_line",
         EditorAction::OpenFuzzyPicker => "open_fuzzy_picker",
         EditorAction::OpenSymbolPicker => "open_symbol_picker",
+        EditorAction::ToggleFoldAtCursor => "toggle_fold_at_cursor",
+        EditorAction::FoldAll => "fold_all",
+        EditorAction::UnfoldAll => "unfold_all",
         EditorAction::ToggleSidebar => "toggle_sidebar",
         EditorAction::FocusSidebar => "focus_sidebar",
         // View / UI toggles
@@ -527,6 +536,9 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "jump_to_line" => EditorAction::JumpToLine,
         "open_fuzzy_picker" => EditorAction::OpenFuzzyPicker,
         "open_symbol_picker" => EditorAction::OpenSymbolPicker,
+        "toggle_fold_at_cursor" => EditorAction::ToggleFoldAtCursor,
+        "fold_all" => EditorAction::FoldAll,
+        "unfold_all" => EditorAction::UnfoldAll,
         "toggle_sidebar" => EditorAction::ToggleSidebar,
         "focus_sidebar" => EditorAction::FocusSidebar,
         // View / UI toggles

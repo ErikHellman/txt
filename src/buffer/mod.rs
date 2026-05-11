@@ -1,5 +1,6 @@
 pub mod cursor;
 pub mod edit;
+pub mod folds;
 pub mod history;
 
 use ropey::Rope;

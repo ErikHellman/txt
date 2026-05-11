@@ -67,6 +67,21 @@ pub static COMMANDS: &[CommandEntry] = &[
         action: || EditorAction::OpenSymbolPicker,
     },
     CommandEntry {
+        name: "Toggle Fold at Cursor",
+        key_hint: "Ctrl+Shift+[",
+        action: || EditorAction::ToggleFoldAtCursor,
+    },
+    CommandEntry {
+        name: "Fold All",
+        key_hint: "Alt+0",
+        action: || EditorAction::FoldAll,
+    },
+    CommandEntry {
+        name: "Unfold All",
+        key_hint: "Alt+Shift+0",
+        action: || EditorAction::UnfoldAll,
+    },
+    CommandEntry {
         name: "Buffer Switcher",
         key_hint: "Ctrl+Shift+E",
         action: || EditorAction::OpenBufferSwitcher,

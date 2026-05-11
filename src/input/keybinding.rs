@@ -508,6 +508,9 @@ impl KeyBindings {
         bind("ctrl+shift+p", EditorAction::OpenCommandPalette);
         bind("ctrl+shift+e", EditorAction::OpenBufferSwitcher);
         bind("ctrl+shift+o", EditorAction::OpenSymbolPicker);
+        bind("ctrl+shift+[", EditorAction::ToggleFoldAtCursor);
+        bind("alt+0", EditorAction::FoldAll);
+        bind("alt+shift+0", EditorAction::UnfoldAll);
         bind("ctrl+shift+c", EditorAction::CopyFileReference);
         bind("ctrl+shift+b", EditorAction::ToggleSidebar);
         bind("ctrl+shift+n", EditorAction::SidebarNewFolder);

@@ -1772,6 +1772,19 @@ impl AppState {
                     self.symbol_picker = Some(SymbolPickerState::new(symbols));
                 }
             }
+            EditorAction::ToggleFoldAtCursor => {
+                let active = self.editor.active_mut();
+                let line = active.buffer.cursors.primary().line;
+                if !active.folds.toggle_at_line(line) {
+                    self.status_error = Some("No fold at cursor".to_string());
+                }
+            }
+            EditorAction::FoldAll => {
+                self.editor.active_mut().folds.fold_all();
+            }
+            EditorAction::UnfoldAll => {
+                self.editor.active_mut().folds.unfold_all();
+            }
             EditorAction::ToggleSidebar => {
                 if self.sidebar.is_none() {
                     // Restore saved state or create fresh, then expand to current file.

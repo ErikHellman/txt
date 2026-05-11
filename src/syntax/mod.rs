@@ -238,6 +238,52 @@ pub struct Symbol {
 }
 
 impl SyntaxHost {
+    /// Run the language's `@fold` query and return the byte ranges of every
+    /// foldable region (function body, class body, etc.).
+    ///
+    /// Returns an empty `Vec` when no tree is available, when the language
+    /// has no fold query, or when the query fails to compile. Ranges are
+    /// sorted by start byte; duplicates are removed.
+    pub fn fold_ranges(&self, rope: &Rope) -> Vec<ByteRange> {
+        let tree = match &self.tree {
+            Some(t) => t,
+            None => return Vec::new(),
+        };
+        let pattern = match queries::folds_query_for(self.language) {
+            Some(p) if !p.trim().is_empty() => p,
+            _ => return Vec::new(),
+        };
+        let ts_lang = match self.language.ts_language() {
+            Some(l) => l,
+            None => return Vec::new(),
+        };
+        let query = match Query::new(&ts_lang, pattern) {
+            Ok(q) => q,
+            Err(_) => return Vec::new(),
+        };
+        let source = rope.to_string();
+        let bytes = source.as_bytes();
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&query, tree.root_node(), bytes);
+        let mut out: Vec<ByteRange> = Vec::new();
+        while let Some(m) = matches.next() {
+            for cap in m.captures {
+                let r = ByteRange::new(cap.node.start_byte(), cap.node.end_byte());
+                out.push(r);
+            }
+        }
+        out.sort_by_key(|r| (r.start, r.end));
+        out.dedup();
+        // Drop folds that are entirely on a single line — folding gives no
+        // visual benefit there.
+        out.retain(|r| {
+            let start_line = rope.byte_to_line(r.start.min(rope.len_bytes()));
+            let end_line = rope.byte_to_line(r.end.min(rope.len_bytes()));
+            end_line > start_line
+        });
+        out
+    }
+
     /// Run the language-specific symbols query over the current parse tree
     /// and collect every `@symbol.<kind>` match.
     ///

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::buffer::Buffer;
+use crate::buffer::folds::FoldState;
 use crate::editor::viewport::Viewport;
 use crate::editorconfig::{EditorConfigOverrides, load_for_file};
 use crate::lsp::types::{DiagSeverity, LspDiagnostic, SemanticTokenSpan};
@@ -58,6 +59,9 @@ pub struct BufferHandle {
     /// Per-buffer overrides resolved from `.editorconfig`. Empty for buffers
     /// without a path or when no `.editorconfig` is found.
     pub editorconfig: EditorConfigOverrides,
+    /// Code-folding state, derived from the tree-sitter parse tree after
+    /// every reparse.
+    pub folds: FoldState,
 }
 
 impl BufferHandle {
@@ -71,6 +75,7 @@ impl BufferHandle {
             syntax: SyntaxHost::new(),
             lsp_state: LspState::new(),
             editorconfig: EditorConfigOverrides::default(),
+            folds: FoldState::new(),
         }
     }
 
@@ -86,6 +91,8 @@ impl BufferHandle {
         syntax.set_language(lang);
         syntax.reparse_rope(buffer.rope());
         let editorconfig = load_for_file(&path);
+        let mut folds = FoldState::new();
+        folds.refresh(buffer.rope(), &syntax.fold_ranges(buffer.rope()));
 
         Ok(Self {
             id,
@@ -95,6 +102,7 @@ impl BufferHandle {
             syntax,
             lsp_state: LspState::new(),
             editorconfig,
+            folds,
         })
     }
 
@@ -149,6 +157,8 @@ impl BufferHandle {
     pub fn reparse(&mut self) {
         let rope = self.buffer.rope().clone();
         self.syntax.reparse_rope(&rope);
+        let ranges = self.syntax.fold_ranges(&rope);
+        self.folds.refresh(&rope, &ranges);
     }
 }
 
