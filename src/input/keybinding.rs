@@ -511,6 +511,10 @@ impl KeyBindings {
         bind("ctrl+shift+[", EditorAction::ToggleFoldAtCursor);
         bind("alt+0", EditorAction::FoldAll);
         bind("alt+shift+0", EditorAction::UnfoldAll);
+        bind("alt+left", EditorAction::JumpListBack);
+        bind("alt+right", EditorAction::JumpListForward);
+        bind("ctrl+m", EditorAction::BeginSetMark);
+        bind("ctrl+'", EditorAction::BeginJumpToMark);
         bind("ctrl+shift+c", EditorAction::CopyFileReference);
         bind("ctrl+shift+b", EditorAction::ToggleSidebar);
         bind("ctrl+shift+n", EditorAction::SidebarNewFolder);
@@ -1146,10 +1150,15 @@ mod tests {
     fn for_preset_returns_correct_type() {
         let default = KeyBindings::for_preset(&KeymapPreset::Default);
         let intellij = KeyBindings::for_preset(&KeymapPreset::IntellijIdea);
-        // IntelliJ should differ from default (word nav)
+        // IntelliJ rebinds Alt+Left to word navigation; the default keymap
+        // uses it for the jump list. Both presets must therefore have
+        // *different* actions bound to Alt+Left.
         let alt_left: KeyCombo = "alt+left".parse().unwrap();
-        assert!(intellij.lookup(&alt_left).is_some());
-        assert!(default.lookup(&alt_left).is_none());
+        let in_intellij = intellij.lookup(&alt_left).cloned();
+        let in_default = default.lookup(&alt_left).cloned();
+        assert!(in_intellij.is_some());
+        assert!(in_default.is_some());
+        assert_ne!(in_intellij, in_default);
     }
 
     // ── Version-gated regeneration ──────────────────────────────────────

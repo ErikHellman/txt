@@ -208,6 +208,14 @@ pub enum EditorAction {
     FoldAll,
     /// Unfold every region in the active buffer.
     UnfoldAll,
+    /// Walk one step backward in the workspace-wide jump list (Alt+Left).
+    JumpListBack,
+    /// Walk one step forward in the workspace-wide jump list (Alt+Right).
+    JumpListForward,
+    /// Begin a mark prompt; the next typed character (a–z) names the mark.
+    BeginSetMark,
+    /// Begin a jump-to-mark prompt; the next typed character (a–z) selects.
+    BeginJumpToMark,
     /// Toggle the file tree sidebar visibility (Ctrl+Shift+B).
     ToggleSidebar,
     /// Focus-jump between the editor and the sidebar (Ctrl+B).
@@ -396,6 +404,10 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::ToggleFoldAtCursor => "toggle_fold_at_cursor",
         EditorAction::FoldAll => "fold_all",
         EditorAction::UnfoldAll => "unfold_all",
+        EditorAction::JumpListBack => "jump_list_back",
+        EditorAction::JumpListForward => "jump_list_forward",
+        EditorAction::BeginSetMark => "set_mark",
+        EditorAction::BeginJumpToMark => "jump_to_mark",
         EditorAction::ToggleSidebar => "toggle_sidebar",
         EditorAction::FocusSidebar => "focus_sidebar",
         // View / UI toggles
@@ -539,6 +551,10 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "toggle_fold_at_cursor" => EditorAction::ToggleFoldAtCursor,
         "fold_all" => EditorAction::FoldAll,
         "unfold_all" => EditorAction::UnfoldAll,
+        "jump_list_back" => EditorAction::JumpListBack,
+        "jump_list_forward" => EditorAction::JumpListForward,
+        "set_mark" => EditorAction::BeginSetMark,
+        "jump_to_mark" => EditorAction::BeginJumpToMark,
         "toggle_sidebar" => EditorAction::ToggleSidebar,
         "focus_sidebar" => EditorAction::FocusSidebar,
         // View / UI toggles

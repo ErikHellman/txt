@@ -285,6 +285,22 @@ const TEMPLATE: &[HelpEntry] = &[
         desc: "Unfold all (Alt+Shift+0)",
     },
     HelpEntry::Binding {
+        actions: &["set_mark"],
+        desc: "Set named mark (Ctrl+M then a–z)",
+    },
+    HelpEntry::Binding {
+        actions: &["jump_to_mark"],
+        desc: "Jump to named mark (Ctrl+' then a–z)",
+    },
+    HelpEntry::Binding {
+        actions: &["jump_list_back"],
+        desc: "Jump-list back",
+    },
+    HelpEntry::Binding {
+        actions: &["jump_list_forward"],
+        desc: "Jump-list forward",
+    },
+    HelpEntry::Binding {
         actions: &["open_recent_files"],
         desc: "Recent files",
     },

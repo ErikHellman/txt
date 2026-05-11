@@ -82,6 +82,26 @@ pub static COMMANDS: &[CommandEntry] = &[
         action: || EditorAction::UnfoldAll,
     },
     CommandEntry {
+        name: "Set Mark…",
+        key_hint: "Ctrl+M",
+        action: || EditorAction::BeginSetMark,
+    },
+    CommandEntry {
+        name: "Jump to Mark…",
+        key_hint: "Ctrl+'",
+        action: || EditorAction::BeginJumpToMark,
+    },
+    CommandEntry {
+        name: "Jump-list Back",
+        key_hint: "Alt+Left",
+        action: || EditorAction::JumpListBack,
+    },
+    CommandEntry {
+        name: "Jump-list Forward",
+        key_hint: "Alt+Right",
+        action: || EditorAction::JumpListForward,
+    },
+    CommandEntry {
         name: "Buffer Switcher",
         key_hint: "Ctrl+Shift+E",
         action: || EditorAction::OpenBufferSwitcher,

@@ -74,6 +74,10 @@ pub enum InputMode {
     /// non-empty character submitted (Enter takes the first char, or aborts
     /// if empty).
     AlignChar(String),
+    /// Ctrl+M: "Mark: " — auto-submits on the next typed alphabetic char.
+    SetMarkChar,
+    /// Ctrl+': "Jump to mark: " — auto-submits on the next typed char.
+    JumpToMarkChar,
 }
 
 impl InputMode {
@@ -858,6 +862,8 @@ pub struct AppState {
     pub input_mode: InputMode,
     pub fuzzy_picker: Option<FuzzyPickerState>,
     pub symbol_picker: Option<SymbolPickerState>,
+    pub marks: crate::marks::NamedMarks,
+    pub jumps: crate::marks::JumpList,
     pub sidebar: Option<SidebarState>,
     pub sidebar_focused: bool,
     /// Current sidebar width in columns (excluding the 1-col separator).
@@ -982,6 +988,8 @@ impl AppState {
             input_mode: InputMode::Normal,
             fuzzy_picker: None,
             symbol_picker: None,
+            marks: crate::marks::NamedMarks::load(&workspace),
+            jumps: crate::marks::JumpList::load(&workspace),
             sidebar: None,
             sidebar_focused: false,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
@@ -1785,6 +1793,23 @@ impl AppState {
             EditorAction::UnfoldAll => {
                 self.editor.active_mut().folds.unfold_all();
             }
+            EditorAction::JumpListBack => {
+                self.push_current_to_jump_list();
+                if let Some(entry) = self.jumps.back() {
+                    self.go_to_jump_entry(&entry);
+                }
+            }
+            EditorAction::JumpListForward => {
+                if let Some(entry) = self.jumps.forward() {
+                    self.go_to_jump_entry(&entry);
+                }
+            }
+            EditorAction::BeginSetMark => {
+                self.input_mode = InputMode::SetMarkChar;
+            }
+            EditorAction::BeginJumpToMark => {
+                self.input_mode = InputMode::JumpToMarkChar;
+            }
             EditorAction::ToggleSidebar => {
                 if self.sidebar.is_none() {
                     // Restore saved state or create fresh, then expand to current file.
@@ -1840,6 +1865,7 @@ impl AppState {
                 self.trigger_hover();
             }
             EditorAction::GoToDefinition => {
+                self.push_current_to_jump_list();
                 self.trigger_go_to_definition();
             }
             EditorAction::FindReferences => {
@@ -1978,6 +2004,23 @@ impl AppState {
         // Dismiss hover on any action.
         self.hover = None;
 
+        // Forward any buffer edits made this action to marks/jumps so their
+        // byte offsets keep tracking after inserts, deletes, and replaces.
+        // Drain regardless of `modified` so the queue never grows unbounded.
+        let pending = self.editor.active_mut().buffer.drain_pending_edits();
+        if !pending.is_empty()
+            && let Some(path) = self.editor.active().path.clone()
+        {
+            for cmd in &pending {
+                self.marks.rebase_after_edit(&path, cmd);
+                self.jumps.rebase_after_edit(&path, cmd);
+            }
+            if !pending.is_empty() {
+                self.marks.save(&self.workspace);
+                self.jumps.save(&self.workspace);
+            }
+        }
+
         // Re-parse the active buffer if it was modified this action.
         if self.editor.active().buffer.modified {
             self.editor.active_mut().reparse();
@@ -2083,6 +2126,42 @@ impl AppState {
     // ── Modal input handling ─────────────────────────────────────────────────
 
     fn handle_modal_input(&mut self, action: EditorAction) {
+        // Mark prompts auto-complete on the first typed character.
+        if let EditorAction::InsertChar(c) = action {
+            match self.input_mode {
+                InputMode::SetMarkChar => {
+                    self.input_mode = InputMode::Normal;
+                    let handle = self.editor.active();
+                    if let Some(path) = handle.path.clone() {
+                        let off = handle.buffer.cursors.primary().byte_offset;
+                        self.marks.set(&path, c, off);
+                        self.marks.save(&self.workspace);
+                    } else {
+                        self.status_error = Some("Save the file before setting a mark".into());
+                    }
+                    return;
+                }
+                InputMode::JumpToMarkChar => {
+                    self.input_mode = InputMode::Normal;
+                    let active_path = self.editor.active().path.clone();
+                    if let Some(path) = active_path
+                        && let Some(off) = self.marks.get(&path, c)
+                    {
+                        self.push_current_to_jump_list();
+                        let handle = self.editor.active_mut();
+                        let rope = handle.buffer.rope();
+                        let bound = off.min(rope.len_bytes());
+                        *handle.buffer.cursors.primary_mut() =
+                            crate::buffer::cursor::Cursor::from_byte_offset(rope, bound);
+                        handle.buffer.cursors.collapse_to_primary();
+                    } else {
+                        self.status_error = Some(format!("No mark named {c}"));
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
         // Mutate the input string for typing/backspace without accessing other fields.
         match action {
             EditorAction::InsertChar(c) => {
@@ -2121,7 +2200,7 @@ impl AppState {
                     | InputMode::AlignChar(s) => {
                         s.pop();
                     }
-                    InputMode::Normal => {}
+                    InputMode::Normal | InputMode::SetMarkChar | InputMode::JumpToMarkChar => {}
                 }
                 return;
             }
@@ -2230,7 +2309,7 @@ impl AppState {
                             self.editor.active_mut().buffer.align_on(c);
                         }
                     }
-                    InputMode::Normal => {}
+                    InputMode::Normal | InputMode::SetMarkChar | InputMode::JumpToMarkChar => {}
                 }
             }
             EditorAction::Quit | EditorAction::Unhandled => {
@@ -4011,6 +4090,33 @@ impl AppState {
         } else {
             self.git_gutter = None;
         }
+    }
+
+    /// Snapshot the active buffer's cursor into the jump list. Used right
+    /// before navigation actions (mark jumps, jump-list back) so the
+    /// previous cursor position can be returned to.
+    fn push_current_to_jump_list(&mut self) {
+        let handle = self.editor.active();
+        if let Some(path) = handle.path.clone() {
+            let byte_offset = handle.buffer.cursors.primary().byte_offset;
+            self.jumps
+                .push(crate::marks::JumpEntry { path, byte_offset });
+        }
+    }
+
+    /// Move the cursor to a jump-list entry, switching tabs if necessary.
+    fn go_to_jump_entry(&mut self, entry: &crate::marks::JumpEntry) {
+        let active_path = self.editor.active().path.clone();
+        if active_path.as_ref() != Some(&entry.path) {
+            let _ = self.editor.open_tab(entry.path.clone());
+            self.after_file_open_or_save();
+        }
+        let handle = self.editor.active_mut();
+        let rope = handle.buffer.rope();
+        let bound = entry.byte_offset.min(rope.len_bytes());
+        *handle.buffer.cursors.primary_mut() =
+            crate::buffer::cursor::Cursor::from_byte_offset(rope, bound);
+        handle.buffer.cursors.collapse_to_primary();
     }
 
     /// Called after a file is opened or saved — updates recent files, git gutter,

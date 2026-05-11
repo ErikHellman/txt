@@ -9,6 +9,7 @@ mod formatting;
 mod git;
 mod input;
 mod lsp;
+mod marks;
 mod search;
 mod syntax;
 mod theme;

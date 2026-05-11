@@ -240,6 +240,8 @@ fn modal_prompt(mode: &InputMode) -> Option<String> {
         InputMode::GitStashMessage(s) => Some(format!(" Stash message (optional): {}_", s)),
         InputMode::ShellFilter(s) => Some(format!(" Shell filter (selection): {}_", s)),
         InputMode::AlignChar(s) => Some(format!(" Align lines on character: {}_", s)),
+        InputMode::SetMarkChar => Some(" Mark: ".to_string()),
+        InputMode::JumpToMarkChar => Some(" Jump to mark: ".to_string()),
     }
 }
 
