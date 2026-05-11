@@ -166,6 +166,92 @@ impl SyntaxHost {
             None => Vec::new(),
         }
     }
+
+    /// Walk up the parse tree from `byte_offset` and collect the enclosing
+    /// named containers (functions, classes, modules, etc.) outermost first.
+    ///
+    /// Returns an empty `Vec` if no parse tree is available or if the cursor
+    /// isn't inside any named container. Names whose tree-sitter `name` field
+    /// can't be decoded are skipped silently.
+    pub fn enclosing_named_path(&self, rope: &Rope, byte_offset: usize) -> Vec<EnclosingSymbol> {
+        let tree = match &self.tree {
+            Some(t) => t,
+            None => return Vec::new(),
+        };
+        let root = tree.root_node();
+        let bound = byte_offset.min(rope.len_bytes());
+        let leaf = match root.descendant_for_byte_range(bound, bound) {
+            Some(n) => n,
+            None => return Vec::new(),
+        };
+        let mut path = Vec::new();
+        let mut node = Some(leaf);
+        while let Some(n) = node {
+            if let Some(label) = container_label(n.kind()) {
+                let name_node = ["name", "type", "path", "declarator"]
+                    .into_iter()
+                    .find_map(|f| n.child_by_field_name(f));
+                if let Some(name_node) = name_node {
+                    let start = name_node.start_byte().min(rope.len_bytes());
+                    let end = name_node.end_byte().min(rope.len_bytes());
+                    if start < end {
+                        let start_char = rope.byte_to_char(start);
+                        let end_char = rope.byte_to_char(end);
+                        let text: String = rope.slice(start_char..end_char).chars().collect();
+                        let trimmed: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                        if !trimmed.is_empty() {
+                            path.push(EnclosingSymbol {
+                                name: trimmed,
+                                kind: label,
+                            });
+                        }
+                    }
+                }
+            }
+            node = n.parent();
+        }
+        path.reverse();
+        path
+    }
+}
+
+/// One entry on an enclosing-symbol path: a node name and a short kind label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnclosingSymbol {
+    pub name: String,
+    pub kind: &'static str,
+}
+
+/// Map a tree-sitter node kind to a short label for display, or `None` if the
+/// node kind isn't a "named container" worth showing in breadcrumbs.
+fn container_label(kind: &str) -> Option<&'static str> {
+    Some(match kind {
+        // Functions / methods (covers Rust, Python, JS/TS, Go, Java, C#, Kotlin, Groovy, Bash).
+        "function_item"
+        | "function_definition"
+        | "function_declaration"
+        | "method_definition"
+        | "method_declaration"
+        | "constructor_declaration"
+        | "constructor_definition" => "fn",
+        // Rust-only.
+        "impl_item" => "impl",
+        "struct_item" => "struct",
+        "enum_item" => "enum",
+        "trait_item" => "trait",
+        "mod_item" => "mod",
+        // Classes / interfaces / objects (Java, C#, JS/TS, Python, Kotlin, Groovy).
+        "class_definition" | "class_declaration" => "class",
+        "interface_declaration" => "interface",
+        "object_declaration" => "object",
+        // C# / Kotlin namespaces.
+        "namespace_declaration" | "package_clause" => "ns",
+        // Go top-level type declarations.
+        "type_declaration" | "type_spec" => "type",
+        // Markdown structural sections.
+        "section" | "atx_heading" | "setext_heading" => "§",
+        _ => return None,
+    })
 }
 
 impl Default for SyntaxHost {
@@ -285,6 +371,41 @@ mod tests {
         host.reparse_rope(&rope2);
         assert!(host.has_tree());
         assert!(!host.tree.as_ref().unwrap().root_node().has_error());
+    }
+
+    #[test]
+    fn enclosing_path_for_function_returns_fn_only() {
+        let src = "fn foo() { let x = 1; }";
+        let (host, rope) = host_for_rust(src);
+        // Cursor inside `let x = 1;` — about byte 16.
+        let path = host.enclosing_named_path(&rope, 16);
+        // At minimum, the function `foo` is in the path.
+        assert!(
+            path.iter().any(|e| e.name == "foo" && e.kind == "fn"),
+            "expected fn foo in path, got {:?}",
+            path
+        );
+    }
+
+    #[test]
+    fn enclosing_path_for_method_inside_impl_includes_both() {
+        let src = "impl Bar { fn baz(&self) { let x = 1; } }";
+        let (host, rope) = host_for_rust(src);
+        // Cursor inside `let x = 1;` — about byte 32.
+        let path = host.enclosing_named_path(&rope, 32);
+        let kinds: Vec<&str> = path.iter().map(|e| e.kind).collect();
+        let names: Vec<&str> = path.iter().map(|e| e.name.as_str()).collect();
+        assert!(kinds.contains(&"impl"), "kinds={kinds:?}");
+        assert!(kinds.contains(&"fn"), "kinds={kinds:?}");
+        assert!(names.contains(&"Bar"), "names={names:?}");
+        assert!(names.contains(&"baz"), "names={names:?}");
+    }
+
+    #[test]
+    fn enclosing_path_no_tree_returns_empty() {
+        let host = SyntaxHost::new();
+        let rope = Rope::from_str("anything");
+        assert!(host.enclosing_named_path(&rope, 0).is_empty());
     }
 
     /// Regression: highlight span byte offsets must match the *current* source

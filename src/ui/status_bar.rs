@@ -164,13 +164,16 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
     }
 
     // Language name after modified flag
-    if !modified_str.is_empty() {
+    let after_lang_x = if !modified_str.is_empty() {
         let lang_x = modified_x + modified_str.len().min(modified_available) as u16;
         let lang_available = (right_x as usize).saturating_sub(lang_x as usize);
         if lang_available > 2 && lang != "plain" {
             let lang_label = format!("  {}", lang);
             let l = truncate_str(&lang_label, lang_available);
             buf.set_string(lang_x, area.y, &l, lang_style);
+            lang_x + l.len() as u16
+        } else {
+            lang_x
         }
     } else if lang != "plain" {
         let lang_x = modified_x;
@@ -179,6 +182,30 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
             let lang_label = format!("  {}", lang);
             let l = truncate_str(&lang_label, lang_available);
             buf.set_string(lang_x, area.y, &l, lang_style);
+            lang_x + l.len() as u16
+        } else {
+            lang_x
+        }
+    } else {
+        modified_x
+    };
+
+    // Breadcrumbs: enclosing function / class / module of the cursor.
+    if state.config.sticky_header {
+        let cursor_byte = handle.buffer.cursors.primary().byte_offset;
+        let path = handle
+            .syntax
+            .enclosing_named_path(handle.buffer.rope(), cursor_byte);
+        if !path.is_empty() {
+            let crumb_avail = (right_x as usize).saturating_sub(after_lang_x as usize + 3);
+            if crumb_avail > 4 {
+                let label = format!("  › {}", crate::ui::sticky_header::format_path(&path));
+                let trimmed = truncate_str(&label, crumb_avail);
+                let crumb_style = Style::default()
+                    .bg(theme.statusbar_bg)
+                    .fg(Color::Rgb(140, 160, 200));
+                buf.set_string(after_lang_x, area.y, &trimmed, crumb_style);
+            }
         }
     }
 }

@@ -98,6 +98,10 @@ pub struct Config {
     /// `[80, 120]`. Empty disables rulers.
     #[serde(default)]
     pub rulers: Vec<usize>,
+    /// Show a sticky header row at the top of the editor pane displaying the
+    /// enclosing function/class/module of the cursor's position.
+    #[serde(default = "default_sticky_header")]
+    pub sticky_header: bool,
 }
 
 fn default_tab_size() -> usize {
@@ -105,6 +109,10 @@ fn default_tab_size() -> usize {
 }
 
 fn default_indent_guides() -> bool {
+    true
+}
+
+fn default_sticky_header() -> bool {
     true
 }
 
@@ -123,6 +131,7 @@ impl Default for Config {
             disable_shell_filter: false,
             indent_guides: default_indent_guides(),
             rulers: Vec::new(),
+            sticky_header: default_sticky_header(),
         }
     }
 }
@@ -303,6 +312,7 @@ mod tests {
             disable_shell_filter: false,
             indent_guides: false,
             rulers: vec![80, 120],
+            sticky_header: false,
         };
         let serialized = toml::to_string(&original).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();

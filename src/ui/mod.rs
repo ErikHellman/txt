@@ -15,6 +15,7 @@ pub mod search_bar;
 pub mod settings_overlay;
 pub mod sidebar;
 pub mod status_bar;
+pub mod sticky_header;
 pub mod tab_bar;
 pub mod welcome_overlay;
 
@@ -177,6 +178,30 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
         && !state.show_welcome
         && !state.show_changelog;
 
+    // Compute the sticky header path for the active buffer's cursor and, when
+    // it's non-empty and there's room, reserve the first row of the editor
+    // pane for it.
+    let sticky_path = if state.config.sticky_header && editor_area.height >= 3 {
+        let cursor_byte = handle.buffer.cursors.primary().byte_offset;
+        handle
+            .syntax
+            .enclosing_named_path(handle.buffer.rope(), cursor_byte)
+    } else {
+        Vec::new()
+    };
+    let (header_area, editor_area) = if !sticky_path.is_empty() {
+        let header = Rect::new(editor_area.x, editor_area.y, editor_area.width, 1);
+        let body = Rect::new(
+            editor_area.x,
+            editor_area.y + 1,
+            editor_area.width,
+            editor_area.height.saturating_sub(1),
+        );
+        (Some(header), body)
+    } else {
+        (None, editor_area)
+    };
+
     editor_view::render(
         handle,
         state.search_state.as_ref(),
@@ -191,6 +216,10 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
         editor_area,
         buf,
     );
+
+    if let Some(ha) = header_area {
+        sticky_header::render(&sticky_path, ha, buf);
+    }
 
     if let Some(sa) = search_area_opt
         && let Some(ss) = &state.search_state
