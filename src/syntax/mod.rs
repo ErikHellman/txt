@@ -571,6 +571,28 @@ mod tests {
         assert!(host.enclosing_named_path(&rope, 0).is_empty());
     }
 
+    /// Regression for the sticky header: walking down through an `impl`
+    /// block must land on the *current* method, not a sibling. The user
+    /// reported the header staying on the first function of a class even
+    /// after scrolling into the second.
+    #[test]
+    fn enclosing_path_tracks_current_method_in_multi_method_impl() {
+        let src = "impl Bar {\n    fn first() { let x = 1; }\n    fn second() { let y = 2; }\n}\n";
+        let (host, rope) = host_for_rust(src);
+        let byte = src.find("let y = 2").expect("test source must contain y");
+        let path = host.enclosing_named_path(&rope, byte);
+        let names: Vec<&str> = path.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"Bar"), "names={names:?}");
+        assert!(
+            names.contains(&"second"),
+            "expected the second method to be in the path, got {names:?}"
+        );
+        assert!(
+            !names.contains(&"first"),
+            "first method must not be in the path, got {names:?}"
+        );
+    }
+
     #[test]
     fn collect_symbols_rust_finds_functions() {
         let src = "fn alpha() {}\nfn beta() { let x = 1; }\nstruct Gamma { x: u32 }\n";

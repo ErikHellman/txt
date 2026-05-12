@@ -181,14 +181,23 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
         && !state.show_welcome
         && !state.show_changelog;
 
-    // Compute the sticky header path for the active buffer's cursor and, when
-    // it's non-empty and there's room, reserve the first row of the editor
-    // pane for it.
+    // Compute the sticky header path from the *top visible line* of the
+    // editor pane (not the cursor) so that scrolling through a class
+    // updates the header even when the cursor stays put. The cursor's
+    // position is a poor signal here: a user reading code by scrolling
+    // would otherwise see the header stuck on whichever function the
+    // cursor happens to be inside.
     let sticky_path = if state.config.sticky_header && editor_area.height >= 3 {
-        let cursor_byte = handle.buffer.cursors.primary().byte_offset;
-        handle
-            .syntax
-            .enclosing_named_path(handle.buffer.rope(), cursor_byte)
+        let rope = handle.buffer.rope();
+        let scroll_row = handle.viewport.scroll_row;
+        let total_lines = rope.len_lines();
+        let top_line = scroll_row.min(total_lines.saturating_sub(1));
+        let top_byte = if top_line >= total_lines {
+            rope.len_bytes()
+        } else {
+            rope.line_to_byte(top_line)
+        };
+        handle.syntax.enclosing_named_path(rope, top_byte)
     } else {
         Vec::new()
     };
