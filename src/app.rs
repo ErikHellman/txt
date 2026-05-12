@@ -4489,6 +4489,63 @@ impl AppState {
         });
     }
 
+    /// Build a `Session` snapshot of the current editor state and write it
+    /// to `<workspace>/.txt/session.json`. Called once on clean shutdown
+    /// when `restore_session = true`. Buffers without a saved path are
+    /// skipped — they have nothing to reopen on the next launch.
+    fn save_session(&self) {
+        use crate::session::{Session, TabState};
+        let mut tabs = Vec::new();
+        let mut active_in_session = 0usize;
+        let active_idx = self.editor.active_idx;
+        for (i, tab) in self.editor.tabs.iter().enumerate() {
+            let Some(path) = &tab.path else {
+                continue;
+            };
+            if i <= active_idx {
+                active_in_session = tabs.len();
+            }
+            tabs.push(TabState {
+                path: path.clone(),
+                cursor_byte: tab.buffer.cursors.primary().byte_offset,
+                viewport_top: tab.viewport.scroll_row,
+            });
+        }
+        let session = Session {
+            tabs,
+            active: active_in_session,
+            sidebar_open: self.sidebar.is_some(),
+        };
+        session.save(&self.workspace);
+    }
+
+    /// Open every tab listed in `session` and restore cursor positions /
+    /// viewport tops. Files that no longer exist on disk are skipped.
+    /// Returns `true` when at least one tab was restored.
+    pub fn restore_from_session(&mut self, session: crate::session::Session) -> bool {
+        let mut restored_any = false;
+        for tab in &session.tabs {
+            if !tab.path.exists() {
+                continue;
+            }
+            if self.editor.open_tab(tab.path.clone()).is_ok() {
+                let buf = &mut self.editor.active_mut().buffer;
+                let bound = tab.cursor_byte.min(buf.rope().len_bytes());
+                *buf.cursors.primary_mut() =
+                    crate::buffer::cursor::Cursor::from_byte_offset(buf.rope(), bound);
+                self.editor.active_mut().viewport.scroll_row = tab.viewport_top;
+                restored_any = true;
+            }
+        }
+        if restored_any && session.active < self.editor.tabs.len() {
+            self.editor.active_idx = session.active;
+        }
+        if session.sidebar_open && self.sidebar.is_none() {
+            self.sidebar = Some(SidebarState::new());
+        }
+        restored_any
+    }
+
     fn refresh_git_gutter(&mut self) {
         let path = self.editor.active().path.clone();
         if let Some(path) = path {
@@ -6092,11 +6149,19 @@ impl App {
         editor: Editor,
         open_sidebar: bool,
         workspace: PathBuf,
+        pending_session: Option<crate::session::Session>,
     ) -> Result<()> {
         let mut state = AppState::new(editor, workspace);
         if open_sidebar {
             state.sidebar = Some(SidebarState::new());
             state.sidebar_focused = true;
+        }
+        // Honour `restore_session = true`: re-open the previously saved
+        // tabs before painting the first frame. Skips silently when no
+        // session is pending.
+        if let Some(session) = pending_session {
+            state.restore_from_session(session);
+            state.refresh_git_gutter();
         }
 
         // Only re-anchor the viewport on the cursor when something actually
@@ -6180,6 +6245,12 @@ impl App {
             if state.should_quit {
                 break;
             }
+        }
+
+        // Persist the session for the next launch when the user has opted
+        // in. Silent on I/O failures.
+        if state.config.restore_session {
+            state.save_session();
         }
 
         Ok(())
