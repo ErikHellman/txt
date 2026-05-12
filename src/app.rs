@@ -42,6 +42,11 @@ pub const MIN_SIDEBAR_WIDTH: u16 = 12;
 /// to half the terminal width so the editor stays usable.
 pub const MAX_SIDEBAR_WIDTH: u16 = 80;
 
+/// Maximum delay between two left-clicks at the same screen cell for the
+/// second click to register as a double-click (which selects the word under
+/// the cursor).
+const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(500);
+
 // ── Modal input mode ─────────────────────────────────────────────────────────
 
 /// Modes that capture keyboard input for a status-bar prompt.
@@ -802,19 +807,29 @@ pub struct PendingLspApproval {
 }
 
 /// Built-in LSP server definitions the user can choose from.
-pub const LSP_SERVER_OPTIONS: &[(&str, &str, &[&str])] = &[
-    // (display name / key, command, args)
-    ("rust-analyzer", "rust-analyzer", &[]),
-    ("pyright", "pyright-langserver", &["--stdio"]),
+/// Sorted alphabetically by language display name.
+pub const LSP_SERVER_OPTIONS: &[(&str, &str, &str, &[&str])] = &[
+    // (language display, server key written to lsp.toml, command, args)
+    ("C#", "omnisharp", "omnisharp", &["-lsp"]),
+    ("C/C++", "clangd", "clangd", &[]),
+    ("Go", "gopls", "gopls", &["serve"]),
+    ("Java", "jdtls", "jdtls", &[]),
     (
+        "Kotlin",
+        "kotlin-language-server",
+        "kotlin-language-server",
+        &[],
+    ),
+    ("Lua", "lua-language-server", "lua-language-server", &[]),
+    ("Python", "pyright", "pyright-langserver", &["--stdio"]),
+    ("Rust", "rust-analyzer", "rust-analyzer", &[]),
+    (
+        "TypeScript",
         "typescript-language-server",
         "typescript-language-server",
         &["--stdio"],
     ),
-    ("clangd", "clangd", &[]),
-    ("gopls", "gopls", &["serve"]),
-    ("lua-language-server", "lua-language-server", &[]),
-    ("zls", "zls", &[]),
+    ("Zig", "zls", "zls", &[]),
 ];
 
 /// State for the LSP configuration picker overlay.
@@ -835,7 +850,7 @@ impl LspPickerState {
                 .and_then(|key| {
                     LSP_SERVER_OPTIONS
                         .iter()
-                        .position(|(name, _, _)| *name == key)
+                        .position(|(_, name, _, _)| *name == key)
                         .map(|i| i + 1)
                 })
                 .unwrap_or(0)
@@ -890,6 +905,11 @@ pub struct AppState {
     /// Active Alt+drag box-select anchor, in (line, display_col).
     /// Set on `BoxDragStart`, used by `BoxDragUpdate`, cleared on `BoxDragEnd`.
     pub box_drag_anchor: Option<(usize, usize)>,
+    /// Time and screen position of the most recent left-click in the editor
+    /// area. A subsequent click at the same `(col, row)` within
+    /// `DOUBLE_CLICK_INTERVAL` is treated as a double-click and selects the
+    /// word at the click position.
+    last_click: Option<(Instant, u16, u16)>,
     saved_sidebar: Option<SidebarState>,
     pub sidebar_clipboard: Option<SidebarClipboard>,
     pub search_state: Option<SearchState>,
@@ -1011,6 +1031,7 @@ impl AppState {
             tab_bar_area: None,
             sidebar_drag: None,
             box_drag_anchor: None,
+            last_click: None,
             saved_sidebar: None,
             sidebar_clipboard: None,
             search_state: None,
@@ -1536,12 +1557,14 @@ impl AppState {
                 if let Some(idx) = self.tab_bar_tab_at(col, row) {
                     self.editor.go_to_tab(idx);
                     self.sidebar_focused = false;
+                    self.last_click = None;
                 } else if self.point_on_separator(col, row) {
                     // Begin a sidebar resize drag.
                     self.sidebar_drag = Some(SidebarDrag {
                         start_col: col,
                         start_width: self.sidebar_width,
                     });
+                    self.last_click = None;
                 } else if self.point_in_sidebar(col, row) {
                     if let Some(idx) = self.sidebar_entry_at(row) {
                         self.sidebar_focused = true;
@@ -1568,15 +1591,38 @@ impl AppState {
                             }
                         }
                     }
+                    self.last_click = None;
                 } else {
                     // Click in the editor area: defocus the sidebar (if focused)
-                    // and move the cursor to the click target.
+                    // and move the cursor to the click target. A second click
+                    // at the same cell within DOUBLE_CLICK_INTERVAL selects the
+                    // word under the cursor instead of just moving.
                     self.sidebar_focused = false;
                     if let Some(offset) = self.screen_to_byte(col, row) {
-                        self.editor
-                            .active_mut()
-                            .buffer
-                            .move_cursor_to(offset, false);
+                        let is_double_click = self.last_click.is_some_and(|(t, c, r)| {
+                            c == col && r == row && t.elapsed() <= DOUBLE_CLICK_INTERVAL
+                        });
+                        if is_double_click {
+                            let span = crate::buffer::cursor::word_span_at(
+                                self.editor.active().buffer.rope(),
+                                offset,
+                            );
+                            let buf = &mut self.editor.active_mut().buffer;
+                            if let Some((start, end)) = span {
+                                buf.move_cursor_to(start, false);
+                                buf.move_cursor_to(end, true);
+                            } else {
+                                buf.move_cursor_to(offset, false);
+                            }
+                            // Reset so a third click starts a fresh single-click sequence.
+                            self.last_click = None;
+                        } else {
+                            self.editor
+                                .active_mut()
+                                .buffer
+                                .move_cursor_to(offset, false);
+                            self.last_click = Some((Instant::now(), col, row));
+                        }
                     }
                 }
             }
@@ -3242,7 +3288,7 @@ impl AppState {
             // Disabled
             WorkspaceLspConfig::default()
         } else {
-            let (name, command, args) = LSP_SERVER_OPTIONS[selected - 1];
+            let (_language, name, command, args) = LSP_SERVER_OPTIONS[selected - 1];
             let mut servers = HashMap::new();
             servers.insert(
                 name.to_string(),
@@ -5489,24 +5535,14 @@ impl AppState {
     }
 
     fn screen_to_byte(&self, col: u16, row: u16) -> Option<usize> {
-        let editor_area_y: u16 = if self.editor.tab_count() > 1 { 1 } else { 0 };
-        // If sidebar is open the editor area starts further right; don't click into sidebar.
-        let sidebar_offset: u16 = if self.sidebar.is_some() {
-            self.sidebar_width + 1
-        } else {
-            0
-        };
-        if self.sidebar.is_some() && col < sidebar_offset {
-            return None;
-        }
-        let adjusted_col = col.saturating_sub(sidebar_offset);
-        let gutter = gutter_width(self.editor.active().buffer.len_lines());
-        let gutter_cols = gutter + 1;
+        let (adjusted_col, editor_area_y, gutter_cols, text_width) =
+            self.screen_mouse_geometry(col)?;
         Some(screen_pos_to_byte_offset(
             adjusted_col,
             row,
             editor_area_y,
             gutter_cols,
+            text_width,
             &self.editor.active().buffer,
             &self.editor.active().viewport,
         ))
@@ -5515,6 +5551,24 @@ impl AppState {
     /// Convert a screen position into `(line, display_col)` for box selection.
     /// Returns `None` if the click landed in the sidebar.
     fn screen_to_line_col(&self, col: u16, row: u16) -> Option<(usize, usize)> {
+        let (adjusted_col, editor_area_y, gutter_cols, text_width) =
+            self.screen_mouse_geometry(col)?;
+        Some(screen_pos_to_line_display_col(
+            adjusted_col,
+            row,
+            editor_area_y,
+            gutter_cols,
+            text_width,
+            &self.editor.active().buffer,
+            &self.editor.active().viewport,
+        ))
+    }
+
+    /// Shared geometry for mouse-to-buffer conversion: returns
+    /// `(adjusted_col, editor_area_y, gutter_cols, text_width)`, or `None`
+    /// when the click is inside the sidebar. `text_width` matches the column
+    /// width the renderer uses for word wrap.
+    fn screen_mouse_geometry(&self, col: u16) -> Option<(u16, u16, u16, u16)> {
         let editor_area_y: u16 = if self.editor.tab_count() > 1 { 1 } else { 0 };
         let sidebar_offset: u16 = if self.sidebar.is_some() {
             self.sidebar_width + 1
@@ -5525,16 +5579,30 @@ impl AppState {
             return None;
         }
         let adjusted_col = col.saturating_sub(sidebar_offset);
-        let gutter = gutter_width(self.editor.active().buffer.len_lines());
-        let gutter_cols = gutter + 1;
-        Some(screen_pos_to_line_display_col(
-            adjusted_col,
-            row,
-            editor_area_y,
-            gutter_cols,
-            &self.editor.active().buffer,
-            &self.editor.active().viewport,
-        ))
+        let handle = self.editor.active();
+        let total_lines = handle.buffer.len_lines();
+        let gutter = gutter_width(total_lines);
+        let git_col_w: u16 = if self.git_gutter.is_some() {
+            crate::ui::editor_view::GIT_GUTTER_W
+        } else {
+            0
+        };
+        let diag_col_w: u16 = if !handle.lsp_state.diagnostics.is_empty() {
+            crate::ui::editor_view::DIAG_GUTTER_W
+        } else {
+            0
+        };
+        let has_folds = (0..total_lines).any(|i| handle.folds.is_fold_start_candidate(i));
+        let fold_col_w: u16 = if has_folds {
+            crate::ui::editor_view::FOLD_GUTTER_W
+        } else {
+            0
+        };
+        let gutter_cols =
+            git_col_w + diag_col_w + fold_col_w + gutter + crate::ui::editor_view::GUTTER_PAD;
+        let editor_area_w = self.term_width.saturating_sub(sidebar_offset);
+        let text_width = editor_area_w.saturating_sub(gutter_cols);
+        Some((adjusted_col, editor_area_y, gutter_cols, text_width))
     }
 }
 
