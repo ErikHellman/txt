@@ -87,6 +87,9 @@ pub enum InputMode {
     RecordMacroChar,
     /// "Replay macro from slot: " — next char names the slot a–z.
     ReplayMacroChar,
+    /// Alt+': "Surround with: " — wraps the current selection in a chosen
+    /// delimiter pair on the next typed character.
+    SurroundChar,
 }
 
 impl InputMode {
@@ -1302,14 +1305,26 @@ impl AppState {
 
             // ── Text insertion ────────────────────────────────────────
             EditorAction::InsertChar(c) => {
-                let (indent, rules) = self.indent_for_active();
-                if self.editor.active().buffer.cursors.is_multi() {
-                    self.editor.active_mut().buffer.multi_insert_char(c);
-                } else {
-                    self.editor
-                        .active_mut()
-                        .buffer
-                        .insert_char_with_indent(c, &indent, rules);
+                // Auto-pair: when the user types one of the configured open
+                // delimiters with no active selection, also insert the
+                // matching close delimiter and step the cursor back one byte
+                // so they keep typing inside the pair. Skip-on-close: when
+                // the user types a close delimiter and the next char already
+                // is that close, just advance the cursor instead of
+                // inserting a duplicate.
+                let auto_paired = self.config.auto_pair
+                    && !self.editor.active().buffer.cursors.is_multi()
+                    && self.try_auto_pair(c);
+                if !auto_paired {
+                    let (indent, rules) = self.indent_for_active();
+                    if self.editor.active().buffer.cursors.is_multi() {
+                        self.editor.active_mut().buffer.multi_insert_char(c);
+                    } else {
+                        self.editor
+                            .active_mut()
+                            .buffer
+                            .insert_char_with_indent(c, &indent, rules);
+                    }
                 }
             }
             EditorAction::InsertNewline => {
@@ -1946,6 +1961,9 @@ impl AppState {
             EditorAction::BeginReplayMacro => {
                 self.input_mode = InputMode::ReplayMacroChar;
             }
+            EditorAction::BeginSurround => {
+                self.input_mode = InputMode::SurroundChar;
+            }
             EditorAction::ToggleSidebar => {
                 if self.sidebar.is_none() {
                     // Restore saved state or create fresh, then expand to current file.
@@ -2324,6 +2342,11 @@ impl AppState {
                     self.replay_macro_slot(c);
                     return;
                 }
+                InputMode::SurroundChar => {
+                    self.input_mode = InputMode::Normal;
+                    self.apply_surround(c);
+                    return;
+                }
                 _ => {}
             }
         }
@@ -2369,7 +2392,8 @@ impl AppState {
                     | InputMode::SetMarkChar
                     | InputMode::JumpToMarkChar
                     | InputMode::RecordMacroChar
-                    | InputMode::ReplayMacroChar => {}
+                    | InputMode::ReplayMacroChar
+                    | InputMode::SurroundChar => {}
                 }
                 return;
             }
@@ -2484,7 +2508,8 @@ impl AppState {
                     | InputMode::SetMarkChar
                     | InputMode::JumpToMarkChar
                     | InputMode::RecordMacroChar
-                    | InputMode::ReplayMacroChar => {}
+                    | InputMode::ReplayMacroChar
+                    | InputMode::SurroundChar => {}
                 }
             }
             EditorAction::Quit | EditorAction::Unhandled => {
@@ -5507,6 +5532,112 @@ impl AppState {
     }
 
     // ── Coordinate helpers ───────────────────────────────────────────────────
+
+    /// Try to handle `c` as a bracket-pair insertion or skip-on-close.
+    /// Returns `true` when this method consumed the keystroke; the caller
+    /// must skip the normal insert path. Caller already ensured the buffer
+    /// is single-cursor and `config.auto_pair` is on.
+    fn try_auto_pair(&mut self, c: char) -> bool {
+        // Pair table — opener → closer. Symmetric pairs (`"` etc.) close
+        // with the same character.
+        let pair_for = |ch: char| -> Option<char> {
+            match ch {
+                '(' => Some(')'),
+                '[' => Some(']'),
+                '{' => Some('}'),
+                '"' => Some('"'),
+                '\'' => Some('\''),
+                '`' => Some('`'),
+                _ => None,
+            }
+        };
+        let close_for = |ch: char| -> bool { matches!(ch, ')' | ']' | '}' | '"' | '\'' | '`') };
+
+        let buf = &mut self.editor.active_mut().buffer;
+        let cursor = buf.cursors.primary();
+        if cursor.has_selection() {
+            return false;
+        }
+        let at = cursor.byte_offset;
+        let rope = buf.rope();
+        let next_char = if at < rope.len_bytes() {
+            let ch_idx = rope.byte_to_char(at);
+            rope.chars_at(ch_idx).next()
+        } else {
+            None
+        };
+        let prev_char = if at > 0 {
+            let ch_idx = rope.byte_to_char(at);
+            // Walk one char back.
+            let mut iter = rope.chars_at(ch_idx);
+            iter.prev()
+        } else {
+            None
+        };
+
+        // Skip-on-close: typing `)` over an existing `)` just advances.
+        if close_for(c) && next_char == Some(c) {
+            let new_off = at + c.len_utf8();
+            buf.move_cursor_to(new_off, false);
+            return true;
+        }
+
+        // Auto-open: insert `(` `)` and step back. Symmetric pairs need extra
+        // care to avoid pairing a closing quote with itself when the cursor
+        // is right after a word character (e.g. `let's` → don't pair the
+        // apostrophe).
+        if let Some(close) = pair_for(c) {
+            let is_symmetric = c == close;
+            if is_symmetric {
+                // Don't auto-pair quotes when adjacent to a word char on
+                // either side (prevents the `let's` case and contractions).
+                let is_word = |ch: Option<char>| match ch {
+                    Some(c) => c.is_alphanumeric() || c == '_',
+                    None => false,
+                };
+                if is_word(prev_char) || is_word(next_char) {
+                    return false;
+                }
+            }
+            let mut pair = String::with_capacity(c.len_utf8() + close.len_utf8());
+            pair.push(c);
+            pair.push(close);
+            buf.insert_str(&pair);
+            // Step the cursor back one char so the user types inside the pair.
+            let after = buf.cursors.primary().byte_offset;
+            let target = after.saturating_sub(close.len_utf8());
+            buf.move_cursor_to(target, false);
+            return true;
+        }
+        false
+    }
+
+    /// Wrap the active selection (or word at the cursor) in the delimiter
+    /// pair chosen by `ch`. Symmetric punctuation (e.g. `"`, `'`) uses the
+    /// same character on both sides.
+    fn apply_surround(&mut self, ch: char) {
+        let pair: Option<(String, String)> = match ch {
+            '(' | ')' => Some(("(".into(), ")".into())),
+            '[' | ']' => Some(("[".into(), "]".into())),
+            '{' | '}' => Some(("{".into(), "}".into())),
+            '<' | '>' => Some(("<".into(), ">".into())),
+            '"' | '\'' | '`' => Some((ch.to_string(), ch.to_string())),
+            c if c.is_ascii_punctuation() => Some((c.to_string(), c.to_string())),
+            _ => None,
+        };
+        let Some((open, close)) = pair else {
+            self.status_error = Some(format!("No surround pair for '{ch}'"));
+            return;
+        };
+        let ok = self
+            .editor
+            .active_mut()
+            .buffer
+            .surround_selection(&open, &close);
+        if !ok {
+            self.status_error = Some("No selection or word to surround".into());
+        }
+    }
 
     fn selected_text(&self) -> Option<String> {
         let cursor = self.editor.active().buffer.cursors.primary();

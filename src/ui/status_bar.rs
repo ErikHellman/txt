@@ -256,6 +256,7 @@ fn modal_prompt(mode: &InputMode) -> Option<String> {
         InputMode::JumpToMarkChar => Some(" Jump to mark: ".to_string()),
         InputMode::RecordMacroChar => Some(" Record macro into slot: ".to_string()),
         InputMode::ReplayMacroChar => Some(" Replay macro from slot: ".to_string()),
+        InputMode::SurroundChar => Some(" Surround with: ".to_string()),
     }
 }
 

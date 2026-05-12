@@ -525,6 +525,7 @@ impl KeyBindings {
         bind("ctrl+shift+g", EditorAction::OpenGitDialog);
         bind("ctrl+shift+f", EditorAction::OpenProjectSearch);
         bind("ctrl+shift+v", EditorAction::OpenClipboardRing);
+        bind("alt+'", EditorAction::BeginSurround);
 
         // ── Box / column selection ────────────────────────────────────
         bind(

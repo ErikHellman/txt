@@ -220,6 +220,10 @@ const TEMPLATE: &[HelpEntry] = &[
         actions: &["open_clipboard_ring"],
         desc: "Clipboard ring (recent yanks)",
     },
+    HelpEntry::Binding {
+        actions: &["surround"],
+        desc: "Surround selection with delimiter (next char picks pair)",
+    },
     // ── File & Tabs ──────────────────────────────────────────────────
     HelpEntry::Section("File & Tabs"),
     HelpEntry::Binding {

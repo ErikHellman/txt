@@ -153,6 +153,63 @@ fn mixed_indent_absent_for_pure_spaces() {
     s.shutdown();
 }
 
+// ── Tier 3 — 3.4 auto-pair + surround ────────────────────────────────────
+
+#[test]
+fn auto_pair_inserts_matching_close_paren() {
+    let fx = Fixture::new();
+    let path = fx.write_file("ap.txt", "\n");
+    let mut s = fx.open(&path);
+    s.wait_for_status_contains("1:1");
+    s.send_key(Key::Char('('));
+    // After "(", cursor should still be at col 2 (sitting inside the pair),
+    // but the buffer should contain "()" on line 1.
+    s.wait_until(
+        |sc| sc.contents().contains("()"),
+        std::time::Duration::from_secs(5),
+    );
+    // Status bar should show 1:2 (inside the pair) rather than 1:3.
+    s.assert_status_contains("1:2");
+    s.shutdown();
+}
+
+#[test]
+fn auto_pair_skip_over_existing_close() {
+    let fx = Fixture::new();
+    let path = fx.write_file("skip.txt", "\n");
+    let mut s = fx.open(&path);
+    s.wait_for_status_contains("1:1");
+    // Type "(" → auto-pair creates "(|)", then type ")" — should just move past it.
+    s.send_keys(&[Key::Char('('), Key::Char(')')]);
+    s.wait_until(
+        |sc| sc.contents().contains("()"),
+        std::time::Duration::from_secs(5),
+    );
+    // Cursor now should be just after the close (col 3).
+    s.assert_status_contains("1:3");
+    s.shutdown();
+}
+
+#[test]
+fn surround_wraps_selection_in_quotes() {
+    let fx = Fixture::new();
+    let path = fx.write_file("sur.txt", "hello\n");
+    let mut s = fx.open(&path);
+    s.wait_for_status_contains("1:1");
+    // Select "hello" and trigger surround → "
+    s.send_keys(&[
+        Key::Home,
+        Key::ShiftArrow(ui_common::Arrow::End),
+        Key::Alt('\''),
+        Key::Char('"'),
+    ]);
+    s.wait_until(
+        |sc| sc.contents().contains("\"hello\""),
+        std::time::Duration::from_secs(5),
+    );
+    s.shutdown();
+}
+
 #[test]
 fn trailing_whitespace_highlight_renders() {
     // Trailing spaces on a line other than the cursor's must show with the

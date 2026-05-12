@@ -234,6 +234,10 @@ pub enum EditorAction {
     StopRecordMacro,
     /// Begin a replay prompt; the next typed char (a–z) selects the slot.
     BeginReplayMacro,
+    /// Begin a surround prompt; the next typed char picks the delimiter pair
+    /// and wraps the current selection (or word under cursor when no
+    /// selection is active). Bound to Alt+' by default.
+    BeginSurround,
     /// Toggle the file tree sidebar visibility (Ctrl+Shift+B).
     ToggleSidebar,
     /// Focus-jump between the editor and the sidebar (Ctrl+B).
@@ -435,6 +439,7 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::BeginRecordMacro => "record_macro",
         EditorAction::StopRecordMacro => "stop_recording_macro",
         EditorAction::BeginReplayMacro => "replay_macro",
+        EditorAction::BeginSurround => "surround",
         EditorAction::ToggleSidebar => "toggle_sidebar",
         EditorAction::FocusSidebar => "focus_sidebar",
         // View / UI toggles
@@ -590,6 +595,7 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "record_macro" => EditorAction::BeginRecordMacro,
         "stop_recording_macro" => EditorAction::StopRecordMacro,
         "replay_macro" => EditorAction::BeginReplayMacro,
+        "surround" => EditorAction::BeginSurround,
         "toggle_sidebar" => EditorAction::ToggleSidebar,
         "focus_sidebar" => EditorAction::FocusSidebar,
         // View / UI toggles
