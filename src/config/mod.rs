@@ -91,8 +91,8 @@ pub struct Config {
     #[serde(default)]
     pub disable_shell_filter: bool,
     /// Exclude the `.git` directory from go-to-file and project search.
-    /// Implied when `hide_dot_folders` is true.
-    #[serde(default)]
+    /// Implied when `hide_dot_folders` is true. Defaults to `true`.
+    #[serde(default = "default_hide_git_folder")]
     pub hide_git_folder: bool,
     /// Exclude every dot-prefixed directory from go-to-file and project search.
     #[serde(default)]
@@ -101,6 +101,10 @@ pub struct Config {
 
 fn default_tab_size() -> usize {
     4
+}
+
+fn default_hide_git_folder() -> bool {
+    true
 }
 
 impl Default for Config {
@@ -116,7 +120,7 @@ impl Default for Config {
             last_seen_version: None,
             formatting: FormattingConfig::default(),
             disable_shell_filter: false,
-            hide_git_folder: false,
+            hide_git_folder: true,
             hide_dot_folders: false,
         }
     }
@@ -318,17 +322,25 @@ mod tests {
     }
 
     #[test]
-    fn hide_folder_defaults_false() {
+    fn hide_folder_defaults() {
         let cfg = Config::default();
-        assert!(!cfg.hide_git_folder);
+        assert!(cfg.hide_git_folder);
         assert!(!cfg.hide_dot_folders);
     }
 
     #[test]
-    fn hide_folder_round_trips() {
-        let toml_text = "hide_git_folder = true\nhide_dot_folders = true\n";
-        let cfg: Config = toml::from_str(toml_text).unwrap();
+    fn hide_git_folder_default_applies_to_partial_toml() {
+        // Missing hide_git_folder must deserialise to true (matching Default),
+        // not to bool's intrinsic false.
+        let cfg: Config = toml::from_str("tab_size = 2\n").unwrap();
         assert!(cfg.hide_git_folder);
+    }
+
+    #[test]
+    fn hide_folder_round_trips() {
+        let toml_text = "hide_git_folder = false\nhide_dot_folders = true\n";
+        let cfg: Config = toml::from_str(toml_text).unwrap();
+        assert!(!cfg.hide_git_folder);
         assert!(cfg.hide_dot_folders);
     }
 
