@@ -68,6 +68,61 @@ fn session_not_restored_when_disabled() {
 }
 
 #[test]
+fn settings_overlay_lists_restore_session_toggle() {
+    // The persistent-session toggle must be reachable from the settings
+    // overlay (Ctrl+,) so the user doesn't have to hand-edit config.toml.
+    let fx = Fixture::new();
+    let path = fx.write_file("toggle.txt", "x\n");
+    let mut s = TxtSession::launch(
+        SessionOptions::new(fx.workspace_path(), fx.config_path()).arg(path.to_string_lossy()),
+    );
+    s.wait_for_first_paint();
+    s.wait_for_status_contains("toggle.txt");
+    s.send_key(Key::Ctrl(','));
+    s.wait_for_screen_contains("Settings");
+    s.wait_for_screen_contains("Restore session");
+    s.shutdown();
+}
+
+#[test]
+fn settings_overlay_toggle_persists_restore_session() {
+    // Toggling "Restore session" with Space in the overlay must write
+    // restore_session = true into config.toml so the next launch picks
+    // it up.
+    let fx = Fixture::new();
+    let path = fx.write_file("set.txt", "x\n");
+    let mut s = TxtSession::launch(
+        SessionOptions::new(fx.workspace_path(), fx.config_path()).arg(path.to_string_lossy()),
+    );
+    s.wait_for_first_paint();
+    s.wait_for_status_contains("set.txt");
+    s.send_key(Key::Ctrl(','));
+    s.wait_for_screen_contains("Restore session");
+    // Settings cursor starts at row 0 (Confirm exit); restore_session is row 5.
+    for _ in 0..5 {
+        s.send_key(Key::Down);
+    }
+    // Space toggles the bool — wait for [ON] to appear on the same row.
+    s.send_key(Key::Char(' '));
+    s.wait_until(
+        |sc| {
+            sc.contents()
+                .lines()
+                .any(|l| l.contains("Restore session") && l.contains("[ON]"))
+        },
+        std::time::Duration::from_secs(5),
+    );
+    s.shutdown();
+
+    // Verify the value was persisted to disk.
+    let cfg = std::fs::read_to_string(fx.config_path().join("config.toml")).unwrap();
+    assert!(
+        cfg.contains("restore_session = true"),
+        "config.toml should record the toggle; got:\n{cfg}"
+    );
+}
+
+#[test]
 fn session_skipped_when_positional_file_is_given() {
     // Even with `restore_session = true`, providing a positional file
     // should NOT also reopen prior tabs (would be surprising).

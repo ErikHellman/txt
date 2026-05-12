@@ -3303,7 +3303,8 @@ impl AppState {
             2 => self.config.show_whitespace = !self.config.show_whitespace,
             3 => self.config.hide_git_folder = !self.config.hide_git_folder,
             4 => self.config.hide_dot_folders = !self.config.hide_dot_folders,
-            5 => {
+            5 => self.config.restore_session = !self.config.restore_session,
+            6 => {
                 let all = Theme::ALL;
                 let idx = all
                     .iter()
@@ -3316,7 +3317,7 @@ impl AppState {
                 };
                 self.config.theme = all[next].clone();
             }
-            6 => {
+            7 => {
                 let all = KeymapPreset::ALL;
                 let idx = all
                     .iter()

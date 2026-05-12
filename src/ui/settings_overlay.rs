@@ -11,7 +11,7 @@ use crate::config::Config;
 
 const OVERLAY_W: u16 = 50;
 // Rows: top border + header + separator + N settings + separator + hint + bottom border
-pub(crate) const NUM_SETTINGS: usize = 7;
+pub(crate) const NUM_SETTINGS: usize = 8;
 const OVERLAY_H: u16 = 3 + NUM_SETTINGS as u16 + 3;
 
 /// Render the settings overlay centered in `area`.
@@ -109,6 +109,10 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
         (
             "Hide dot folders",
             SettingValue::Bool(state.config.hide_dot_folders),
+        ),
+        (
+            "Restore session",
+            SettingValue::Bool(state.config.restore_session),
         ),
         (
             "Color theme",
