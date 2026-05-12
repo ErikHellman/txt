@@ -1,4 +1,5 @@
 pub mod changelog_overlay;
+pub mod clipboard_ring;
 pub mod command_palette;
 pub mod completion_popup;
 pub mod editor_view;
@@ -357,5 +358,10 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
     // ── References list overlay ──────────────────────────────────────────────
     if let Some(refs) = &state.references_list {
         references_list::render(refs, area, buf);
+    }
+
+    // ── Clipboard-ring overlay ───────────────────────────────────────────────
+    if let Some(ring) = &state.clipboard_ring {
+        clipboard_ring::render(ring, area, buf);
     }
 }

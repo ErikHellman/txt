@@ -216,6 +216,10 @@ const TEMPLATE: &[HelpEntry] = &[
         actions: &["copy_file_reference"],
         desc: "Copy file reference",
     },
+    HelpEntry::Binding {
+        actions: &["open_clipboard_ring"],
+        desc: "Clipboard ring (recent yanks)",
+    },
     // ── File & Tabs ──────────────────────────────────────────────────
     HelpEntry::Section("File & Tabs"),
     HelpEntry::Binding {

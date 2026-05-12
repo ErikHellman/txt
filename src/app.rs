@@ -770,6 +770,15 @@ pub struct ReferencesListState {
     pub selected: usize,
 }
 
+/// State for the clipboard-ring picker overlay (`Ctrl+Shift+V`).
+pub struct ClipboardRingState {
+    /// Snapshot of the ring at the time the overlay was opened. Most recent
+    /// entry first. Mutated only via `selected`; the underlying
+    /// `ClipboardManager` is not touched until the user confirms a pick.
+    pub entries: Vec<String>,
+    pub selected: usize,
+}
+
 /// A single reference location.
 pub struct ReferenceItem {
     pub path: PathBuf,
@@ -933,6 +942,8 @@ pub struct AppState {
     pub completion: Option<CompletionState>,
     pub hover: Option<HoverState>,
     pub references_list: Option<ReferencesListState>,
+    /// `Ctrl+Shift+V` overlay listing the last N clipboard entries.
+    pub clipboard_ring: Option<ClipboardRingState>,
     pub git_gutter: Option<GitGutter>,
     pub git_dialog: Option<GitDialogState>,
     pub config: Config,
@@ -1050,6 +1061,7 @@ impl AppState {
             completion: None,
             hover: None,
             references_list: None,
+            clipboard_ring: None,
             git_gutter: None,
             git_dialog: None,
             config,
@@ -1208,6 +1220,11 @@ impl AppState {
 
         // References list — captured input
         if self.references_list.is_some() && self.handle_references_input(&action) {
+            return;
+        }
+
+        // Clipboard ring picker — captured input
+        if self.clipboard_ring.is_some() && self.handle_clipboard_ring(&action) {
             return;
         }
 
@@ -1976,6 +1993,15 @@ impl AppState {
             }
             EditorAction::OpenGitDialog => {
                 self.open_git_dialog();
+            }
+            EditorAction::OpenClipboardRing => {
+                let entries = self.clipboard.ring_entries();
+                if !entries.is_empty() {
+                    self.clipboard_ring = Some(ClipboardRingState {
+                        entries,
+                        selected: 0,
+                    });
+                }
             }
             EditorAction::TriggerCompletion => {
                 self.trigger_completion();
@@ -5058,6 +5084,51 @@ impl AppState {
             })
             .collect();
         self.references_list = Some(ReferencesListState { items, selected: 0 });
+    }
+
+    /// Handle input while the clipboard-ring picker is open. Returns `true`
+    /// when the action was consumed, `false` to allow global routing.
+    fn handle_clipboard_ring(&mut self, action: &EditorAction) -> bool {
+        let num_items = self
+            .clipboard_ring
+            .as_ref()
+            .map(|r| r.entries.len())
+            .unwrap_or(0);
+        match action {
+            EditorAction::MoveCursor(Direction::Up) => {
+                if let Some(r) = &mut self.clipboard_ring {
+                    r.selected = r.selected.saturating_sub(1);
+                }
+                true
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                if let Some(r) = &mut self.clipboard_ring {
+                    r.selected = (r.selected + 1).min(num_items.saturating_sub(1));
+                }
+                true
+            }
+            EditorAction::InsertNewline => {
+                if let Some(r) = &self.clipboard_ring {
+                    let idx = r.selected;
+                    if let Some(text) = self.clipboard.pick(idx) {
+                        // Reuse the buffer's insert_str — it already handles
+                        // replacing the active selection, exactly like Paste.
+                        self.editor.active_mut().buffer.insert_str(&text);
+                    }
+                }
+                self.clipboard_ring = None;
+                true
+            }
+            EditorAction::CloseSearch => {
+                self.clipboard_ring = None;
+                true
+            }
+            EditorAction::Quit | EditorAction::ForceQuit => {
+                self.clipboard_ring = None;
+                false
+            }
+            _ => false,
+        }
     }
 
     fn handle_references_input(&mut self, action: &EditorAction) -> bool {

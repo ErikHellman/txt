@@ -270,6 +270,8 @@ pub enum EditorAction {
     OpenLspConfig,
     /// Open the git operations dialog (Ctrl+Shift+G).
     OpenGitDialog,
+    /// Open the clipboard-ring picker overlay (Ctrl+Shift+V).
+    OpenClipboardRing,
 
     // ── LSP features ─────────────────────────────────────────────────
     /// Trigger code completion (Ctrl+Space).
@@ -450,6 +452,7 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::OpenBufferSwitcher => "open_buffer_switcher",
         EditorAction::OpenLspConfig => "open_lsp_config",
         EditorAction::OpenGitDialog => "open_git_dialog",
+        EditorAction::OpenClipboardRing => "open_clipboard_ring",
         // LSP features
         EditorAction::TriggerCompletion => "trigger_completion",
         EditorAction::ShowHover => "show_hover",
@@ -604,6 +607,7 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "open_buffer_switcher" => EditorAction::OpenBufferSwitcher,
         "open_lsp_config" => EditorAction::OpenLspConfig,
         "open_git_dialog" => EditorAction::OpenGitDialog,
+        "open_clipboard_ring" => EditorAction::OpenClipboardRing,
         // LSP features
         "trigger_completion" => EditorAction::TriggerCompletion,
         "show_hover" => EditorAction::ShowHover,
