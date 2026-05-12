@@ -10,9 +10,9 @@ use crate::config::Config;
 // ── Layout constants ──────────────────────────────────────────────────────────
 
 const OVERLAY_W: u16 = 50;
-// Rows: top border + header + separator + 4 settings + separator + hint + bottom border = 10
-const NUM_SETTINGS: usize = 5;
-const OVERLAY_H: u16 = 3 + NUM_SETTINGS as u16 + 3; // 10
+// Rows: top border + header + separator + N settings + separator + hint + bottom border
+pub(crate) const NUM_SETTINGS: usize = 7;
+const OVERLAY_H: u16 = 3 + NUM_SETTINGS as u16 + 3;
 
 /// Render the settings overlay centered in `area`.
 pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
@@ -101,6 +101,14 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
         (
             "Show whitespace",
             SettingValue::Bool(state.config.show_whitespace),
+        ),
+        (
+            "Hide .git folder",
+            SettingValue::Bool(state.config.hide_git_folder),
+        ),
+        (
+            "Hide dot folders",
+            SettingValue::Bool(state.config.hide_dot_folders),
         ),
         (
             "Color theme",

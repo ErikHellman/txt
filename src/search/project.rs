@@ -50,8 +50,16 @@ pub struct ProjectSearchResults {
 }
 
 /// Walk `root` and collect matches for `query`. Honours `.gitignore` and skips
-/// binary / oversized files.
-pub fn run(root: &Path, query: &str, is_regex: bool, case_sensitive: bool) -> ProjectSearchResults {
+/// binary / oversized files. `hide_git` and `hide_dot` prune `.git` / all
+/// dot-prefixed directories respectively.
+pub fn run(
+    root: &Path,
+    query: &str,
+    is_regex: bool,
+    case_sensitive: bool,
+    hide_git: bool,
+    hide_dot: bool,
+) -> ProjectSearchResults {
     let mut out = ProjectSearchResults::default();
     if query.is_empty() {
         return out;
@@ -62,12 +70,10 @@ pub fn run(root: &Path, query: &str, is_regex: bool, case_sensitive: bool) -> Pr
         Err(_) => return out,
     };
 
-    'walk: for entry in WalkBuilder::new(root)
-        .hidden(false)
-        .git_ignore(true)
-        .build()
-        .flatten()
-    {
+    let mut builder = WalkBuilder::new(root);
+    builder.hidden(false).git_ignore(true);
+    super::apply_hidden_dir_filters(&mut builder, hide_git, hide_dot);
+    'walk: for entry in builder.build().flatten() {
         if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
             continue;
         }
@@ -214,7 +220,7 @@ mod tests {
         fs::write(dir.join("b.txt"), "no match here\n").unwrap();
         fs::write(dir.join("c.txt"), "another hello\n").unwrap();
 
-        let r = run(&dir, "hello", false, true);
+        let r = run(&dir, "hello", false, true, false, false);
         assert!(!r.truncated);
         assert_eq!(r.matches.len(), 3);
         assert!(
@@ -239,7 +245,7 @@ mod tests {
             .unwrap();
         fs::write(dir.join("text.txt"), "hello text\n").unwrap();
 
-        let r = run(&dir, "hello", false, true);
+        let r = run(&dir, "hello", false, true, false, false);
         assert_eq!(r.matches.len(), 1);
         assert_eq!(r.matches[0].path.file_name().unwrap(), "text.txt");
 
@@ -259,7 +265,7 @@ mod tests {
             .current_dir(&dir)
             .output();
 
-        let r = run(&dir, "hello", false, true);
+        let r = run(&dir, "hello", false, true, false, false);
         // Either the env has git or it doesn't; assert that kept.txt is found
         // and that if any match comes from ignored.txt, the test environment
         // didn't have git available — both are acceptable.
@@ -273,7 +279,7 @@ mod tests {
         let dir = tempdir();
         fs::write(dir.join("a.txt"), "Hello WORLD\nhello there\n").unwrap();
 
-        let r = run(&dir, "hello", false, false);
+        let r = run(&dir, "hello", false, false, false, false);
         assert_eq!(r.matches.len(), 2);
 
         let _ = fs::remove_dir_all(&dir);
@@ -284,8 +290,58 @@ mod tests {
         let dir = tempdir();
         fs::write(dir.join("a.txt"), "abc 123 def 456\n").unwrap();
 
-        let r = run(&dir, r"\d+", true, true);
+        let r = run(&dir, r"\d+", true, true, false, false);
         assert_eq!(r.matches.len(), 2);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn hide_git_folder_skips_git_dir() {
+        let dir = tempdir();
+        fs::create_dir_all(dir.join(".git")).unwrap();
+        fs::create_dir_all(dir.join(".cache")).unwrap();
+        fs::write(dir.join(".git").join("config"), "hello git\n").unwrap();
+        fs::write(dir.join(".cache").join("data.txt"), "hello cache\n").unwrap();
+        fs::write(dir.join("kept.txt"), "hello kept\n").unwrap();
+
+        let r = run(&dir, "hello", false, true, true, false);
+        assert!(r.matches.iter().any(|m| m.path.ends_with("kept.txt")));
+        assert!(
+            r.matches
+                .iter()
+                .any(|m| m.path.components().any(|c| c.as_os_str() == ".cache"))
+        );
+        assert!(
+            !r.matches
+                .iter()
+                .any(|m| m.path.components().any(|c| c.as_os_str() == ".git"))
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn hide_dot_folders_skips_all_dot_dirs() {
+        let dir = tempdir();
+        fs::create_dir_all(dir.join(".git")).unwrap();
+        fs::create_dir_all(dir.join(".cache")).unwrap();
+        fs::write(dir.join(".git").join("config"), "hello git\n").unwrap();
+        fs::write(dir.join(".cache").join("data.txt"), "hello cache\n").unwrap();
+        fs::write(dir.join("kept.txt"), "hello kept\n").unwrap();
+
+        let r = run(&dir, "hello", false, true, false, true);
+        assert!(r.matches.iter().any(|m| m.path.ends_with("kept.txt")));
+        assert!(
+            !r.matches
+                .iter()
+                .any(|m| m.path.components().any(|c| c.as_os_str() == ".git"))
+        );
+        assert!(
+            !r.matches
+                .iter()
+                .any(|m| m.path.components().any(|c| c.as_os_str() == ".cache"))
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

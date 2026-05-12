@@ -1,8 +1,35 @@
 pub mod project;
 
+use ignore::WalkBuilder;
 use regex::Regex;
 
 use crate::buffer::cursor::ByteRange;
+
+/// Apply the user's "hide .git" / "hide dot folders" filters to an
+/// `ignore::WalkBuilder`. The filter rejects directories whose names match the
+/// configured criteria; their contents are pruned from the walk. The root
+/// entry (depth 0) is always retained.
+pub fn apply_hidden_dir_filters(builder: &mut WalkBuilder, hide_git: bool, hide_dot: bool) {
+    if !hide_git && !hide_dot {
+        return;
+    }
+    builder.filter_entry(move |entry| {
+        if entry.depth() == 0 {
+            return true;
+        }
+        let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+        if !is_dir {
+            return true;
+        }
+        let Some(name) = entry.file_name().to_str() else {
+            return true;
+        };
+        if hide_dot {
+            return !name.starts_with('.');
+        }
+        name != ".git"
+    });
+}
 
 /// Cap on the number of matches stored at once. Protects the editor against
 /// pathological queries (e.g. `e` in a megabyte file) that would otherwise
