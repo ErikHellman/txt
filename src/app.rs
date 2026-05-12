@@ -1719,6 +1719,12 @@ impl AppState {
                             vp.scroll_row =
                                 (vp.scroll_row + SCROLL_LINES).min(total_lines.saturating_sub(1));
                         }
+                        ScrollDir::Left if !vp.word_wrap => {
+                            vp.scroll_col = vp.scroll_col.saturating_sub(4);
+                        }
+                        ScrollDir::Right if !vp.word_wrap => {
+                            vp.scroll_col += 4;
+                        }
                         _ => {}
                     }
                 }
