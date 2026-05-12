@@ -236,6 +236,14 @@ const TEMPLATE: &[HelpEntry] = &[
         actions: &["peek_head"],
         desc: "Peek HEAD content for hunk under cursor",
     },
+    HelpEntry::Binding {
+        actions: &["open_quickfix"],
+        desc: "Quickfix list (workspace LSP diagnostics)",
+    },
+    HelpEntry::Binding {
+        actions: &["quickfix_next", "quickfix_prev"],
+        desc: "Next / Prev quickfix entry",
+    },
     // ── File & Tabs ──────────────────────────────────────────────────
     HelpEntry::Section("File & Tabs"),
     HelpEntry::Binding {

@@ -11,6 +11,7 @@ mod input;
 mod lsp;
 mod macros;
 mod marks;
+mod quickfix;
 mod search;
 mod snippet;
 mod syntax;

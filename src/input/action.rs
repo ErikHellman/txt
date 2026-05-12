@@ -247,6 +247,13 @@ pub enum EditorAction {
     /// Open a small float showing the HEAD content for the hunk under the
     /// cursor (Alt+H).
     PeekHeadAtCursor,
+    /// Open the quickfix / location list overlay (Alt+1). Lists every LSP
+    /// diagnostic across the workspace.
+    OpenQuickfix,
+    /// Step to the next quickfix entry and jump to it (F8).
+    QuickfixNext,
+    /// Step to the previous quickfix entry and jump to it (Shift+F8).
+    QuickfixPrev,
     /// Toggle the file tree sidebar visibility (Ctrl+Shift+B).
     ToggleSidebar,
     /// Focus-jump between the editor and the sidebar (Ctrl+B).
@@ -453,6 +460,9 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::PrevHunk => "prev_hunk",
         EditorAction::RevertHunkAtCursor => "revert_hunk",
         EditorAction::PeekHeadAtCursor => "peek_head",
+        EditorAction::OpenQuickfix => "open_quickfix",
+        EditorAction::QuickfixNext => "quickfix_next",
+        EditorAction::QuickfixPrev => "quickfix_prev",
         EditorAction::ToggleSidebar => "toggle_sidebar",
         EditorAction::FocusSidebar => "focus_sidebar",
         // View / UI toggles
@@ -613,6 +623,9 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "prev_hunk" => EditorAction::PrevHunk,
         "revert_hunk" => EditorAction::RevertHunkAtCursor,
         "peek_head" => EditorAction::PeekHeadAtCursor,
+        "open_quickfix" => EditorAction::OpenQuickfix,
+        "quickfix_next" => EditorAction::QuickfixNext,
+        "quickfix_prev" => EditorAction::QuickfixPrev,
         "toggle_sidebar" => EditorAction::ToggleSidebar,
         "focus_sidebar" => EditorAction::FocusSidebar,
         // View / UI toggles

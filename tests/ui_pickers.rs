@@ -93,3 +93,17 @@ fn picker_ctrl_g_jumps_to_typed_line() {
     s.wait_for_status_contains("25:1");
     s.shutdown();
 }
+
+#[test]
+fn quickfix_shows_no_diagnostics_message_without_lsp() {
+    // With LSP disabled in the harness, opening the quickfix list must
+    // report "No diagnostics" via the status bar instead of opening the
+    // overlay.
+    let fx = Fixture::new();
+    let path = fx.write_file("nodiag.txt", "fn main() {}\n");
+    let mut s = fx.open(&path);
+    s.wait_for_status_contains("nodiag.txt");
+    s.send_key(Key::Alt('1'));
+    s.wait_for_status_contains("No diagnostics");
+    s.shutdown();
+}

@@ -959,6 +959,8 @@ pub struct AppState {
     pub clipboard_ring: Option<ClipboardRingState>,
     /// `Alt+H` float showing HEAD content for the hunk at the cursor.
     pub diff_peek: Option<DiffPeekState>,
+    /// `Alt+1` overlay listing every LSP diagnostic across the workspace.
+    pub quickfix: Option<crate::quickfix::QuickfixState>,
     pub git_gutter: Option<GitGutter>,
     pub git_dialog: Option<GitDialogState>,
     pub config: Config,
@@ -1078,6 +1080,7 @@ impl AppState {
             references_list: None,
             clipboard_ring: None,
             diff_peek: None,
+            quickfix: None,
             git_gutter: None,
             git_dialog: None,
             config,
@@ -1241,6 +1244,11 @@ impl AppState {
 
         // Clipboard ring picker — captured input
         if self.clipboard_ring.is_some() && self.handle_clipboard_ring(&action) {
+            return;
+        }
+
+        // Quickfix list — captured input
+        if self.quickfix.is_some() && self.handle_quickfix_input(&action) {
             return;
         }
 
@@ -2045,6 +2053,20 @@ impl AppState {
             }
             EditorAction::PeekHeadAtCursor => {
                 self.toggle_diff_peek();
+            }
+            EditorAction::OpenQuickfix => {
+                let entries = crate::quickfix::collect_lsp_diagnostics(&self.editor);
+                if entries.is_empty() {
+                    self.status_error = Some("No diagnostics".into());
+                } else {
+                    self.quickfix = Some(crate::quickfix::QuickfixState::new(entries));
+                }
+            }
+            EditorAction::QuickfixNext => {
+                self.quickfix_step(1);
+            }
+            EditorAction::QuickfixPrev => {
+                self.quickfix_step(-1);
             }
             EditorAction::TriggerCompletion => {
                 self.trigger_completion();
@@ -5283,6 +5305,79 @@ impl AppState {
             })
             .collect();
         self.references_list = Some(ReferencesListState { items, selected: 0 });
+    }
+
+    /// Walk to the next/previous quickfix entry and jump to it. Does not
+    /// open the overlay — just navigates the list when it is already
+    /// populated. Builds a fresh list from current diagnostics if the
+    /// overlay state is empty.
+    fn quickfix_step(&mut self, step: i32) {
+        if self.quickfix.is_none() {
+            let entries = crate::quickfix::collect_lsp_diagnostics(&self.editor);
+            if entries.is_empty() {
+                self.status_error = Some("No diagnostics".into());
+                return;
+            }
+            self.quickfix = Some(crate::quickfix::QuickfixState::new(entries));
+        }
+        let entry_opt = {
+            let qf = self.quickfix.as_mut().unwrap();
+            let n = qf.entries.len();
+            if n == 0 {
+                None
+            } else {
+                let i = if step > 0 {
+                    (qf.selected + 1) % n
+                } else {
+                    (qf.selected + n - 1) % n
+                };
+                qf.selected = i;
+                Some(qf.entries[i].clone())
+            }
+        };
+        if let Some(e) = entry_opt {
+            self.jump_to_location(&(e.path, e.line, e.col));
+        }
+    }
+
+    /// Handle input while the quickfix list overlay is open.
+    fn handle_quickfix_input(&mut self, action: &EditorAction) -> bool {
+        let n = self.quickfix.as_ref().map(|q| q.entries.len()).unwrap_or(0);
+        match action {
+            EditorAction::MoveCursor(Direction::Up) => {
+                if let Some(q) = &mut self.quickfix {
+                    q.selected = q.selected.saturating_sub(1);
+                }
+                true
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                if let Some(q) = &mut self.quickfix {
+                    q.selected = (q.selected + 1).min(n.saturating_sub(1));
+                }
+                true
+            }
+            EditorAction::InsertNewline => {
+                let target = self.quickfix.as_ref().and_then(|q| {
+                    q.entries
+                        .get(q.selected)
+                        .map(|e| (e.path.clone(), e.line, e.col))
+                });
+                self.quickfix = None;
+                if let Some(loc) = target {
+                    self.jump_to_location(&loc);
+                }
+                true
+            }
+            EditorAction::CloseSearch => {
+                self.quickfix = None;
+                true
+            }
+            EditorAction::Quit | EditorAction::ForceQuit => {
+                self.quickfix = None;
+                false
+            }
+            _ => false,
+        }
     }
 
     /// Handle input while the clipboard-ring picker is open. Returns `true`
