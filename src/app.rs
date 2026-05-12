@@ -2302,6 +2302,7 @@ impl AppState {
                             None => (input.as_str(), None),
                         };
                         if let Ok(n) = line_str.parse::<usize>() {
+                            self.push_current_to_jump_list();
                             let line = n.saturating_sub(1); // 1-based input
                             let buf = &mut self.editor.active_mut().buffer;
                             let target = {
@@ -2333,6 +2334,7 @@ impl AppState {
                     }
                     InputMode::OpenFilePath(input) => {
                         let path = PathBuf::from(input.trim());
+                        self.push_current_to_jump_list();
                         let _ = self.editor.open_tab(path);
                         self.after_file_open_or_save();
                     }
@@ -2445,6 +2447,7 @@ impl AppState {
                     .and_then(|p| p.selected_path().cloned());
                 self.fuzzy_picker = None;
                 if let Some(path) = path {
+                    self.push_current_to_jump_list();
                     let _ = self.editor.open_tab(path);
                     self.after_file_open_or_save();
                 }
@@ -2492,6 +2495,7 @@ impl AppState {
                     .and_then(|p| p.selected_symbol().cloned());
                 self.symbol_picker = None;
                 if let Some(sym) = target {
+                    self.push_current_to_jump_list();
                     let handle = self.editor.active_mut();
                     let rope = handle.buffer.rope();
                     let bound = sym.byte_range.start.min(rope.len_bytes());
@@ -3704,6 +3708,7 @@ impl AppState {
                             sb.toggle_selected();
                         }
                     } else {
+                        self.push_current_to_jump_list();
                         let _ = self.editor.open_tab(path);
                         self.after_file_open_or_save();
                         self.sidebar_focused = false;

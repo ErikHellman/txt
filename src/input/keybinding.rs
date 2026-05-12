@@ -211,7 +211,7 @@ fn parse_named_key(name: &str) -> Result<KeyCodeRepr, String> {
 /// (e.g. swapping what `ctrl+d` does). On load, files older than this are
 /// backed up to `keybindings.toml.bak-vN` and rewritten from current
 /// defaults so the change actually reaches users with a pre-existing file.
-const CURRENT_CONFIG_VERSION: u32 = 2;
+const CURRENT_CONFIG_VERSION: u32 = 3;
 
 /// Read the version header from a TOML file's text. Files without a header
 /// are treated as v1 (the implicit version before this scheme existed).
@@ -1158,9 +1158,19 @@ mod tests {
         let alt_left: KeyCombo = "alt+left".parse().unwrap();
         let in_intellij = intellij.lookup(&alt_left).cloned();
         let in_default = default.lookup(&alt_left).cloned();
+        assert_eq!(in_default, Some(EditorAction::JumpListBack));
         assert!(in_intellij.is_some());
-        assert!(in_default.is_some());
         assert_ne!(in_intellij, in_default);
+    }
+
+    #[test]
+    fn default_binds_alt_right_to_jump_list_forward() {
+        let default = KeyBindings::for_preset(&KeymapPreset::Default);
+        let alt_right: KeyCombo = "alt+right".parse().unwrap();
+        assert_eq!(
+            default.lookup(&alt_right).cloned(),
+            Some(EditorAction::JumpListForward)
+        );
     }
 
     // ── Version-gated regeneration ──────────────────────────────────────

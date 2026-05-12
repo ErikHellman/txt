@@ -435,4 +435,110 @@ mod tests {
         }
         assert_eq!(jl.entries.len(), JUMP_LIST_CAP);
     }
+
+    /// Regression: with a single entry already pushed, `back()` followed by
+    /// another `push` (as the JumpListBack handler does) must yield the
+    /// stored entry. Previously the `cursor <= 1` guard short-circuited
+    /// before the just-pushed `current` location could be returned.
+    #[test]
+    fn back_after_handler_pattern_with_one_existing_entry() {
+        let mut jl = JumpList::new();
+        // The handler's "push then back" pattern.
+        jl.push(JumpEntry {
+            path: p("/a"),
+            byte_offset: 0,
+        });
+        jl.push(JumpEntry {
+            path: p("/a"),
+            byte_offset: 50,
+        });
+        assert_eq!(
+            jl.back(),
+            Some(JumpEntry {
+                path: p("/a"),
+                byte_offset: 0
+            })
+        );
+    }
+
+    /// User scenario: open a file, do one jump-to-line, press Alt+Left.
+    /// Alt+Left should land on the original cursor position.
+    #[test]
+    fn alt_left_after_single_jump_returns_origin() {
+        let mut jl = JumpList::new();
+        // First navigation: pushes the origin into history.
+        jl.push(JumpEntry {
+            path: p("/file"),
+            byte_offset: 0,
+        });
+        // User is now at byte_offset 100.
+        // Alt+Left handler: push current, then back.
+        jl.push(JumpEntry {
+            path: p("/file"),
+            byte_offset: 100,
+        });
+        let back = jl.back();
+        assert_eq!(
+            back,
+            Some(JumpEntry {
+                path: p("/file"),
+                byte_offset: 0
+            }),
+            "Alt+Left should return to byte_offset 0"
+        );
+        // Now Alt+Right should bring them back to 100.
+        let forward = jl.forward();
+        assert_eq!(
+            forward,
+            Some(JumpEntry {
+                path: p("/file"),
+                byte_offset: 100
+            }),
+            "Alt+Right should restore byte_offset 100"
+        );
+    }
+
+    /// Pressing Alt+Left repeatedly should walk further back. The dedup on
+    /// `push_current` (because the user is at the entry we just returned to)
+    /// must not block the next back step.
+    #[test]
+    fn alt_left_walks_multiple_steps() {
+        let mut jl = JumpList::new();
+        jl.push(JumpEntry {
+            path: p("/file"),
+            byte_offset: 0,
+        });
+        jl.push(JumpEntry {
+            path: p("/file"),
+            byte_offset: 50,
+        });
+        // User at 100 — the third visited location.
+        jl.push(JumpEntry {
+            path: p("/file"),
+            byte_offset: 100,
+        });
+        assert_eq!(
+            jl.back(),
+            Some(JumpEntry {
+                path: p("/file"),
+                byte_offset: 50
+            })
+        );
+        // Now press Alt+Left again — handler pushes current (50), which
+        // dedups against the existing entry at index 1. Back should still
+        // produce the *next* older entry (0).
+        jl.push(JumpEntry {
+            path: p("/file"),
+            byte_offset: 50,
+        });
+        let next_back = jl.back();
+        assert_eq!(
+            next_back,
+            Some(JumpEntry {
+                path: p("/file"),
+                byte_offset: 0
+            }),
+            "second Alt+Left should land on byte_offset 0"
+        );
+    }
 }
