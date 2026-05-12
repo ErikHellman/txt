@@ -150,6 +150,9 @@ pub fn fetch_head_content(path: &Path) -> Option<String> {
 /// Returns `None` if `workspace` is not inside a git repo, git is unavailable,
 /// or HEAD is detached.
 pub fn current_branch(workspace: &Path) -> Option<String> {
+    if disabled_via_env() {
+        return None;
+    }
     let output = Command::new("git")
         .arg("-C")
         .arg(workspace)
@@ -168,11 +171,21 @@ pub fn current_branch(workspace: &Path) -> Option<String> {
 ///
 /// Returns `None` if the file is not tracked or git is unavailable.
 pub fn gutter_for_path(path: &Path, current_content: &str) -> Option<GitGutter> {
+    if disabled_via_env() {
+        return None;
+    }
     let head = fetch_head_content(path)?;
     let original: Vec<&str> = head.lines().collect();
     let current: Vec<&str> = current_content.lines().collect();
     let marks = compute_marks(&original, &current);
     Some(GitGutter { marks })
+}
+
+/// Test hook: when `TXT_DISABLE_GIT` is set, all git operations short-circuit
+/// to `None`. Used by the PTY-driven UI test harness to keep the status bar
+/// deterministic.
+fn disabled_via_env() -> bool {
+    std::env::var_os("TXT_DISABLE_GIT").is_some()
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

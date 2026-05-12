@@ -4725,6 +4725,9 @@ impl AppState {
     /// the hash has changed, sets `pending_lsp_approval` so the approval
     /// overlay opens on the next frame.
     pub fn request_lsp_start(&mut self) {
+        if std::env::var_os("TXT_DISABLE_LSP").is_some() {
+            return;
+        }
         if !self.lsp_config.is_active() {
             return;
         }

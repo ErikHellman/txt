@@ -14,8 +14,12 @@ pub struct FileWatcher {
 
 impl FileWatcher {
     /// Start watching `path`.  Returns `None` if the OS watcher could not be
-    /// created (e.g. the file doesn't exist yet, or the platform is unsupported).
+    /// created (e.g. the file doesn't exist yet, or the platform is unsupported),
+    /// or when `TXT_DISABLE_WATCHER` is set in the environment (test hook).
     pub fn new(path: &Path) -> Option<Self> {
+        if std::env::var_os("TXT_DISABLE_WATCHER").is_some() {
+            return None;
+        }
         let (tx, rx) = channel::<bool>();
         let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
             if let Ok(event) = res

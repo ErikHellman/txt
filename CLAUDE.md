@@ -10,10 +10,29 @@ cargo test                   # run all unit tests (embedded in modules)
 cargo bench                  # criterion benchmarks (benches/buffer.rs)
 cargo run -- <file>          # open a file
 cargo run -- <directory>     # open a directory — sidebar opens automatically
+
+# PTY-driven UI tests (gated behind a feature flag; ~30 tests under tests/ui_*.rs)
+cargo test --features ui-tests --tests
+scripts/check-ui.sh          # same, with --test-threads=2 and RUST_BACKTRACE=1
 ```
 
 **IMPORTANT: Run `scripts/check.sh` after every code change before finishing.**
 It runs the same four checks as CI (fmt, build, clippy, test) and exits on the first failure. Fix all reported issues before committing — `#[allow(dead_code)]` is used deliberately on future API (see below), not as a workaround for real warnings.
+
+## Testing
+
+Unit tests are embedded `#[cfg(test)]` modules and run by default. The UI suite (`tests/ui_*.rs`) drives the real `txt` binary through a pseudo-terminal using `portable-pty` + `vt100`; it is gated behind the `ui-tests` Cargo feature and runs in a separate CI job. The shared harness lives at `tests/ui_common/`.
+
+Four environment variables make the binary deterministic under test. Production behaviour is unchanged when they are unset.
+
+| Env var | Effect |
+|---|---|
+| `TXT_CONFIG_DIR` | Override the config directory (default `~/.config/txt`). Redirects `config.toml`, `keybindings.toml`, `trusted_binaries.json`, and the keybinding preset files. |
+| `TXT_DISABLE_LSP` | `request_lsp_start` returns early; the editor never spawns an LSP server. |
+| `TXT_DISABLE_GIT` | `git::current_branch` and `git::gutter_for_path` return `None`, so the branch indicator and diff gutter never appear. |
+| `TXT_DISABLE_WATCHER` | `FileWatcher::new` returns `None`; no `notify` background thread starts. |
+
+The harness sets all four for every spawned session.
 
 ## Critical constraints
 

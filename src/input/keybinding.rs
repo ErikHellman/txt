@@ -556,7 +556,7 @@ impl KeyBindings {
 
     /// Path to the keybindings config file.
     pub fn keybindings_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".config").join("txt").join("keybindings.toml"))
+        crate::config::txt_config_dir().map(|d| d.join("keybindings.toml"))
     }
 
     /// Write bindings to a TOML file.  Silently ignores errors.
@@ -609,11 +609,7 @@ impl KeyBindings {
 
     /// Path to the preset file for the given preset.
     pub fn preset_path(preset: &KeymapPreset) -> Option<PathBuf> {
-        dirs::home_dir().map(|h| {
-            h.join(".config")
-                .join("txt")
-                .join(Self::preset_filename(preset))
-        })
+        crate::config::txt_config_dir().map(|d| d.join(Self::preset_filename(preset)))
     }
 
     /// Rewrite all preset files in `base_dir` from current defaults.
@@ -633,8 +629,8 @@ impl KeyBindings {
     /// Write all preset files into `~/.config/txt/`, regenerating from
     /// current defaults whether or not the file already exists.
     fn ensure_preset_files() {
-        if let Some(home) = dirs::home_dir() {
-            Self::ensure_preset_files_at(&home.join(".config").join("txt"));
+        if let Some(dir) = crate::config::txt_config_dir() {
+            Self::ensure_preset_files_at(&dir);
         }
     }
 
