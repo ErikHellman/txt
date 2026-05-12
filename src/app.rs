@@ -802,19 +802,29 @@ pub struct PendingLspApproval {
 }
 
 /// Built-in LSP server definitions the user can choose from.
-pub const LSP_SERVER_OPTIONS: &[(&str, &str, &[&str])] = &[
-    // (display name / key, command, args)
-    ("rust-analyzer", "rust-analyzer", &[]),
-    ("pyright", "pyright-langserver", &["--stdio"]),
+/// Sorted alphabetically by language display name.
+pub const LSP_SERVER_OPTIONS: &[(&str, &str, &str, &[&str])] = &[
+    // (language display, server key written to lsp.toml, command, args)
+    ("C#", "omnisharp", "omnisharp", &["-lsp"]),
+    ("C/C++", "clangd", "clangd", &[]),
+    ("Go", "gopls", "gopls", &["serve"]),
+    ("Java", "jdtls", "jdtls", &[]),
     (
+        "Kotlin",
+        "kotlin-language-server",
+        "kotlin-language-server",
+        &[],
+    ),
+    ("Lua", "lua-language-server", "lua-language-server", &[]),
+    ("Python", "pyright", "pyright-langserver", &["--stdio"]),
+    ("Rust", "rust-analyzer", "rust-analyzer", &[]),
+    (
+        "TypeScript",
         "typescript-language-server",
         "typescript-language-server",
         &["--stdio"],
     ),
-    ("clangd", "clangd", &[]),
-    ("gopls", "gopls", &["serve"]),
-    ("lua-language-server", "lua-language-server", &[]),
-    ("zls", "zls", &[]),
+    ("Zig", "zls", "zls", &[]),
 ];
 
 /// State for the LSP configuration picker overlay.
@@ -835,7 +845,7 @@ impl LspPickerState {
                 .and_then(|key| {
                     LSP_SERVER_OPTIONS
                         .iter()
-                        .position(|(name, _, _)| *name == key)
+                        .position(|(_, name, _, _)| *name == key)
                         .map(|i| i + 1)
                 })
                 .unwrap_or(0)
@@ -3239,7 +3249,7 @@ impl AppState {
             // Disabled
             WorkspaceLspConfig::default()
         } else {
-            let (name, command, args) = LSP_SERVER_OPTIONS[selected - 1];
+            let (_language, name, command, args) = LSP_SERVER_OPTIONS[selected - 1];
             let mut servers = HashMap::new();
             servers.insert(
                 name.to_string(),
