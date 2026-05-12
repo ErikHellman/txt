@@ -1755,47 +1755,50 @@ impl AppState {
                     }
                 } else {
                     // Route to the editor scroll just like a keyboard scroll.
-                    let total_lines = self.editor.active().buffer.len_lines();
                     let vp = &mut self.editor.active_mut().viewport;
                     match dir {
                         ScrollDir::Up => {
                             vp.scroll_row = vp.scroll_row.saturating_sub(SCROLL_LINES);
                         }
                         ScrollDir::Down => {
-                            vp.scroll_row =
-                                (vp.scroll_row + SCROLL_LINES).min(total_lines.saturating_sub(1));
+                            vp.scroll_row = vp.scroll_row.saturating_add(SCROLL_LINES);
+                        }
+                        ScrollDir::Left if !vp.word_wrap => {
+                            vp.scroll_col = vp.scroll_col.saturating_sub(4);
+                        }
+                        ScrollDir::Right if !vp.word_wrap => {
+                            vp.scroll_col = vp.scroll_col.saturating_add(4);
                         }
                         _ => {}
                     }
+                    self.clamp_viewport_scroll(text_h);
                 }
             }
 
             // ── Scroll ────────────────────────────────────────────────
             EditorAction::Scroll(dir) => {
-                let total_lines = self.editor.active().buffer.len_lines();
                 let vp = &mut self.editor.active_mut().viewport;
                 match dir {
                     ScrollDir::Up => {
                         vp.scroll_row = vp.scroll_row.saturating_sub(SCROLL_LINES);
                     }
                     ScrollDir::Down => {
-                        vp.scroll_row =
-                            (vp.scroll_row + SCROLL_LINES).min(total_lines.saturating_sub(1));
+                        vp.scroll_row = vp.scroll_row.saturating_add(SCROLL_LINES);
                     }
                     ScrollDir::Left => {
                         vp.scroll_col = vp.scroll_col.saturating_sub(4);
                     }
                     ScrollDir::Right => {
-                        vp.scroll_col += 4;
+                        vp.scroll_col = vp.scroll_col.saturating_add(4);
                     }
                     ScrollDir::HalfPageUp => {
                         vp.scroll_row = vp.scroll_row.saturating_sub(text_h / 2);
                     }
                     ScrollDir::HalfPageDown => {
-                        vp.scroll_row =
-                            (vp.scroll_row + text_h / 2).min(total_lines.saturating_sub(1));
+                        vp.scroll_row = vp.scroll_row.saturating_add(text_h / 2);
                     }
                 }
+                self.clamp_viewport_scroll(text_h);
             }
             EditorAction::ScrollCursorCenter => {
                 let cursor_line = self.editor.active().buffer.cursors.primary().line;
@@ -5457,6 +5460,27 @@ impl AppState {
     fn tab_bar_tab_at(&self, col: u16, row: u16) -> Option<usize> {
         let area = self.tab_bar_area?;
         crate::ui::tab_bar::tab_at(&self.editor, area, col, row)
+    }
+
+    /// Cap user-initiated scrolling so the last line cannot pass the vertical
+    /// centre of the viewport and the longest line's end cannot pass the
+    /// horizontal centre. Mirrors `Viewport::clamp_user_scroll` but supplies
+    /// the buffer-derived dimensions from current `AppState`.
+    fn clamp_viewport_scroll(&mut self, text_h: usize) {
+        let total_lines = self.editor.active().buffer.len_lines();
+        let gutter = crate::ui::editor_view::gutter_width(total_lines);
+        let sidebar_w: u16 = if self.sidebar.is_some() {
+            self.sidebar_width + 1
+        } else {
+            0
+        };
+        let text_w =
+            (self.term_width as usize).saturating_sub(gutter as usize + 1 + sidebar_w as usize);
+
+        let tab = self.editor.active_mut();
+        let longest = crate::editor::viewport::max_line_display_width(&tab.buffer);
+        tab.viewport
+            .clamp_user_scroll(total_lines, longest, text_h, text_w);
     }
 
     /// Returns true if the given screen point is inside the sidebar's
