@@ -9,8 +9,8 @@ use crate::app::{LSP_SERVER_OPTIONS, LspPickerState};
 // ── Layout constants ─────────────────────────────────────────────────────────
 
 const OVERLAY_W: u16 = 50;
-// Rows: border-top + header + separator + (1 Disabled + N servers) + separator + hint + border-bot
-const CHROME_ROWS: u16 = 6; // top border + header + sep + sep + hint + bottom border
+// Rows: border-top + header + separator + (1 Disabled + N servers) + separator + 2 notice rows + hint + border-bot
+const CHROME_ROWS: u16 = 8; // top border + header + sep + sep + notice×2 + hint + bottom border
 
 /// Render the LSP configuration picker overlay centered in `area`.
 pub fn render(picker: &LspPickerState, area: Rect, buf: &mut TermBuffer) {
@@ -43,6 +43,7 @@ pub fn render(picker: &LspPickerState, area: Rect, buf: &mut TermBuffer) {
         .fg(Color::Rgb(120, 220, 120))
         .add_modifier(Modifier::BOLD);
     let hint_style = Style::default().bg(bg).fg(Color::Rgb(100, 110, 150));
+    let notice_style = Style::default().bg(bg).fg(Color::Rgb(255, 200, 80));
 
     // ── Background fill ──────────────────────────────────────────────────────
     for y in overlay.y..overlay.y + overlay.height {
@@ -88,13 +89,9 @@ pub fn render(picker: &LspPickerState, area: Rect, buf: &mut TermBuffer) {
             let display: String = label.chars().take(inner_w.saturating_sub(2)).collect();
             buf.set_string(cx, row_y, &display, style);
         } else {
-            // Server option
-            let (name, command, _) = LSP_SERVER_OPTIONS[i - 1];
-            let label = if name == command {
-                name.to_string()
-            } else {
-                format!("{} ({})", name, command)
-            };
+            // Server option: "Language (command)"
+            let (language, _name, command, _) = LSP_SERVER_OPTIONS[i - 1];
+            let label = format!("{} ({})", language, command);
             let style = server_style.bg(row_bg);
             let display: String = label.chars().take(inner_w.saturating_sub(6)).collect();
             buf.set_string(cx, row_y, &display, style);
@@ -114,9 +111,24 @@ pub fn render(picker: &LspPickerState, area: Rect, buf: &mut TermBuffer) {
         draw_h_separator(buf, overlay, sep_y, border_style);
     }
 
+    // ── Notice rows ──────────────────────────────────────────────────────────
+    let notices = [
+        "Install LSP server externally before enabling.",
+        "Edit .txt/lsp.toml for advanced configuration.",
+    ];
+    for (i, line) in notices.iter().enumerate() {
+        let row_y = sep_y + 1 + i as u16;
+        if row_y >= overlay.y + overlay.height {
+            break;
+        }
+        let row_x = overlay.x + overlay.width.saturating_sub(line.len() as u16 + 2) / 2 + 1;
+        let truncated: String = line.chars().take(inner_w).collect();
+        buf.set_string(row_x, row_y, &truncated, notice_style);
+    }
+
     // ── Hint row ─────────────────────────────────────────────────────────────
     let hint = "Enter: select  ·  Esc: cancel";
-    let hint_y = sep_y + 1;
+    let hint_y = sep_y + 1 + notices.len() as u16;
     if hint_y < overlay.y + overlay.height {
         let hint_x = overlay.x + overlay.width.saturating_sub(hint.len() as u16 + 2) / 2 + 1;
         let truncated: String = hint.chars().take(inner_w).collect();
