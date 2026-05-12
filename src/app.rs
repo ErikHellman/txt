@@ -786,6 +786,10 @@ pub struct AppState {
     /// frame. Used by mouse-event routing to translate `(col, row)` into either
     /// an entry hit, a separator hit, or a fall-through to the editor.
     pub sidebar_area: Option<Rect>,
+    /// Tab-bar rect from the most recent frame, or `None` when the strip is
+    /// not shown (single tab). Used by mouse-event routing to hit-test tab
+    /// labels.
+    pub tab_bar_area: Option<Rect>,
     /// Active separator-drag, if any.
     pub sidebar_drag: Option<SidebarDrag>,
     /// Active Alt+drag box-select anchor, in (line, display_col).
@@ -904,6 +908,7 @@ impl AppState {
             sidebar_focused: false,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
             sidebar_area: None,
+            tab_bar_area: None,
             sidebar_drag: None,
             box_drag_anchor: None,
             saved_sidebar: None,
@@ -1402,7 +1407,10 @@ impl AppState {
 
             // ── Mouse ─────────────────────────────────────────────────
             EditorAction::MouseClick { col, row } => {
-                if self.point_on_separator(col, row) {
+                if let Some(idx) = self.tab_bar_tab_at(col, row) {
+                    self.editor.go_to_tab(idx);
+                    self.sidebar_focused = false;
+                } else if self.point_on_separator(col, row) {
                     // Begin a sidebar resize drag.
                     self.sidebar_drag = Some(SidebarDrag {
                         start_col: col,
@@ -4853,6 +4861,13 @@ impl AppState {
                 .slice(start..end)
                 .to_string(),
         )
+    }
+
+    /// Hit-test the tab strip. Returns the tab index when `(col, row)`
+    /// lands on a rendered tab label.
+    fn tab_bar_tab_at(&self, col: u16, row: u16) -> Option<usize> {
+        let area = self.tab_bar_area?;
+        crate::ui::tab_bar::tab_at(&self.editor, area, col, row)
     }
 
     /// Returns true if the given screen point is inside the sidebar's
