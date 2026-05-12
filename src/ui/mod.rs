@@ -97,6 +97,7 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
     // Store the rendered sidebar rect (or `None`) so mouse-event handlers in
     // the next `update()` call can hit-test against it.
     state.sidebar_area = sidebar_area;
+    state.tab_bar_area = tab_area;
 
     // ── Compute syntax highlights for visible range ───────────────────────────
     // Prefer LSP semantic tokens when available; fall back to tree-sitter.
