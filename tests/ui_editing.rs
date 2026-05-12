@@ -153,6 +153,46 @@ fn mixed_indent_absent_for_pure_spaces() {
     s.shutdown();
 }
 
+// ── Tier 3 — 3.2 persistent undo ─────────────────────────────────────────
+
+#[test]
+fn persistent_undo_survives_relaunch() {
+    use ui_common::{SessionOptions, TxtSession};
+    let fx = Fixture::new();
+    // Enable persistent undo via the seeded config.
+    fx.append_config("persistent_undo = true\n");
+    let path = fx.write_file("pu.txt", "hello\n");
+
+    // Edit, save, quit.
+    let mut s1 = TxtSession::launch(
+        SessionOptions::new(fx.workspace_path(), fx.config_path()).arg(path.to_string_lossy()),
+    );
+    s1.wait_for_first_paint();
+    s1.wait_for_status_contains("pu.txt");
+    s1.send_keys(&[Key::End, Key::Char('!'), Key::Ctrl('s')]);
+    s1.wait_until(
+        |sc| sc.contents().contains("hello!"),
+        std::time::Duration::from_secs(5),
+    );
+    s1.shutdown();
+
+    // Relaunch the same file → press Ctrl+Z → should restore "hello".
+    let mut s2 = TxtSession::launch(
+        SessionOptions::new(fx.workspace_path(), fx.config_path()).arg(path.to_string_lossy()),
+    );
+    s2.wait_for_first_paint();
+    s2.wait_for_status_contains("pu.txt");
+    s2.send_key(Key::Ctrl('z'));
+    s2.wait_until(
+        |sc| {
+            let body = sc.contents();
+            body.contains("hello") && !body.contains("hello!")
+        },
+        std::time::Duration::from_secs(5),
+    );
+    s2.shutdown();
+}
+
 // ── Tier 3 — 3.4 auto-pair + surround ────────────────────────────────────
 
 #[test]

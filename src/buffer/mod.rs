@@ -2,6 +2,7 @@ pub mod cursor;
 pub mod edit;
 pub mod folds;
 pub mod history;
+pub mod persistent_undo;
 
 use ropey::Rope;
 
@@ -139,6 +140,19 @@ impl Buffer {
     #[allow(dead_code)]
     pub fn can_redo(&self) -> bool {
         self.history.can_redo()
+    }
+
+    /// Take a serializable snapshot of the undo/redo stacks. Used by
+    /// persistent undo to write history to disk on save.
+    pub fn history_snapshot(&self) -> history::UndoStackSnapshot {
+        self.history.snapshot()
+    }
+
+    /// Restore the undo/redo stacks from `snap` (overwriting whatever is
+    /// currently held). Called once when the buffer is opened and a
+    /// persistent undo record was loaded.
+    pub fn restore_history(&mut self, snap: history::UndoStackSnapshot) {
+        self.history.restore(snap);
     }
 
     /// Number of undo entries currently on the stack. Changes whenever the buffer

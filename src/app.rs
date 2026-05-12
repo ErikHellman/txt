@@ -4334,6 +4334,16 @@ impl AppState {
             self.lsp_dirty_since = None;
             self.lsp_change_sent = false;
             self.notify_lsp_did_save();
+            // Persist undo history (opt-in) so Ctrl+Z still works after a
+            // restart. Silent on I/O failure.
+            if self.config.persistent_undo {
+                let tab = self.editor.active();
+                if let Some(path) = &tab.path {
+                    let content = tab.buffer.to_string();
+                    let snap = tab.buffer.history_snapshot();
+                    crate::buffer::persistent_undo::save(&self.workspace, path, &content, &snap);
+                }
+            }
         } else {
             self.input_mode = InputMode::SaveAsPath(String::new());
         }
@@ -4736,10 +4746,34 @@ impl AppState {
 
     /// Called after a file is opened or saved — updates recent files, git gutter,
     /// installs a file watcher, and notifies the LSP server.
+    /// Attempt to load persistent undo history for the active tab. No-op
+    /// when the feature is disabled, the buffer has no path, or the
+    /// on-disk hash doesn't match the buffer content.
+    pub fn try_load_persistent_undo_for_active(&mut self) {
+        if !self.config.persistent_undo {
+            return;
+        }
+        let path = match self.editor.active().path.clone() {
+            Some(p) => p,
+            None => return,
+        };
+        let content = self.editor.active().buffer.to_string();
+        if let Some(snap) = crate::buffer::persistent_undo::load(&self.workspace, &path, &content) {
+            self.editor.active_mut().buffer.restore_history(snap);
+        }
+    }
+
     fn after_file_open_or_save(&mut self) {
         if let Some(path) = self.editor.active().path.clone() {
             add_to_recent_files(&path, &self.workspace.clone());
             self.file_watcher = FileWatcher::new(&path);
+        }
+        // Persistent undo: a freshly opened buffer has an empty history, so
+        // we use that as the cue that this is an `open` event (not a
+        // `save`). This avoids the load clobbering the in-memory history
+        // that we are about to persist on save.
+        if !self.editor.active().buffer.can_undo() {
+            self.try_load_persistent_undo_for_active();
         }
         self.refresh_git_gutter();
         // Notify LSP server that a file was opened.
@@ -6163,6 +6197,16 @@ impl App {
             state.restore_from_session(session);
             state.refresh_git_gutter();
         }
+        // Load persistent undo for every tab that was opened during
+        // startup (either via the positional CLI arg or session restore).
+        // Walk by index so we can borrow `state` mutably across iterations;
+        // restore the original active index when done.
+        let saved_active = state.editor.active_idx;
+        for i in 0..state.editor.tabs.len() {
+            state.editor.active_idx = i;
+            state.try_load_persistent_undo_for_active();
+        }
+        state.editor.active_idx = saved_active.min(state.editor.tabs.len().saturating_sub(1));
 
         // Only re-anchor the viewport on the cursor when something actually
         // moved the cursor (or the layout changed); pure scroll actions leave

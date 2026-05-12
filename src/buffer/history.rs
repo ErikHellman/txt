@@ -4,8 +4,10 @@
 //! knows how to undo itself. A `BatchGuard` groups multiple commands into one
 //! logical undo step (e.g., Replace All).
 
+use serde::{Deserialize, Serialize};
+
 /// A single undoable/redoable text edit.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EditCommand {
     /// Inserted `text` at byte offset `at`.
     Insert { at: usize, text: String },
@@ -52,8 +54,8 @@ impl EditCommand {
 
 /// One entry on the undo stack. Either a single command or a batch of commands
 /// that are undone/redone together.
-#[derive(Debug, Clone)]
-enum UndoEntry {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum UndoEntry {
     Single(EditCommand),
     Batch(Vec<EditCommand>),
 }
@@ -176,6 +178,31 @@ impl UndoStack {
     pub fn redo_depth(&self) -> usize {
         self.redo_stack.len()
     }
+
+    /// Build a serializable snapshot of the current undo/redo stacks. Used
+    /// by `crate::buffer::persistent_undo` to write the history to disk.
+    pub fn snapshot(&self) -> UndoStackSnapshot {
+        UndoStackSnapshot {
+            undo: self.undo_stack.clone(),
+            redo: self.redo_stack.clone(),
+        }
+    }
+
+    /// Replace the in-memory stacks with `snap`. Any open batch is dropped.
+    pub fn restore(&mut self, snap: UndoStackSnapshot) {
+        self.current_batch = None;
+        self.undo_stack = snap.undo;
+        self.redo_stack = snap.redo;
+        self.trim_to_capacity();
+    }
+}
+
+/// Serializable view of an `UndoStack`. The on-disk format is JSON via
+/// `serde_json` to match the other workspace-local files.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UndoStackSnapshot {
+    pub undo: Vec<UndoEntry>,
+    pub redo: Vec<UndoEntry>,
 }
 
 impl Default for UndoStack {
