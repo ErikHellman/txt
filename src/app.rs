@@ -96,14 +96,14 @@ pub struct FuzzyPickerState {
 
 impl FuzzyPickerState {
     /// Build by walking the current directory with `ignore` (respects .gitignore).
-    pub fn new() -> Self {
+    /// `hide_git` skips the `.git` directory; `hide_dot` skips every dot-prefixed
+    /// directory (and implies `hide_git`).
+    pub fn new(hide_git: bool, hide_dot: bool) -> Self {
         let mut all_files = Vec::new();
-        for entry in ignore::WalkBuilder::new(".")
-            .hidden(false)
-            .git_ignore(true)
-            .build()
-            .flatten()
-        {
+        let mut builder = ignore::WalkBuilder::new(".");
+        builder.hidden(false).git_ignore(true);
+        crate::search::apply_hidden_dir_filters(&mut builder, hide_git, hide_dot);
+        for entry in builder.build().flatten() {
             if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
                 // Strip the leading "./" for display clarity.
                 let p = entry.into_path();
@@ -1681,7 +1681,10 @@ impl AppState {
                 self.input_mode = InputMode::JumpToLine(String::new());
             }
             EditorAction::OpenFuzzyPicker => {
-                self.fuzzy_picker = Some(FuzzyPickerState::new());
+                self.fuzzy_picker = Some(FuzzyPickerState::new(
+                    self.config.hide_git_folder,
+                    self.config.hide_dot_folders,
+                ));
             }
             EditorAction::ToggleSidebar => {
                 if self.sidebar.is_none() {
@@ -2308,8 +2311,14 @@ impl AppState {
             Some(ps) => (ps.query.clone(), ps.is_regex, ps.case_sensitive),
             None => return,
         };
-        let results =
-            crate::search::project::run(&self.workspace, &query, is_regex, case_sensitive);
+        let results = crate::search::project::run(
+            &self.workspace,
+            &query,
+            is_regex,
+            case_sensitive,
+            self.config.hide_git_folder,
+            self.config.hide_dot_folders,
+        );
         if let Some(ps) = &mut self.project_search {
             ps.results = results;
             ps.selected = 0;
@@ -2770,7 +2779,7 @@ impl AppState {
     /// Handle input while the settings overlay is open.
     /// Returns `true` if the action was consumed, `false` to let it fall through.
     fn handle_settings(&mut self, action: &EditorAction) -> bool {
-        const NUM_ROWS: usize = 5;
+        const NUM_ROWS: usize = crate::ui::settings_overlay::NUM_SETTINGS;
         match action {
             EditorAction::MoveCursor(Direction::Up) => {
                 self.settings_cursor = self.settings_cursor.saturating_sub(1);
@@ -2814,7 +2823,9 @@ impl AppState {
             0 => self.config.confirm_exit = !self.config.confirm_exit,
             1 => self.config.auto_save = !self.config.auto_save,
             2 => self.config.show_whitespace = !self.config.show_whitespace,
-            3 => {
+            3 => self.config.hide_git_folder = !self.config.hide_git_folder,
+            4 => self.config.hide_dot_folders = !self.config.hide_dot_folders,
+            5 => {
                 let all = Theme::ALL;
                 let idx = all
                     .iter()
@@ -2827,7 +2838,7 @@ impl AppState {
                 };
                 self.config.theme = all[next].clone();
             }
-            4 => {
+            6 => {
                 let all = KeymapPreset::ALL;
                 let idx = all
                     .iter()
