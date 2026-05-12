@@ -90,6 +90,18 @@ pub struct Config {
     /// undesirable; default `false`.
     #[serde(default)]
     pub disable_shell_filter: bool,
+    /// Render light vertical guides at every indent multiple inside the
+    /// leading whitespace of each line.
+    #[serde(default = "default_indent_guides")]
+    pub indent_guides: bool,
+    /// Display columns at which to render a light vertical ruler line, e.g.
+    /// `[80, 120]`. Empty disables rulers.
+    #[serde(default)]
+    pub rulers: Vec<usize>,
+    /// Show a sticky header row at the top of the editor pane displaying the
+    /// enclosing function/class/module of the cursor's position.
+    #[serde(default = "default_sticky_header")]
+    pub sticky_header: bool,
     /// Exclude the `.git` directory from go-to-file and project search.
     /// Implied when `hide_dot_folders` is true. Defaults to `true`.
     #[serde(default = "default_hide_git_folder")]
@@ -101,6 +113,14 @@ pub struct Config {
 
 fn default_tab_size() -> usize {
     4
+}
+
+fn default_indent_guides() -> bool {
+    true
+}
+
+fn default_sticky_header() -> bool {
+    true
 }
 
 fn default_hide_git_folder() -> bool {
@@ -120,6 +140,9 @@ impl Default for Config {
             last_seen_version: None,
             formatting: FormattingConfig::default(),
             disable_shell_filter: false,
+            indent_guides: default_indent_guides(),
+            rulers: Vec::new(),
+            sticky_header: default_sticky_header(),
             hide_git_folder: true,
             hide_dot_folders: false,
         }
@@ -300,6 +323,9 @@ mod tests {
             last_seen_version: Some("0.3.0".to_string()),
             formatting: FormattingConfig::default(),
             disable_shell_filter: false,
+            indent_guides: false,
+            rulers: vec![80, 120],
+            sticky_header: false,
             hide_git_folder: true,
             hide_dot_folders: true,
         };
@@ -319,6 +345,20 @@ mod tests {
         let toml_text = "disable_shell_filter = true\n";
         let cfg: Config = toml::from_str(toml_text).unwrap();
         assert!(cfg.disable_shell_filter);
+    }
+
+    #[test]
+    fn indent_guides_default_true() {
+        let cfg = Config::default();
+        assert!(cfg.indent_guides);
+        assert!(cfg.rulers.is_empty());
+    }
+
+    #[test]
+    fn rulers_round_trip_through_toml() {
+        let toml_text = "rulers = [80, 100, 120]\n";
+        let cfg: Config = toml::from_str(toml_text).unwrap();
+        assert_eq!(cfg.rulers, vec![80, 100, 120]);
     }
 
     #[test]

@@ -211,7 +211,7 @@ fn parse_named_key(name: &str) -> Result<KeyCodeRepr, String> {
 /// (e.g. swapping what `ctrl+d` does). On load, files older than this are
 /// backed up to `keybindings.toml.bak-vN` and rewritten from current
 /// defaults so the change actually reaches users with a pre-existing file.
-const CURRENT_CONFIG_VERSION: u32 = 2;
+const CURRENT_CONFIG_VERSION: u32 = 3;
 
 /// Read the version header from a TOML file's text. Files without a header
 /// are treated as v1 (the implicit version before this scheme existed).
@@ -507,6 +507,16 @@ impl KeyBindings {
         bind("ctrl+shift+d", EditorAction::DuplicateLine);
         bind("ctrl+shift+p", EditorAction::OpenCommandPalette);
         bind("ctrl+shift+e", EditorAction::OpenBufferSwitcher);
+        bind("ctrl+shift+o", EditorAction::OpenSymbolPicker);
+        bind("ctrl+shift+[", EditorAction::ToggleFoldAtCursor);
+        bind("alt+0", EditorAction::FoldAll);
+        bind("alt+shift+0", EditorAction::UnfoldAll);
+        bind("alt+left", EditorAction::JumpListBack);
+        bind("alt+right", EditorAction::JumpListForward);
+        bind("ctrl+m", EditorAction::BeginSetMark);
+        bind("ctrl+'", EditorAction::BeginJumpToMark);
+        bind("ctrl+shift+r", EditorAction::BeginRecordMacro);
+        bind("ctrl+alt+r", EditorAction::BeginReplayMacro);
         bind("ctrl+shift+c", EditorAction::CopyFileReference);
         bind("ctrl+shift+b", EditorAction::ToggleSidebar);
         bind("ctrl+shift+n", EditorAction::SidebarNewFolder);
@@ -1142,10 +1152,25 @@ mod tests {
     fn for_preset_returns_correct_type() {
         let default = KeyBindings::for_preset(&KeymapPreset::Default);
         let intellij = KeyBindings::for_preset(&KeymapPreset::IntellijIdea);
-        // IntelliJ should differ from default (word nav)
+        // IntelliJ rebinds Alt+Left to word navigation; the default keymap
+        // uses it for the jump list. Both presets must therefore have
+        // *different* actions bound to Alt+Left.
         let alt_left: KeyCombo = "alt+left".parse().unwrap();
-        assert!(intellij.lookup(&alt_left).is_some());
-        assert!(default.lookup(&alt_left).is_none());
+        let in_intellij = intellij.lookup(&alt_left).cloned();
+        let in_default = default.lookup(&alt_left).cloned();
+        assert_eq!(in_default, Some(EditorAction::JumpListBack));
+        assert!(in_intellij.is_some());
+        assert_ne!(in_intellij, in_default);
+    }
+
+    #[test]
+    fn default_binds_alt_right_to_jump_list_forward() {
+        let default = KeyBindings::for_preset(&KeymapPreset::Default);
+        let alt_right: KeyCombo = "alt+right".parse().unwrap();
+        assert_eq!(
+            default.lookup(&alt_right).cloned(),
+            Some(EditorAction::JumpListForward)
+        );
     }
 
     // ── Version-gated regeneration ──────────────────────────────────────

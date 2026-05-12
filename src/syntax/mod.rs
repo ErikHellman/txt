@@ -1,8 +1,9 @@
 pub mod highlighter;
 pub mod language;
+pub mod queries;
 
 use ropey::Rope;
-use tree_sitter::{Parser, Tree};
+use tree_sitter::{Parser, Query, QueryCursor, StreamingIterator, Tree};
 
 use crate::buffer::cursor::ByteRange;
 use crate::syntax::language::Lang;
@@ -166,6 +167,254 @@ impl SyntaxHost {
             None => Vec::new(),
         }
     }
+
+    /// Walk up the parse tree from `byte_offset` and collect the enclosing
+    /// named containers (functions, classes, modules, etc.) outermost first.
+    ///
+    /// Returns an empty `Vec` if no parse tree is available or if the cursor
+    /// isn't inside any named container. Names whose tree-sitter `name` field
+    /// can't be decoded are skipped silently.
+    pub fn enclosing_named_path(&self, rope: &Rope, byte_offset: usize) -> Vec<EnclosingSymbol> {
+        let tree = match &self.tree {
+            Some(t) => t,
+            None => return Vec::new(),
+        };
+        let root = tree.root_node();
+        let bound = byte_offset.min(rope.len_bytes());
+        let leaf = match root.descendant_for_byte_range(bound, bound) {
+            Some(n) => n,
+            None => return Vec::new(),
+        };
+        let mut path = Vec::new();
+        let mut node = Some(leaf);
+        while let Some(n) = node {
+            if let Some(label) = container_label(n.kind()) {
+                let name_node = ["name", "type", "path", "declarator"]
+                    .into_iter()
+                    .find_map(|f| n.child_by_field_name(f));
+                if let Some(name_node) = name_node {
+                    let start = name_node.start_byte().min(rope.len_bytes());
+                    let end = name_node.end_byte().min(rope.len_bytes());
+                    if start < end {
+                        let start_char = rope.byte_to_char(start);
+                        let end_char = rope.byte_to_char(end);
+                        let text: String = rope.slice(start_char..end_char).chars().collect();
+                        let trimmed: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                        if !trimmed.is_empty() {
+                            path.push(EnclosingSymbol {
+                                name: trimmed,
+                                kind: label,
+                            });
+                        }
+                    }
+                }
+            }
+            node = n.parent();
+        }
+        path.reverse();
+        path
+    }
+}
+
+/// One entry on an enclosing-symbol path: a node name and a short kind label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnclosingSymbol {
+    pub name: String,
+    pub kind: &'static str,
+}
+
+/// A named definition discovered by a tree-sitter symbols query (used by the
+/// Ctrl+Shift+O picker).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Symbol {
+    /// Display name of the symbol (e.g. `"foo"` for `fn foo`).
+    pub name: String,
+    /// Short kind label such as `"fn"`, `"class"`, `"struct"`. Derived from
+    /// the `@symbol.<kind>` capture in the query.
+    pub kind: &'static str,
+    /// Byte range of the *definition* node — i.e. the `@symbol.kind` capture,
+    /// not just the name. Used to jump the cursor.
+    pub byte_range: ByteRange,
+}
+
+impl SyntaxHost {
+    /// Run the language's `@fold` query and return the byte ranges of every
+    /// foldable region (function body, class body, etc.).
+    ///
+    /// Returns an empty `Vec` when no tree is available, when the language
+    /// has no fold query, or when the query fails to compile. Ranges are
+    /// sorted by start byte; duplicates are removed.
+    pub fn fold_ranges(&self, rope: &Rope) -> Vec<ByteRange> {
+        let tree = match &self.tree {
+            Some(t) => t,
+            None => return Vec::new(),
+        };
+        let pattern = match queries::folds_query_for(self.language) {
+            Some(p) if !p.trim().is_empty() => p,
+            _ => return Vec::new(),
+        };
+        let ts_lang = match self.language.ts_language() {
+            Some(l) => l,
+            None => return Vec::new(),
+        };
+        let query = match Query::new(&ts_lang, pattern) {
+            Ok(q) => q,
+            Err(_) => return Vec::new(),
+        };
+        let source = rope.to_string();
+        let bytes = source.as_bytes();
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&query, tree.root_node(), bytes);
+        let mut out: Vec<ByteRange> = Vec::new();
+        while let Some(m) = matches.next() {
+            for cap in m.captures {
+                let r = ByteRange::new(cap.node.start_byte(), cap.node.end_byte());
+                out.push(r);
+            }
+        }
+        out.sort_by_key(|r| (r.start, r.end));
+        out.dedup();
+        // Drop folds that are entirely on a single line — folding gives no
+        // visual benefit there.
+        out.retain(|r| {
+            let start_line = rope.byte_to_line(r.start.min(rope.len_bytes()));
+            let end_line = rope.byte_to_line(r.end.min(rope.len_bytes()));
+            end_line > start_line
+        });
+        out
+    }
+
+    /// Run the language-specific symbols query over the current parse tree
+    /// and collect every `@symbol.<kind>` match.
+    ///
+    /// Returns an empty `Vec` when no tree is available, when the language has
+    /// no symbols query, or when the query fails to compile (which shouldn't
+    /// happen in production but is recovered from gracefully).
+    pub fn collect_symbols(&self, rope: &Rope) -> Vec<Symbol> {
+        let tree = match &self.tree {
+            Some(t) => t,
+            None => return Vec::new(),
+        };
+        let pattern = match queries::symbols_query_for(self.language) {
+            Some(p) if !p.trim().is_empty() => p,
+            _ => return Vec::new(),
+        };
+        let ts_lang = match self.language.ts_language() {
+            Some(l) => l,
+            None => return Vec::new(),
+        };
+        let query = match Query::new(&ts_lang, pattern) {
+            Ok(q) => q,
+            Err(_) => return Vec::new(),
+        };
+
+        let source = rope.to_string();
+        let bytes = source.as_bytes();
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&query, tree.root_node(), bytes);
+
+        let capture_names: Vec<&str> = query.capture_names().to_vec();
+        let mut out = Vec::new();
+        while let Some(m) = matches.next() {
+            let mut name_text: Option<String> = None;
+            let mut symbol_range: Option<(ByteRange, &'static str)> = None;
+            for cap in m.captures {
+                let cap_name = match capture_names.get(cap.index as usize) {
+                    Some(s) => *s,
+                    None => continue,
+                };
+                if cap_name == "name" {
+                    let start = cap.node.start_byte();
+                    let end = cap.node.end_byte();
+                    let text = std::str::from_utf8(&bytes[start..end])
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    if !text.is_empty() {
+                        name_text = Some(text);
+                    }
+                } else if let Some(rest) = cap_name.strip_prefix("symbol.") {
+                    let kind = symbol_kind_label(rest);
+                    let r = ByteRange::new(cap.node.start_byte(), cap.node.end_byte());
+                    symbol_range = Some((r, kind));
+                }
+            }
+            if let (Some(name), Some((range, kind))) = (name_text, symbol_range) {
+                out.push(Symbol {
+                    name,
+                    kind,
+                    byte_range: range,
+                });
+            }
+        }
+        // Sort by line number for stable display.
+        out.sort_by_key(|s| s.byte_range.start);
+        out
+    }
+}
+
+/// Map a query capture suffix (`fn`, `class`, etc.) to a stable `&'static str`
+/// kind label. Unknown suffixes fall back to `"?"`.
+fn symbol_kind_label(suffix: &str) -> &'static str {
+    match suffix {
+        "fn" => "fn",
+        "impl" => "impl",
+        "struct" => "struct",
+        "enum" => "enum",
+        "trait" => "trait",
+        "mod" => "mod",
+        "const" => "const",
+        "static" => "static",
+        "macro" => "macro",
+        "type" => "type",
+        "class" => "class",
+        "interface" => "interface",
+        "object" => "object",
+        "ns" => "ns",
+        "key" => "key",
+        "tag" => "tag",
+        "rule" => "rule",
+        "table" => "table",
+        "var" => "var",
+        "property" => "property",
+        "h1" => "h1",
+        "h2" => "h2",
+        "h3" => "h3",
+        "h4" => "h4",
+        _ => "?",
+    }
+}
+
+/// Map a tree-sitter node kind to a short label for display, or `None` if the
+/// node kind isn't a "named container" worth showing in breadcrumbs.
+fn container_label(kind: &str) -> Option<&'static str> {
+    Some(match kind {
+        // Functions / methods (covers Rust, Python, JS/TS, Go, Java, C#, Kotlin, Groovy, Bash).
+        "function_item"
+        | "function_definition"
+        | "function_declaration"
+        | "method_definition"
+        | "method_declaration"
+        | "constructor_declaration"
+        | "constructor_definition" => "fn",
+        // Rust-only.
+        "impl_item" => "impl",
+        "struct_item" => "struct",
+        "enum_item" => "enum",
+        "trait_item" => "trait",
+        "mod_item" => "mod",
+        // Classes / interfaces / objects (Java, C#, JS/TS, Python, Kotlin, Groovy).
+        "class_definition" | "class_declaration" => "class",
+        "interface_declaration" => "interface",
+        "object_declaration" => "object",
+        // C# / Kotlin namespaces.
+        "namespace_declaration" | "package_clause" => "ns",
+        // Go top-level type declarations.
+        "type_declaration" | "type_spec" => "type",
+        // Markdown structural sections.
+        "section" | "atx_heading" | "setext_heading" => "§",
+        _ => return None,
+    })
 }
 
 impl Default for SyntaxHost {
@@ -285,6 +534,84 @@ mod tests {
         host.reparse_rope(&rope2);
         assert!(host.has_tree());
         assert!(!host.tree.as_ref().unwrap().root_node().has_error());
+    }
+
+    #[test]
+    fn enclosing_path_for_function_returns_fn_only() {
+        let src = "fn foo() { let x = 1; }";
+        let (host, rope) = host_for_rust(src);
+        // Cursor inside `let x = 1;` — about byte 16.
+        let path = host.enclosing_named_path(&rope, 16);
+        // At minimum, the function `foo` is in the path.
+        assert!(
+            path.iter().any(|e| e.name == "foo" && e.kind == "fn"),
+            "expected fn foo in path, got {:?}",
+            path
+        );
+    }
+
+    #[test]
+    fn enclosing_path_for_method_inside_impl_includes_both() {
+        let src = "impl Bar { fn baz(&self) { let x = 1; } }";
+        let (host, rope) = host_for_rust(src);
+        // Cursor inside `let x = 1;` — about byte 32.
+        let path = host.enclosing_named_path(&rope, 32);
+        let kinds: Vec<&str> = path.iter().map(|e| e.kind).collect();
+        let names: Vec<&str> = path.iter().map(|e| e.name.as_str()).collect();
+        assert!(kinds.contains(&"impl"), "kinds={kinds:?}");
+        assert!(kinds.contains(&"fn"), "kinds={kinds:?}");
+        assert!(names.contains(&"Bar"), "names={names:?}");
+        assert!(names.contains(&"baz"), "names={names:?}");
+    }
+
+    #[test]
+    fn enclosing_path_no_tree_returns_empty() {
+        let host = SyntaxHost::new();
+        let rope = Rope::from_str("anything");
+        assert!(host.enclosing_named_path(&rope, 0).is_empty());
+    }
+
+    /// Regression for the sticky header: walking down through an `impl`
+    /// block must land on the *current* method, not a sibling. The user
+    /// reported the header staying on the first function of a class even
+    /// after scrolling into the second.
+    #[test]
+    fn enclosing_path_tracks_current_method_in_multi_method_impl() {
+        let src = "impl Bar {\n    fn first() { let x = 1; }\n    fn second() { let y = 2; }\n}\n";
+        let (host, rope) = host_for_rust(src);
+        let byte = src.find("let y = 2").expect("test source must contain y");
+        let path = host.enclosing_named_path(&rope, byte);
+        let names: Vec<&str> = path.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"Bar"), "names={names:?}");
+        assert!(
+            names.contains(&"second"),
+            "expected the second method to be in the path, got {names:?}"
+        );
+        assert!(
+            !names.contains(&"first"),
+            "first method must not be in the path, got {names:?}"
+        );
+    }
+
+    #[test]
+    fn collect_symbols_rust_finds_functions() {
+        let src = "fn alpha() {}\nfn beta() { let x = 1; }\nstruct Gamma { x: u32 }\n";
+        let (host, rope) = host_for_rust(src);
+        let syms = host.collect_symbols(&rope);
+        let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"alpha"));
+        assert!(names.contains(&"beta"));
+        assert!(names.contains(&"Gamma"));
+        let kinds: Vec<&str> = syms.iter().map(|s| s.kind).collect();
+        assert!(kinds.contains(&"fn"));
+        assert!(kinds.contains(&"struct"));
+    }
+
+    #[test]
+    fn collect_symbols_unknown_language_returns_empty() {
+        let host = SyntaxHost::new();
+        let rope = Rope::from_str("fn foo() {}");
+        assert!(host.collect_symbols(&rope).is_empty());
     }
 
     /// Regression: highlight span byte offsets must match the *current* source

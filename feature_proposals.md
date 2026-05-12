@@ -28,17 +28,17 @@ This is already a serious editor for the niche described in the README — *"rev
 | AST‑aware selection | ✅ expand/contract | ✅ object motions | ✅ object motions | ❌ | textobjects plugin | symbol nav |
 | Multi‑cursor (column) | line above/below only | ✅ rich | ✅ rich | ✅ + click | block visual | ✅ + Alt‑click + Ctrl+D add‑next |
 | Project‑wide find/replace | ❌ | ✅ via `:rg` | ❌ | ✅ | telescope/grep plugins | ✅ |
-| Snippets | ❌ | LSP only | ❌ | ✅ plugin | ✅ many | ✅ |
-| Macros (record/replay) | ❌ | ✅ | ✅ | ✅ | ✅ q/@ | ✅ |
-| Marks / bookmarks | ❌ | ✅ `mx` / `'x` | ✅ | ✅ | ✅ | ✅ |
-| Jump list | ❌ | ✅ | ✅ | ❌ | ✅ Ctrl‑O / Ctrl‑I | ✅ Alt+←/→ |
-| Code folding | ❌ | tree‑sitter folds | ❌ | manual | ✅ | ✅ |
-| Sticky scroll / breadcrumbs | ❌ | ❌ | ❌ | ❌ | plugin | ✅ |
-| Indent guides | ❌ | ✅ | ❌ | ✅ | plugin | ✅ |
+| Snippets | ✅ | LSP only | ❌ | ✅ plugin | ✅ many | ✅ |
+| Macros (record/replay) | ✅ | ✅ | ✅ | ✅ | ✅ q/@ | ✅ |
+| Marks / bookmarks | ✅ | ✅ `mx` / `'x` | ✅ | ✅ | ✅ | ✅ |
+| Jump list | ✅ | ✅ | ✅ | ❌ | ✅ Ctrl‑O / Ctrl‑I | ✅ Alt+←/→ |
+| Code folding | ✅ | tree‑sitter folds | ❌ | manual | ✅ | ✅ |
+| Sticky scroll / breadcrumbs | ✅ | ❌ | ❌ | ❌ | plugin | ✅ |
+| Indent guides | ✅ | ✅ | ❌ | ✅ | plugin | ✅ |
 | Filter selection through shell | ❌ | ✅ `\|` | ✅ `\|` | ❌ | `!` | ❌ |
 | Sort / case / dedupe lines | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Increment number under cursor | ❌ | ❌ | ✅ | ❌ | ✅ Ctrl‑A/X | ❌ |
-| EditorConfig support | ❌ | ✅ | plugin | ✅ | plugin | ✅ |
+| EditorConfig support | ✅ | ✅ | plugin | ✅ | plugin | ✅ |
 | Persistent sessions | ❌ | partial | ❌ | partial | ✅ | ✅ |
 | Persistent undo | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
 | Read clipboard ring / registers | system clipboard | ✅ registers | ✅ registers | system | ✅ registers | ❌ |
@@ -101,21 +101,24 @@ Ten compact actions exposed on the command palette and remappable:
 
 Each is a few lines on top of the existing `Buffer` API and trivially composes with multi‑cursor.
 
-### Tier 2 — daily quality‑of‑life
+### Tier 2 — daily quality‑of‑life ✅ shipped
 
-#### 2.1 Snippets
+All eight Tier 2 features have been implemented on branch
+`claude/implement-tier-2-features-3bEqv` (one commit per feature).
+
+#### 2.1 Snippets ✅ implemented
 
 A simple TextMate‑style snippet engine (`prefix → body` with `$1`, `$2`, `${1:default}`, `$0` final cursor, no transformations needed). Snippets live in `~/.config/txt/snippets/<lang>.toml`, are filtered by tree‑sitter language id, and surface in the existing completion popup. Tab cycles tab‑stops; Esc collapses to `$0`. Roughly the scope of 800 lines including parser, expander, and tab‑stop tracker.
 
 Worth noting: this dovetails with LSP completions because LSP servers already return snippet bodies in the same syntax — `txt` only needs the runtime.
 
-#### 2.2 Macros (record / replay)
+#### 2.2 Macros (record / replay) ✅ implemented
 
 Modal‑editor staple: `Ctrl+Shift+R` starts recording into a slot (`a`–`z`); `Ctrl+Shift+R` again stops. `Ctrl+R` replays. With multi‑cursor and the new `Ctrl+D` motion, macros recorded once apply trivially across an entire file.
 
 Implementation: an `EditorAction` queue tee'd into a `Vec<EditorAction>` while recording, then re‑fed through `update()`. `MouseClick`, `MouseDrag`, and `Unhandled` are skipped. ~200 lines.
 
-#### 2.3 Marks / bookmarks and a jump list
+#### 2.3 Marks / bookmarks and a jump list ✅ implemented
 
 Two related features that share storage:
 
@@ -124,23 +127,23 @@ Two related features that share storage:
 
 Both are cheap and pay back constantly when navigating a multi‑file change.
 
-#### 2.4 Code folding driven by tree‑sitter
+#### 2.4 Code folding driven by tree‑sitter ✅ implemented
 
 Folding ranges are queryable from the existing parse tree (`@fold` captures or balanced node kinds). UI: chevrons in the gutter, `Ctrl+Shift+[` / `Ctrl+Shift+]` to fold/unfold, `Ctrl+K Ctrl+0` fold all. Folded ranges are stored on the `BufferHandle` as a `Vec<Range<usize>>`; `editor_view.rs` already iterates lines for rendering, so the visible‑line walk just skips folded interiors and emits a "..." marker.
 
-#### 2.5 Sticky header / breadcrumbs row
+#### 2.5 Sticky header / breadcrumbs row ✅ implemented
 
 When the cursor is inside a function/class/section, render the enclosing parent on the first row of the editor pane. The information is one tree‑sitter ancestor walk; the cost is one row of viewport. Breadcrumbs in the status bar (`Buffer › Mod › Fn`) are a free byproduct.
 
-#### 2.6 Indent guides and column rulers
+#### 2.6 Indent guides and column rulers ✅ implemented
 
 Render light vertical lines at every indent multiple, and optional vertical rulers at user‑configured columns (e.g. `rulers = [80, 120]`). Both are render‑only changes in `editor_view.rs` and read‑only fields in config. Indent guides catch indentation bugs in YAML/Python instantly.
 
-#### 2.7 EditorConfig support
+#### 2.7 EditorConfig support ✅ implemented
 
 `.editorconfig` is the de facto cross‑editor convention. The `editorconfig` Rust crate is small; on file open, override per‑buffer `tab_size`, `indent_style`, `end_of_line`, `insert_final_newline`, `trim_trailing_whitespace`. This is one of the cheapest features to ship and significantly reduces config friction in mixed‑language repos.
 
-#### 2.8 Symbols in file (Ctrl+Shift+O)
+#### 2.8 Symbols in file (Ctrl+Shift+O) ✅ implemented
 
 A fuzzy picker over all named symbols in the active buffer. The data source is tree‑sitter (`@local.definition.*` captures or per‑grammar definition queries), so it works without an LSP server. The picker is the existing `fuzzy_picker.rs` populated from a different source.
 
@@ -207,9 +210,9 @@ A pragmatic 5‑release roadmap that keeps each release shippable on its own:
 |---|---|---|
 | v0.5 | "Find everywhere" ✅ shipped | 1.1 project search/replace, 1.5 line transforms, 1.4 shell filter |
 | v0.6 | "Multi‑cursor upgrade" | 1.2 add‑next ✅, 1.3 box selection ✅, 3.3 clipboard ring |
-| v0.7 | "Navigate" | 2.3 marks + jump list, 2.8 file/workspace symbols, 3.5 diff navigation |
-| v0.8 | "Rhythm" | 2.2 macros, 2.1 snippets, 3.4 surround/auto‑pairs |
-| v0.9 | "Polish" | 2.4 folding, 2.5 sticky header, 2.6 indent guides + rulers, 2.7 EditorConfig, 3.1 sessions, 3.2 persistent undo |
+| v0.7 | "Navigate" ✅ shipped | 2.3 marks + jump list ✅, 2.8 file symbols ✅, 3.5 diff navigation |
+| v0.8 | "Rhythm" ✅ shipped | 2.2 macros ✅, 2.1 snippets ✅, 3.4 surround/auto‑pairs |
+| v0.9 | "Polish" ✅ shipped | 2.4 folding ✅, 2.5 sticky header ✅, 2.6 indent guides + rulers ✅, 2.7 EditorConfig ✅, 3.1 sessions, 3.2 persistent undo |
 
 ## 5. Constraints to respect
 

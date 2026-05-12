@@ -200,6 +200,40 @@ pub enum EditorAction {
     JumpToLine,
     /// Open the fuzzy file picker overlay (Ctrl+P).
     OpenFuzzyPicker,
+    /// Open the symbols-in-file picker overlay (Ctrl+Shift+O).
+    OpenSymbolPicker,
+    /// Toggle the fold at the cursor's line (Ctrl+Shift+[).
+    ToggleFoldAtCursor,
+    /// Fold every candidate region in the active buffer.
+    FoldAll,
+    /// Unfold every region in the active buffer.
+    UnfoldAll,
+    /// Walk one step backward in the workspace-wide jump list (Alt+Left).
+    JumpListBack,
+    /// Walk one step forward in the workspace-wide jump list (Alt+Right).
+    JumpListForward,
+    /// Begin a mark prompt; the next typed character (a–z) names the mark.
+    BeginSetMark,
+    /// Begin a jump-to-mark prompt; the next typed character (a–z) selects.
+    BeginJumpToMark,
+    /// Look up a snippet whose prefix matches the word before the cursor and
+    /// expand it in-place. Bound to Ctrl+J by default.
+    ExpandSnippetAtCursor,
+    /// While a snippet session is active, advance to the next tab stop.
+    SnippetNextStop,
+    /// While a snippet session is active, walk back to the previous stop.
+    SnippetPrevStop,
+    /// Cancel the active snippet session (Esc).
+    SnippetCancel,
+    /// Begin a macro-recording prompt; the next typed character (a–z) names
+    /// the slot. Pressing the same hotkey while a recording is active stops
+    /// it instead of starting a new one.
+    BeginRecordMacro,
+    /// Stop the in-progress macro recording. Bound to Ctrl+Shift+R while a
+    /// recording is active (the same hotkey toggles).
+    StopRecordMacro,
+    /// Begin a replay prompt; the next typed char (a–z) selects the slot.
+    BeginReplayMacro,
     /// Toggle the file tree sidebar visibility (Ctrl+Shift+B).
     ToggleSidebar,
     /// Focus-jump between the editor and the sidebar (Ctrl+B).
@@ -384,6 +418,21 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::OpenFile => "open_file",
         EditorAction::JumpToLine => "jump_to_line",
         EditorAction::OpenFuzzyPicker => "open_fuzzy_picker",
+        EditorAction::OpenSymbolPicker => "open_symbol_picker",
+        EditorAction::ToggleFoldAtCursor => "toggle_fold_at_cursor",
+        EditorAction::FoldAll => "fold_all",
+        EditorAction::UnfoldAll => "unfold_all",
+        EditorAction::JumpListBack => "jump_list_back",
+        EditorAction::JumpListForward => "jump_list_forward",
+        EditorAction::BeginSetMark => "set_mark",
+        EditorAction::BeginJumpToMark => "jump_to_mark",
+        EditorAction::ExpandSnippetAtCursor => "expand_snippet",
+        EditorAction::SnippetNextStop => "snippet_next_stop",
+        EditorAction::SnippetPrevStop => "snippet_prev_stop",
+        EditorAction::SnippetCancel => "snippet_cancel",
+        EditorAction::BeginRecordMacro => "record_macro",
+        EditorAction::StopRecordMacro => "stop_recording_macro",
+        EditorAction::BeginReplayMacro => "replay_macro",
         EditorAction::ToggleSidebar => "toggle_sidebar",
         EditorAction::FocusSidebar => "focus_sidebar",
         // View / UI toggles
@@ -523,6 +572,21 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "open_file" => EditorAction::OpenFile,
         "jump_to_line" => EditorAction::JumpToLine,
         "open_fuzzy_picker" => EditorAction::OpenFuzzyPicker,
+        "open_symbol_picker" => EditorAction::OpenSymbolPicker,
+        "toggle_fold_at_cursor" => EditorAction::ToggleFoldAtCursor,
+        "fold_all" => EditorAction::FoldAll,
+        "unfold_all" => EditorAction::UnfoldAll,
+        "jump_list_back" => EditorAction::JumpListBack,
+        "jump_list_forward" => EditorAction::JumpListForward,
+        "set_mark" => EditorAction::BeginSetMark,
+        "jump_to_mark" => EditorAction::BeginJumpToMark,
+        "expand_snippet" => EditorAction::ExpandSnippetAtCursor,
+        "snippet_next_stop" => EditorAction::SnippetNextStop,
+        "snippet_prev_stop" => EditorAction::SnippetPrevStop,
+        "snippet_cancel" => EditorAction::SnippetCancel,
+        "record_macro" => EditorAction::BeginRecordMacro,
+        "stop_recording_macro" => EditorAction::StopRecordMacro,
+        "replay_macro" => EditorAction::BeginReplayMacro,
         "toggle_sidebar" => EditorAction::ToggleSidebar,
         "focus_sidebar" => EditorAction::FocusSidebar,
         // View / UI toggles

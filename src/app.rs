@@ -74,6 +74,14 @@ pub enum InputMode {
     /// non-empty character submitted (Enter takes the first char, or aborts
     /// if empty).
     AlignChar(String),
+    /// Ctrl+M: "Mark: " — auto-submits on the next typed alphabetic char.
+    SetMarkChar,
+    /// Ctrl+': "Jump to mark: " — auto-submits on the next typed char.
+    JumpToMarkChar,
+    /// "Record macro into slot: " — next char names the slot a–z.
+    RecordMacroChar,
+    /// "Replay macro from slot: " — next char names the slot a–z.
+    ReplayMacroChar,
 }
 
 impl InputMode {
@@ -187,6 +195,86 @@ impl FuzzyPickerState {
         self.filtered
             .get(self.selected)
             .map(|(_, idx)| &self.all_files[*idx])
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        if !self.filtered.is_empty() && self.selected < self.filtered.len() - 1 {
+            self.selected += 1;
+        }
+    }
+}
+
+// ── Symbol-in-file picker state ──────────────────────────────────────────
+
+/// State for the Ctrl+Shift+O symbol-in-file picker. Mirrors
+/// [`FuzzyPickerState`] but scores against symbol names rather than file
+/// paths and tracks each symbol's byte range so `Enter` can jump the cursor.
+pub struct SymbolPickerState {
+    pub query: String,
+    /// All symbols collected from the active buffer's parse tree.
+    pub all_symbols: Vec<crate::syntax::Symbol>,
+    /// Scored and sorted (score DESC) indices into `all_symbols`.
+    pub filtered: Vec<(u32, usize)>,
+    /// Currently highlighted row.
+    pub selected: usize,
+}
+
+impl SymbolPickerState {
+    /// Build with the symbols already collected from the active buffer.
+    pub fn new(symbols: Vec<crate::syntax::Symbol>) -> Self {
+        let n = symbols.len();
+        let filtered = (0..n).map(|i| (0u32, i)).collect();
+        Self {
+            query: String::new(),
+            all_symbols: symbols,
+            filtered,
+            selected: 0,
+        }
+    }
+
+    /// Re-score against the current query using nucleo. Empty query shows
+    /// every symbol in source order.
+    pub fn update_query(&mut self, query: String) {
+        self.query = query;
+        self.selected = 0;
+
+        if self.query.is_empty() {
+            let n = self.all_symbols.len();
+            self.filtered = (0..n).map(|i| (0u32, i)).collect();
+            return;
+        }
+
+        use nucleo::pattern::{CaseMatching, Normalization, Pattern};
+        use nucleo::{Config, Matcher, Utf32String};
+
+        let mut matcher = Matcher::new(Config::DEFAULT);
+        let pattern = Pattern::parse(&self.query, CaseMatching::Smart, Normalization::Smart);
+
+        let mut scored: Vec<(u32, usize)> = self
+            .all_symbols
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, sym)| {
+                let haystack = Utf32String::from(sym.name.as_str());
+                pattern
+                    .score(haystack.slice(..), &mut matcher)
+                    .map(|sc| (sc, idx))
+            })
+            .collect();
+        scored.sort_by_key(|b| std::cmp::Reverse(b.0));
+        self.filtered = scored;
+    }
+
+    pub fn selected_symbol(&self) -> Option<&crate::syntax::Symbol> {
+        self.filtered
+            .get(self.selected)
+            .map(|(_, idx)| &self.all_symbols[*idx])
     }
 
     pub fn move_up(&mut self) {
@@ -777,6 +865,13 @@ pub struct AppState {
     pub clipboard: ClipboardManager,
     pub input_mode: InputMode,
     pub fuzzy_picker: Option<FuzzyPickerState>,
+    pub symbol_picker: Option<SymbolPickerState>,
+    pub marks: crate::marks::NamedMarks,
+    pub jumps: crate::marks::JumpList,
+    /// Lazy-loaded snippet store, populated per language on first use.
+    pub snippets: crate::snippet::SnippetStore,
+    /// In-memory keyboard macro state (recording, slots, replay flag).
+    pub macros: crate::macros::MacroState,
     pub sidebar: Option<SidebarState>,
     pub sidebar_focused: bool,
     /// Current sidebar width in columns (excluding the 1-col separator).
@@ -904,6 +999,11 @@ impl AppState {
             clipboard: ClipboardManager::new(),
             input_mode: InputMode::Normal,
             fuzzy_picker: None,
+            symbol_picker: None,
+            marks: crate::marks::NamedMarks::load(&workspace),
+            jumps: crate::marks::JumpList::load(&workspace),
+            snippets: crate::snippet::SnippetStore::new(),
+            macros: crate::macros::MacroState::new(),
             sidebar: None,
             sidebar_focused: false,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
@@ -971,6 +1071,12 @@ impl AppState {
 
         // Clear transient status error on any user interaction.
         self.status_error = None;
+
+        // Append to the in-progress macro recording (if any). The state's
+        // own `replaying` flag suppresses re-recording during playback.
+        if crate::macros::is_recordable(&action) {
+            self.macros.append(&action);
+        }
 
         // Capture undo depth before dispatch so we can detect actual buffer edits below.
         let pre_undo_depth = self.editor.active().buffer.undo_depth();
@@ -1065,6 +1171,12 @@ impl AppState {
         // Fuzzy picker — captured input
         if self.fuzzy_picker.is_some() {
             self.handle_fuzzy_picker(action);
+            return;
+        }
+
+        // Symbol picker — captured input
+        if self.symbol_picker.is_some() {
+            self.handle_symbol_picker(action);
             return;
         }
 
@@ -1170,6 +1282,16 @@ impl AppState {
                     .insert_newline(&indent, rules);
             }
             EditorAction::InsertTab => {
+                if self.editor.active().snippet_session.is_some() {
+                    self.snippet_advance(true);
+                    return;
+                }
+                // Try to expand a snippet whose prefix matches the word
+                // immediately before the cursor. Falls through to normal
+                // tab-indent behaviour when no snippet is found.
+                if self.try_expand_snippet_silently() {
+                    return;
+                }
                 let (indent, _) = self.indent_for_active();
                 // Multi-line selection → indent every touched line.
                 let buf = &self.editor.active().buffer;
@@ -1196,6 +1318,10 @@ impl AppState {
                 self.editor.active_mut().buffer.indent_lines(&indent);
             }
             EditorAction::DedentSelection => {
+                if self.editor.active().snippet_session.is_some() {
+                    self.snippet_advance(false);
+                    return;
+                }
                 let (indent, _) = self.indent_for_active();
                 self.editor.active_mut().buffer.dedent_lines(&indent);
             }
@@ -1686,6 +1812,74 @@ impl AppState {
                     self.config.hide_dot_folders,
                 ));
             }
+            EditorAction::OpenSymbolPicker => {
+                let active = self.editor.active();
+                let symbols = active.syntax.collect_symbols(active.buffer.rope());
+                if symbols.is_empty() {
+                    self.status_error = Some("No symbols found in this buffer".to_string());
+                } else {
+                    self.symbol_picker = Some(SymbolPickerState::new(symbols));
+                }
+            }
+            EditorAction::ToggleFoldAtCursor => {
+                let active = self.editor.active_mut();
+                let line = active.buffer.cursors.primary().line;
+                if !active.folds.toggle_at_line(line) {
+                    self.status_error = Some("No fold at cursor".to_string());
+                }
+            }
+            EditorAction::FoldAll => {
+                self.editor.active_mut().folds.fold_all();
+            }
+            EditorAction::UnfoldAll => {
+                self.editor.active_mut().folds.unfold_all();
+            }
+            EditorAction::JumpListBack => {
+                self.push_current_to_jump_list();
+                if let Some(entry) = self.jumps.back() {
+                    self.go_to_jump_entry(&entry);
+                }
+            }
+            EditorAction::JumpListForward => {
+                if let Some(entry) = self.jumps.forward() {
+                    self.go_to_jump_entry(&entry);
+                }
+            }
+            EditorAction::BeginSetMark => {
+                self.input_mode = InputMode::SetMarkChar;
+            }
+            EditorAction::BeginJumpToMark => {
+                self.input_mode = InputMode::JumpToMarkChar;
+            }
+            EditorAction::ExpandSnippetAtCursor => {
+                self.expand_snippet_at_cursor();
+            }
+            EditorAction::SnippetNextStop => {
+                self.snippet_advance(true);
+            }
+            EditorAction::SnippetPrevStop => {
+                self.snippet_advance(false);
+            }
+            EditorAction::SnippetCancel => {
+                self.editor.active_mut().snippet_session = None;
+            }
+            EditorAction::BeginRecordMacro => {
+                if self.macros.recording_slot().is_some() {
+                    if let Some(slot) = self.macros.stop_recording() {
+                        self.status_error = Some(format!("Recorded macro '{slot}'"));
+                    }
+                } else {
+                    self.input_mode = InputMode::RecordMacroChar;
+                }
+            }
+            EditorAction::StopRecordMacro => {
+                if let Some(slot) = self.macros.stop_recording() {
+                    self.status_error = Some(format!("Recorded macro '{slot}'"));
+                }
+            }
+            EditorAction::BeginReplayMacro => {
+                self.input_mode = InputMode::ReplayMacroChar;
+            }
             EditorAction::ToggleSidebar => {
                 if self.sidebar.is_none() {
                     // Restore saved state or create fresh, then expand to current file.
@@ -1741,6 +1935,7 @@ impl AppState {
                 self.trigger_hover();
             }
             EditorAction::GoToDefinition => {
+                self.push_current_to_jump_list();
                 self.trigger_go_to_definition();
             }
             EditorAction::FindReferences => {
@@ -1836,6 +2031,10 @@ impl AppState {
             EditorAction::SearchNext => self.search_next(),
             EditorAction::SearchPrev => self.search_prev(),
             EditorAction::CloseSearch => {
+                if self.editor.active().snippet_session.is_some() {
+                    self.editor.active_mut().snippet_session = None;
+                    return;
+                }
                 self.search_state = None;
                 // Esc also collapses column-edit multi-cursor when search is not open.
                 if self.editor.active().buffer.cursors.is_multi() {
@@ -1878,6 +2077,29 @@ impl AppState {
 
         // Dismiss hover on any action.
         self.hover = None;
+
+        // Forward any buffer edits made this action to marks/jumps so their
+        // byte offsets keep tracking after inserts, deletes, and replaces.
+        // Drain regardless of `modified` so the queue never grows unbounded.
+        let pending = self.editor.active_mut().buffer.drain_pending_edits();
+        if !pending.is_empty() {
+            if let Some(path) = self.editor.active().path.clone() {
+                for cmd in &pending {
+                    self.marks.rebase_after_edit(&path, cmd);
+                    self.jumps.rebase_after_edit(&path, cmd);
+                }
+                self.marks.save(&self.workspace);
+                self.jumps.save(&self.workspace);
+            }
+            if let Some(session) = self.editor.active_mut().snippet_session.as_mut() {
+                for cmd in &pending {
+                    session.rebase(cmd);
+                }
+                if session.is_empty() {
+                    self.editor.active_mut().snippet_session = None;
+                }
+            }
+        }
 
         // Re-parse the active buffer if it was modified this action.
         if self.editor.active().buffer.modified {
@@ -1984,6 +2206,52 @@ impl AppState {
     // ── Modal input handling ─────────────────────────────────────────────────
 
     fn handle_modal_input(&mut self, action: EditorAction) {
+        // Mark prompts auto-complete on the first typed character.
+        if let EditorAction::InsertChar(c) = action {
+            match self.input_mode {
+                InputMode::SetMarkChar => {
+                    self.input_mode = InputMode::Normal;
+                    let handle = self.editor.active();
+                    if let Some(path) = handle.path.clone() {
+                        let off = handle.buffer.cursors.primary().byte_offset;
+                        self.marks.set(&path, c, off);
+                        self.marks.save(&self.workspace);
+                    } else {
+                        self.status_error = Some("Save the file before setting a mark".into());
+                    }
+                    return;
+                }
+                InputMode::JumpToMarkChar => {
+                    self.input_mode = InputMode::Normal;
+                    let active_path = self.editor.active().path.clone();
+                    if let Some(path) = active_path
+                        && let Some(off) = self.marks.get(&path, c)
+                    {
+                        self.push_current_to_jump_list();
+                        let handle = self.editor.active_mut();
+                        let rope = handle.buffer.rope();
+                        let bound = off.min(rope.len_bytes());
+                        *handle.buffer.cursors.primary_mut() =
+                            crate::buffer::cursor::Cursor::from_byte_offset(rope, bound);
+                        handle.buffer.cursors.collapse_to_primary();
+                    } else {
+                        self.status_error = Some(format!("No mark named {c}"));
+                    }
+                    return;
+                }
+                InputMode::RecordMacroChar => {
+                    self.input_mode = InputMode::Normal;
+                    self.macros.start_recording(c);
+                    return;
+                }
+                InputMode::ReplayMacroChar => {
+                    self.input_mode = InputMode::Normal;
+                    self.replay_macro_slot(c);
+                    return;
+                }
+                _ => {}
+            }
+        }
         // Mutate the input string for typing/backspace without accessing other fields.
         match action {
             EditorAction::InsertChar(c) => {
@@ -2022,7 +2290,11 @@ impl AppState {
                     | InputMode::AlignChar(s) => {
                         s.pop();
                     }
-                    InputMode::Normal => {}
+                    InputMode::Normal
+                    | InputMode::SetMarkChar
+                    | InputMode::JumpToMarkChar
+                    | InputMode::RecordMacroChar
+                    | InputMode::ReplayMacroChar => {}
                 }
                 return;
             }
@@ -2041,6 +2313,7 @@ impl AppState {
                             None => (input.as_str(), None),
                         };
                         if let Ok(n) = line_str.parse::<usize>() {
+                            self.push_current_to_jump_list();
                             let line = n.saturating_sub(1); // 1-based input
                             let buf = &mut self.editor.active_mut().buffer;
                             let target = {
@@ -2072,6 +2345,7 @@ impl AppState {
                     }
                     InputMode::OpenFilePath(input) => {
                         let path = PathBuf::from(input.trim());
+                        self.push_current_to_jump_list();
                         let _ = self.editor.open_tab(path);
                         self.after_file_open_or_save();
                     }
@@ -2131,7 +2405,11 @@ impl AppState {
                             self.editor.active_mut().buffer.align_on(c);
                         }
                     }
-                    InputMode::Normal => {}
+                    InputMode::Normal
+                    | InputMode::SetMarkChar
+                    | InputMode::JumpToMarkChar
+                    | InputMode::RecordMacroChar
+                    | InputMode::ReplayMacroChar => {}
                 }
             }
             EditorAction::Quit | EditorAction::Unhandled => {
@@ -2180,12 +2458,65 @@ impl AppState {
                     .and_then(|p| p.selected_path().cloned());
                 self.fuzzy_picker = None;
                 if let Some(path) = path {
+                    self.push_current_to_jump_list();
                     let _ = self.editor.open_tab(path);
                     self.after_file_open_or_save();
                 }
             }
             EditorAction::Quit | EditorAction::CloseSearch | EditorAction::Unhandled => {
                 self.fuzzy_picker = None;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_symbol_picker(&mut self, action: EditorAction) {
+        if self.symbol_picker.is_none() {
+            return;
+        }
+        match action {
+            EditorAction::InsertChar(c) => {
+                if let Some(picker) = &mut self.symbol_picker {
+                    let mut q = picker.query.clone();
+                    q.push(c);
+                    picker.update_query(q);
+                }
+            }
+            EditorAction::DeleteBackward => {
+                if let Some(picker) = &mut self.symbol_picker {
+                    let mut q = picker.query.clone();
+                    q.pop();
+                    picker.update_query(q);
+                }
+            }
+            EditorAction::MoveCursor(Direction::Up) => {
+                if let Some(picker) = &mut self.symbol_picker {
+                    picker.move_up();
+                }
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                if let Some(picker) = &mut self.symbol_picker {
+                    picker.move_down();
+                }
+            }
+            EditorAction::InsertNewline => {
+                let target = self
+                    .symbol_picker
+                    .as_ref()
+                    .and_then(|p| p.selected_symbol().cloned());
+                self.symbol_picker = None;
+                if let Some(sym) = target {
+                    self.push_current_to_jump_list();
+                    let handle = self.editor.active_mut();
+                    let rope = handle.buffer.rope();
+                    let bound = sym.byte_range.start.min(rope.len_bytes());
+                    *handle.buffer.cursors.primary_mut() =
+                        crate::buffer::cursor::Cursor::from_byte_offset(rope, bound);
+                    handle.buffer.cursors.collapse_to_primary();
+                }
+            }
+            EditorAction::Quit | EditorAction::CloseSearch | EditorAction::Unhandled => {
+                self.symbol_picker = None;
             }
             _ => {}
         }
@@ -3396,6 +3727,7 @@ impl AppState {
                             sb.toggle_selected();
                         }
                     } else {
+                        self.push_current_to_jump_list();
                         let _ = self.editor.open_tab(path);
                         self.after_file_open_or_save();
                         self.sidebar_focused = false;
@@ -3707,25 +4039,44 @@ impl AppState {
 
     // ── Code formatting ───────────────────────────────────────────────────────
 
+    /// Short status-bar label showing the active indent style, e.g.
+    /// `"spaces:4"` or `"tabs:8"`.
+    pub fn indent_label(&self) -> String {
+        let (indent, _) = self.indent_for_active();
+        match indent.style {
+            crate::formatting::IndentStyle::Tabs => format!("tabs:{}", indent.width),
+            crate::formatting::IndentStyle::Spaces => format!("spaces:{}", indent.width),
+        }
+    }
+
     /// Resolve the live indent rules for the active buffer's language,
     /// merging project + global config and falling back to the legacy
     /// `tab_size` and built-in defaults.
+    ///
+    /// Per-buffer `.editorconfig` overrides win over every config layer.
     fn indent_for_active(
         &self,
     ) -> (
         crate::formatting::IndentConfig,
         crate::formatting::IndentRules,
     ) {
-        let lang = self.editor.active().syntax.language;
+        let active = self.editor.active();
+        let lang = active.syntax.language;
         let resolver = crate::formatting::FormattingResolver {
             global: &self.config.formatting,
             project: self.project_fmt.as_ref(),
             legacy_tab_size: self.config.tab_size,
         };
-        (
-            resolver.indent(lang),
-            crate::formatting::IndentRules::for_lang(lang),
-        )
+        let mut indent = resolver.indent(lang);
+        if let Some(style) = active.editorconfig.indent_style {
+            indent.style = style;
+        }
+        if let Some(width) = active.editorconfig.effective_width()
+            && width > 0
+        {
+            indent.width = width;
+        }
+        (indent, crate::formatting::IndentRules::for_lang(lang))
     }
 
     /// Run the configured external formatter for the active buffer's
@@ -3850,6 +4201,184 @@ impl AppState {
         } else {
             self.git_gutter = None;
         }
+    }
+
+    /// Replay the actions stored in macro slot `slot`. Wraps the playback in
+    /// a single undo batch so the entire sequence collapses to one undo step,
+    /// and sets the replay flag so the actions are not re-recorded if the
+    /// user starts a new recording mid-replay.
+    fn replay_macro_slot(&mut self, slot: char) {
+        let Some(actions) = self.macros.play(slot) else {
+            self.status_error = Some(format!("No macro in slot '{slot}'"));
+            return;
+        };
+        let term_h = self.term_height;
+        self.macros.set_replaying(true);
+        self.editor.active_mut().buffer.begin_batch();
+        for action in actions {
+            self.update(action, term_h);
+        }
+        self.editor.active_mut().buffer.commit_batch();
+        self.macros.set_replaying(false);
+    }
+
+    /// Same logic as `expand_snippet_at_cursor` but silent: returns `false`
+    /// when no snippet matches so the caller can fall through to its own
+    /// default (e.g. `InsertTab` doing indentation).
+    fn try_expand_snippet_silently(&mut self) -> bool {
+        let lang_id = self.editor.active().syntax.language.config_key();
+        if lang_id.is_empty() {
+            return false;
+        }
+        let cursor_byte = self.editor.active().buffer.cursors.primary().byte_offset;
+        let primary = self.editor.active().buffer.cursors.primary();
+        if primary.has_selection() {
+            return false;
+        }
+        let rope = self.editor.active().buffer.rope();
+        let probe = cursor_byte.saturating_sub(1);
+        let Some((wstart, wend)) = crate::buffer::cursor::word_span_at(rope, probe) else {
+            return false;
+        };
+        if wend < cursor_byte {
+            return false;
+        }
+        let prefix: String = rope.byte_slice(wstart..wend).chars().collect();
+        let matches = self.snippets.lookup(lang_id, &prefix);
+        let Some(snip) = matches.into_iter().next() else {
+            return false;
+        };
+        let parsed = snip.parse_body();
+        let exp = crate::snippet::session::SnippetSession::expand_at(&parsed, wstart);
+        let buf = &mut self.editor.active_mut().buffer;
+        buf.begin_batch();
+        buf.delete_range(wstart, wend);
+        *buf.cursors.primary_mut() =
+            crate::buffer::cursor::Cursor::from_byte_offset(buf.rope(), wstart);
+        buf.cursors.primary_mut().selection = None;
+        buf.insert_str(&exp.text);
+        buf.commit_batch();
+        self.editor.active_mut().snippet_session = exp.session;
+        self.snippet_select_current();
+        true
+    }
+
+    /// Look up the word before the cursor in the active buffer's language
+    /// snippet store; if there's a match, delete the word and expand the
+    /// snippet in its place.
+    fn expand_snippet_at_cursor(&mut self) {
+        let lang_id = self.editor.active().syntax.language.config_key();
+        if lang_id.is_empty() {
+            self.status_error = Some("Snippets need a recognised language".into());
+            return;
+        }
+        let cursor_byte = self.editor.active().buffer.cursors.primary().byte_offset;
+        let rope = self.editor.active().buffer.rope();
+        let probe = cursor_byte.saturating_sub(1);
+        let Some((wstart, wend)) = crate::buffer::cursor::word_span_at(rope, probe) else {
+            self.status_error = Some("Place the cursor after a snippet prefix".into());
+            return;
+        };
+        if wend < cursor_byte {
+            self.status_error = Some("Place the cursor after a snippet prefix".into());
+            return;
+        }
+        let prefix: String = rope.byte_slice(wstart..wend).chars().collect();
+        let matches = self.snippets.lookup(lang_id, &prefix);
+        let Some(snip) = matches.into_iter().next() else {
+            self.status_error = Some(format!("No snippet named '{prefix}'"));
+            return;
+        };
+        let parsed = snip.parse_body();
+        // Compute the expansion text and session at the prefix start position
+        // since we're about to delete the prefix.
+        let exp = crate::snippet::session::SnippetSession::expand_at(&parsed, wstart);
+        let buf = &mut self.editor.active_mut().buffer;
+        buf.begin_batch();
+        buf.delete_range(wstart, wend);
+        // Move the primary cursor to wstart before inserting so insert lands
+        // at the right location regardless of prior selection state.
+        *buf.cursors.primary_mut() =
+            crate::buffer::cursor::Cursor::from_byte_offset(buf.rope(), wstart);
+        buf.cursors.primary_mut().selection = None;
+        buf.insert_str(&exp.text);
+        buf.commit_batch();
+        self.editor.active_mut().snippet_session = exp.session;
+        // Jump cursor to the first tab stop, selecting its default text.
+        self.snippet_select_current();
+    }
+
+    /// Select the byte range of the current snippet tab stop. Called after
+    /// expanding or advancing the session.
+    fn snippet_select_current(&mut self) {
+        let handle = self.editor.active_mut();
+        let range = match &handle.snippet_session {
+            Some(s) => s.current_range(),
+            None => return,
+        };
+        let len = handle.buffer.rope().len_bytes();
+        let bound_start = range.start.min(len);
+        let bound_end = range.end.min(len);
+        let new_cursor = {
+            let rope = handle.buffer.rope();
+            crate::buffer::cursor::Cursor::from_byte_offset(rope, bound_end)
+        };
+        let primary = handle.buffer.cursors.primary_mut();
+        *primary = new_cursor;
+        if bound_end > bound_start {
+            primary.selection = Some(crate::buffer::cursor::Selection {
+                anchor: bound_start,
+                active: bound_end,
+            });
+        } else {
+            primary.selection = None;
+        }
+    }
+
+    /// Move the active snippet session forward (`true`) or backward.
+    fn snippet_advance(&mut self, forward: bool) {
+        let advanced = match self.editor.active_mut().snippet_session.as_mut() {
+            Some(s) => {
+                if forward {
+                    s.next_stop()
+                } else {
+                    s.prev_stop()
+                }
+            }
+            None => false,
+        };
+        if advanced {
+            self.snippet_select_current();
+        } else {
+            self.editor.active_mut().snippet_session = None;
+        }
+    }
+
+    /// Snapshot the active buffer's cursor into the jump list. Used right
+    /// before navigation actions (mark jumps, jump-list back) so the
+    /// previous cursor position can be returned to.
+    fn push_current_to_jump_list(&mut self) {
+        let handle = self.editor.active();
+        if let Some(path) = handle.path.clone() {
+            let byte_offset = handle.buffer.cursors.primary().byte_offset;
+            self.jumps
+                .push(crate::marks::JumpEntry { path, byte_offset });
+        }
+    }
+
+    /// Move the cursor to a jump-list entry, switching tabs if necessary.
+    fn go_to_jump_entry(&mut self, entry: &crate::marks::JumpEntry) {
+        let active_path = self.editor.active().path.clone();
+        if active_path.as_ref() != Some(&entry.path) {
+            let _ = self.editor.open_tab(entry.path.clone());
+            self.after_file_open_or_save();
+        }
+        let handle = self.editor.active_mut();
+        let rope = handle.buffer.rope();
+        let bound = entry.byte_offset.min(rope.len_bytes());
+        *handle.buffer.cursors.primary_mut() =
+            crate::buffer::cursor::Cursor::from_byte_offset(rope, bound);
+        handle.buffer.cursors.collapse_to_primary();
     }
 
     /// Called after a file is opened or saved — updates recent files, git gutter,
