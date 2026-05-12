@@ -3301,10 +3301,17 @@ impl AppState {
             0 => self.config.confirm_exit = !self.config.confirm_exit,
             1 => self.config.auto_save = !self.config.auto_save,
             2 => self.config.show_whitespace = !self.config.show_whitespace,
-            3 => self.config.hide_git_folder = !self.config.hide_git_folder,
-            4 => self.config.hide_dot_folders = !self.config.hide_dot_folders,
-            5 => self.config.restore_session = !self.config.restore_session,
-            6 => {
+            3 => {
+                self.config.highlight_trailing_whitespace =
+                    !self.config.highlight_trailing_whitespace;
+            }
+            4 => self.config.warn_mixed_indent = !self.config.warn_mixed_indent,
+            5 => self.config.auto_pair = !self.config.auto_pair,
+            6 => self.config.hide_git_folder = !self.config.hide_git_folder,
+            7 => self.config.hide_dot_folders = !self.config.hide_dot_folders,
+            8 => self.config.restore_session = !self.config.restore_session,
+            9 => self.config.persistent_undo = !self.config.persistent_undo,
+            10 => {
                 let all = Theme::ALL;
                 let idx = all
                     .iter()
@@ -3317,7 +3324,7 @@ impl AppState {
                 };
                 self.config.theme = all[next].clone();
             }
-            7 => {
+            11 => {
                 let all = KeymapPreset::ALL;
                 let idx = all
                     .iter()

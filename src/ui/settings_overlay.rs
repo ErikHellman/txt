@@ -11,7 +11,7 @@ use crate::config::Config;
 
 const OVERLAY_W: u16 = 50;
 // Rows: top border + header + separator + N settings + separator + hint + bottom border
-pub(crate) const NUM_SETTINGS: usize = 8;
+pub(crate) const NUM_SETTINGS: usize = 12;
 const OVERLAY_H: u16 = 3 + NUM_SETTINGS as u16 + 3;
 
 /// Render the settings overlay centered in `area`.
@@ -103,6 +103,18 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
             SettingValue::Bool(state.config.show_whitespace),
         ),
         (
+            "Highlight trailing whitespace",
+            SettingValue::Bool(state.config.highlight_trailing_whitespace),
+        ),
+        (
+            "Warn on mixed indent",
+            SettingValue::Bool(state.config.warn_mixed_indent),
+        ),
+        (
+            "Auto-pair brackets",
+            SettingValue::Bool(state.config.auto_pair),
+        ),
+        (
             "Hide .git folder",
             SettingValue::Bool(state.config.hide_git_folder),
         ),
@@ -113,6 +125,10 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
         (
             "Restore session",
             SettingValue::Bool(state.config.restore_session),
+        ),
+        (
+            "Persistent undo",
+            SettingValue::Bool(state.config.persistent_undo),
         ),
         (
             "Color theme",

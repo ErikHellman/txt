@@ -193,6 +193,59 @@ fn persistent_undo_survives_relaunch() {
     s2.shutdown();
 }
 
+#[test]
+fn settings_overlay_lists_all_tier3_toggles() {
+    // The settings overlay must surface every new Tier 3 bool toggle so
+    // the user doesn't have to hand-edit config.toml.
+    let fx = Fixture::new();
+    let path = fx.write_file("settings.txt", "x\n");
+    let mut s = fx.open(&path);
+    s.wait_for_status_contains("settings.txt");
+    s.send_key(Key::Ctrl(','));
+    s.wait_for_screen_contains("Settings");
+    for label in [
+        "Highlight trailing whitespace",
+        "Warn on mixed indent",
+        "Auto-pair brackets",
+        "Restore session",
+        "Persistent undo",
+    ] {
+        s.wait_for_screen_contains(label);
+    }
+    s.shutdown();
+}
+
+#[test]
+fn settings_toggle_auto_pair_writes_config() {
+    // Toggling "Auto-pair brackets" (row 5) must persist auto_pair = false
+    // to config.toml.
+    let fx = Fixture::new();
+    let path = fx.write_file("ap-toggle.txt", "x\n");
+    let mut s = fx.open(&path);
+    s.wait_for_status_contains("ap-toggle.txt");
+    s.send_key(Key::Ctrl(','));
+    s.wait_for_screen_contains("Auto-pair brackets");
+    // Auto-pair is row 5; defaults to ON so Space toggles to OFF.
+    for _ in 0..5 {
+        s.send_key(Key::Down);
+    }
+    s.send_key(Key::Char(' '));
+    s.wait_until(
+        |sc| {
+            sc.contents()
+                .lines()
+                .any(|l| l.contains("Auto-pair brackets") && l.contains("[OFF]"))
+        },
+        std::time::Duration::from_secs(5),
+    );
+    s.shutdown();
+    let cfg = std::fs::read_to_string(fx.config_path().join("config.toml")).unwrap();
+    assert!(
+        cfg.contains("auto_pair = false"),
+        "config.toml should record auto_pair = false; got:\n{cfg}"
+    );
+}
+
 // ── Tier 3 — 3.4 auto-pair + surround ────────────────────────────────────
 
 #[test]

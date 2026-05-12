@@ -98,8 +98,8 @@ fn settings_overlay_toggle_persists_restore_session() {
     s.wait_for_status_contains("set.txt");
     s.send_key(Key::Ctrl(','));
     s.wait_for_screen_contains("Restore session");
-    // Settings cursor starts at row 0 (Confirm exit); restore_session is row 5.
-    for _ in 0..5 {
+    // Settings cursor starts at row 0 (Confirm exit); restore_session is row 8.
+    for _ in 0..8 {
         s.send_key(Key::Down);
     }
     // Space toggles the bool — wait for [ON] to appear on the same row.
