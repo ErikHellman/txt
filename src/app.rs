@@ -814,12 +814,7 @@ pub const LSP_SERVER_OPTIONS: &[(&str, &str, &str, &[&str])] = &[
     ("C/C++", "clangd", "clangd", &[]),
     ("Go", "gopls", "gopls", &["serve"]),
     ("Java", "jdtls", "jdtls", &[]),
-    (
-        "Kotlin",
-        "kotlin-language-server",
-        "kotlin-language-server",
-        &[],
-    ),
+    ("Kotlin", "kotlin-lsp", "kotlin-lsp", &[]),
     ("Lua", "lua-language-server", "lua-language-server", &[]),
     ("Python", "pyright", "pyright-langserver", &["--stdio"]),
     ("Rust", "rust-analyzer", "rust-analyzer", &[]),

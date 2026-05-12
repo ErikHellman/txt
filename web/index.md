@@ -139,7 +139,7 @@ The picker ships with presets for the following servers — click through to the
 - **Rust** — [rust-analyzer](https://rust-analyzer.github.io/)
 - **Go** — [gopls](https://github.com/golang/tools/tree/master/gopls)
 - **TypeScript / JavaScript** — [typescript-language-server](https://github.com/typescript-language-server/typescript-language-server)
-- **Kotlin** — [kotlin-language-server](https://github.com/fwcd/kotlin-language-server)
+- **Kotlin** — [kotlin-lsp](https://github.com/Kotlin/kotlin-lsp)
 - **Java** — [Eclipse JDT Language Server (jdtls)](https://github.com/eclipse-jdtls/eclipse.jdt.ls)
 - **C#** — [OmniSharp](https://github.com/OmniSharp/omnisharp-roslyn)
 
