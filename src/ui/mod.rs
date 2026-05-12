@@ -224,6 +224,7 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
         state.config.tab_size,
         state.config.indent_guides,
         &state.config.rulers,
+        state.config.highlight_trailing_whitespace,
         &theme,
         editor_area,
         buf,

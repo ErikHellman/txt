@@ -102,6 +102,31 @@ impl Buffer {
         s.trim_end_matches(['\r', '\n']).to_string()
     }
 
+    /// Whether the buffer contains both tab-indented and space-indented lines.
+    /// Only leading whitespace is examined; lines whose first non-whitespace
+    /// character is at column 0, or which are entirely whitespace, are ignored.
+    pub fn has_mixed_indent(&self) -> bool {
+        let mut saw_tabs = false;
+        let mut saw_spaces = false;
+        let total = self.rope.len_lines();
+        // Scan up to 5000 lines — enough for every realistic source file but
+        // bounded so a 1 GiB buffer doesn't stall the status bar.
+        let cap = total.min(5000);
+        for i in 0..cap {
+            let line = self.rope.line(i);
+            let first = line.chars().next();
+            match first {
+                Some('\t') => saw_tabs = true,
+                Some(' ') => saw_spaces = true,
+                _ => {}
+            }
+            if saw_tabs && saw_spaces {
+                return true;
+            }
+        }
+        false
+    }
+
     // ------------------------------------------------------------------ //
     // Undo / redo
     // ------------------------------------------------------------------ //
@@ -2057,6 +2082,35 @@ mod tests {
         buf.insert_str("hello");
         assert_eq!(buf.to_string(), "hello");
         assert!(buf.modified);
+    }
+
+    #[test]
+    fn has_mixed_indent_detects_mixed() {
+        let mut buf = Buffer::new();
+        buf.insert_str("\tfoo\n  bar\n");
+        assert!(buf.has_mixed_indent());
+    }
+
+    #[test]
+    fn has_mixed_indent_pure_tabs() {
+        let mut buf = Buffer::new();
+        buf.insert_str("\tfoo\n\tbar\n");
+        assert!(!buf.has_mixed_indent());
+    }
+
+    #[test]
+    fn has_mixed_indent_pure_spaces() {
+        let mut buf = Buffer::new();
+        buf.insert_str("  foo\n    bar\n");
+        assert!(!buf.has_mixed_indent());
+    }
+
+    #[test]
+    fn has_mixed_indent_ignores_unindented_lines() {
+        let mut buf = Buffer::new();
+        // Top-level lines (column 0 content) don't count either way.
+        buf.insert_str("foo\nbar\n");
+        assert!(!buf.has_mixed_indent());
     }
 
     #[test]

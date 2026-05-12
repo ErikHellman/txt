@@ -119,6 +119,11 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
         .unwrap_or_default();
 
     let indent_str = format!(" {}", state.indent_label());
+    let mixed_indent_str = if state.config.warn_mixed_indent && handle.buffer.has_mixed_indent() {
+        " mixed-indent".to_string()
+    } else {
+        String::new()
+    };
     let rec_str = state
         .macros
         .recording_slot()
@@ -127,7 +132,7 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
 
     // Right side: branch + word-wrap flag + LSP/TS mode + diagnostics + language + indent + REC + position + memory + encoding
     let right = format!(
-        "{}{}{}{}{}{}{}  {}{}{}",
+        "{}{}{}{}{}{}{}{}  {}{}{}",
         branch_str,
         wrap_flag,
         lsp_flag,
@@ -138,6 +143,7 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
             String::new()
         },
         indent_str,
+        mixed_indent_str,
         rec_str,
         pos,
         mem_str,

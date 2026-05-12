@@ -44,6 +44,7 @@ pub fn render(
     tab_size: usize,
     indent_guides: bool,
     rulers: &[usize],
+    highlight_trailing_ws: bool,
     theme: &ThemeColors,
     area: Rect,
     buf: &mut TermBuffer,
@@ -451,6 +452,78 @@ pub fn render(
                 let x = text_area.x + ruler as u16;
                 if x < max_x {
                     overlay_guide(buf, x, y, "│", guide_style);
+                }
+            }
+        }
+    }
+
+    // ── Trailing-whitespace highlight (post-pass overlay) ─────────────────
+    // Paint a subtle red background on cells that hold a trailing space or
+    // tab in the *logical* line. Skipped if the line is the cursor's current
+    // line (so editing midway through a line doesn't strobe red while the
+    // user is typing). Also skips lines that are entirely whitespace —
+    // legitimate blank lines in source files.
+    if highlight_trailing_ws && text_area.width > 0 {
+        let tws_style = Style::default().bg(Color::Rgb(110, 30, 30));
+        let max_x = text_area.x + text_area.width;
+        let cursor_line = handle.buffer.cursors.primary().line;
+        for (screen_row, vl) in visual_lines.iter().enumerate() {
+            if vl.line_idx == cursor_line {
+                continue;
+            }
+            let line_str = handle.buffer.line_str(vl.line_idx);
+            if line_str.is_empty() {
+                continue;
+            }
+            // Find byte offset of last non-whitespace char. If all whitespace,
+            // skip — that's a blank line, not a trailing-ws violation.
+            let trimmed_end = line_str.trim_end_matches([' ', '\t']);
+            if trimmed_end.is_empty() || trimmed_end.len() == line_str.len() {
+                continue;
+            }
+            let trail_start_byte = trimmed_end.len();
+            // Convert byte offset within the displayed segment to display
+            // column. Trailing-ws lives at the end so it should appear in
+            // the last visual segment of the line.
+            let display_start_byte = vl.seg_byte;
+            if trail_start_byte < display_start_byte {
+                // Trailing-ws was before the start of this segment (shouldn't
+                // happen given the line was non-empty), bail.
+                continue;
+            }
+            // Walk the visible display until we reach trail_start_byte.
+            let mut col_x = text_area.x;
+            let mut byte = display_start_byte;
+            for grapheme in line_str_graphemes(&vl.display) {
+                if byte >= trail_start_byte {
+                    break;
+                }
+                let gw_g = UnicodeWidthStr::width(grapheme) as u16;
+                if grapheme == "\t" {
+                    let col = (col_x - text_area.x) as usize;
+                    let tab_w = (tab_size - (col % tab_size)).max(1) as u16;
+                    col_x = (col_x + tab_w).min(max_x);
+                } else {
+                    col_x += gw_g.max(1);
+                }
+                byte += grapheme.len();
+            }
+            // Fill from col_x to end of segment with the trailing-ws style,
+            // but only across cells whose symbol is still a plain space (so
+            // we don't clobber cursors or selections).
+            for x in col_x..max_x {
+                let y = area.y + screen_row as u16;
+                let pos = ratatui::layout::Position::new(x, y);
+                if let Some(cell) = buf.cell(pos) {
+                    let sym = cell.symbol();
+                    if sym == " " || sym.is_empty() {
+                        buf.set_string(x, y, " ", tws_style);
+                    } else if sym == "·" {
+                        // show_whitespace already drew middle-dots; tint them red too.
+                        buf.set_string(x, y, "·", tws_style.fg(Color::Rgb(220, 180, 180)));
+                    } else if sym == "→" {
+                        buf.set_string(x, y, "→", tws_style.fg(Color::Rgb(220, 180, 180)));
+                    }
                 }
             }
         }
