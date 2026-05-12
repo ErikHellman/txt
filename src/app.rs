@@ -4933,24 +4933,14 @@ impl AppState {
     }
 
     fn screen_to_byte(&self, col: u16, row: u16) -> Option<usize> {
-        let editor_area_y: u16 = if self.editor.tab_count() > 1 { 1 } else { 0 };
-        // If sidebar is open the editor area starts further right; don't click into sidebar.
-        let sidebar_offset: u16 = if self.sidebar.is_some() {
-            self.sidebar_width + 1
-        } else {
-            0
-        };
-        if self.sidebar.is_some() && col < sidebar_offset {
-            return None;
-        }
-        let adjusted_col = col.saturating_sub(sidebar_offset);
-        let gutter = gutter_width(self.editor.active().buffer.len_lines());
-        let gutter_cols = gutter + 1;
+        let (adjusted_col, editor_area_y, gutter_cols, text_width) =
+            self.screen_mouse_geometry(col)?;
         Some(screen_pos_to_byte_offset(
             adjusted_col,
             row,
             editor_area_y,
             gutter_cols,
+            text_width,
             &self.editor.active().buffer,
             &self.editor.active().viewport,
         ))
@@ -4959,6 +4949,24 @@ impl AppState {
     /// Convert a screen position into `(line, display_col)` for box selection.
     /// Returns `None` if the click landed in the sidebar.
     fn screen_to_line_col(&self, col: u16, row: u16) -> Option<(usize, usize)> {
+        let (adjusted_col, editor_area_y, gutter_cols, text_width) =
+            self.screen_mouse_geometry(col)?;
+        Some(screen_pos_to_line_display_col(
+            adjusted_col,
+            row,
+            editor_area_y,
+            gutter_cols,
+            text_width,
+            &self.editor.active().buffer,
+            &self.editor.active().viewport,
+        ))
+    }
+
+    /// Shared geometry for mouse-to-buffer conversion: returns
+    /// `(adjusted_col, editor_area_y, gutter_cols, text_width)`, or `None`
+    /// when the click is inside the sidebar. `text_width` matches the column
+    /// width the renderer uses for word wrap.
+    fn screen_mouse_geometry(&self, col: u16) -> Option<(u16, u16, u16, u16)> {
         let editor_area_y: u16 = if self.editor.tab_count() > 1 { 1 } else { 0 };
         let sidebar_offset: u16 = if self.sidebar.is_some() {
             self.sidebar_width + 1
@@ -4969,16 +4977,22 @@ impl AppState {
             return None;
         }
         let adjusted_col = col.saturating_sub(sidebar_offset);
-        let gutter = gutter_width(self.editor.active().buffer.len_lines());
-        let gutter_cols = gutter + 1;
-        Some(screen_pos_to_line_display_col(
-            adjusted_col,
-            row,
-            editor_area_y,
-            gutter_cols,
-            &self.editor.active().buffer,
-            &self.editor.active().viewport,
-        ))
+        let handle = self.editor.active();
+        let gutter = gutter_width(handle.buffer.len_lines());
+        let git_col_w: u16 = if self.git_gutter.is_some() {
+            crate::ui::editor_view::GIT_GUTTER_W
+        } else {
+            0
+        };
+        let diag_col_w: u16 = if !handle.lsp_state.diagnostics.is_empty() {
+            crate::ui::editor_view::DIAG_GUTTER_W
+        } else {
+            0
+        };
+        let gutter_cols = git_col_w + diag_col_w + gutter + crate::ui::editor_view::GUTTER_PAD;
+        let editor_area_w = self.term_width.saturating_sub(sidebar_offset);
+        let text_width = editor_area_w.saturating_sub(gutter_cols);
+        Some((adjusted_col, editor_area_y, gutter_cols, text_width))
     }
 }
 
