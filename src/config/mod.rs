@@ -184,7 +184,7 @@ impl Config {
 
     /// Path to the config file (`~/.config/txt/config.toml`).
     pub fn config_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".config").join("txt").join("config.toml"))
+        txt_config_dir().map(|d| d.join("config.toml"))
     }
 
     /// Whether a config file already exists on disk. Used to distinguish a
@@ -193,6 +193,19 @@ impl Config {
     pub fn config_file_exists() -> bool {
         Self::config_path().map(|p| p.exists()).unwrap_or(false)
     }
+}
+
+/// Directory that holds all on-disk configuration files for `txt`
+/// (`config.toml`, `keybindings.toml`, `trusted_binaries.json`, preset files).
+///
+/// Resolution order:
+/// 1. `TXT_CONFIG_DIR` environment variable (used by tests).
+/// 2. `~/.config/txt` on supported platforms.
+pub fn txt_config_dir() -> Option<PathBuf> {
+    if let Some(custom) = std::env::var_os("TXT_CONFIG_DIR") {
+        return Some(PathBuf::from(custom));
+    }
+    dirs::home_dir().map(|h| h.join(".config").join("txt"))
 }
 
 /// Parse a semver-ish version string into `(major, minor)`. Accepts a leading

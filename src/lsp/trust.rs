@@ -46,7 +46,7 @@ pub enum TrustDecision {
 impl TrustStore {
     /// Default path: `~/.config/txt/trusted_binaries.json`.
     pub fn default_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".config").join("txt").join("trusted_binaries.json"))
+        crate::config::txt_config_dir().map(|d| d.join("trusted_binaries.json"))
     }
 
     /// Load the store from `~/.config/txt/trusted_binaries.json`.
