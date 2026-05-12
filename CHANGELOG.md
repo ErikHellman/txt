@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.5.0
+
+- Add keyboard macros: Ctrl+Shift+R prompts for a slot (a–z) and toggles recording, Ctrl+Alt+R replays a slot inside a single undo batch
+- Add TextMate-style snippets with `$1` / `${1:default}` / `$0` tab stops, lazy-loaded per language from `~/.config/txt/snippets/<lang>.toml`; Tab expands a known prefix and cycles stops while a session is active
+- Add named marks and a workspace-wide jump list (persisted under `<workspace>/.txt/`): Ctrl+M then a–z sets a mark, Ctrl+' then a–z jumps to it, Alt+Left/Alt+Right walk the jump list (also pushed to before Go To Definition)
+- Add tree-sitter–driven code folding with a fold gutter and `▸ N lines` markers: Ctrl+Shift+[ toggles, Alt+0 folds all, Alt+Shift+0 unfolds all
+- Add Ctrl+Shift+O symbols-in-file picker — fuzzy-match functions, classes, and other declarations in the current buffer
+- Add a sticky header row and status-bar breadcrumb showing the enclosing function/class/module while scrolling (configurable via `sticky_header`)
+- Render indent guides at each tab stop and configurable column rulers (`rulers = [80, 120]` in config)
+- Honor `.editorconfig` per buffer for indent style/width, line endings, final newline, and trailing-whitespace trimming; the resolved indent is shown in the status bar
+- Add `hide_git_folder` (default on) and `hide_dot_folders` settings that prune dot-prefixed directories from the Go To File picker and project-wide search
+- Switch tabs by clicking them in the tab bar
+- Replace the empty placeholder `[No Name]` tab when opening a file instead of stacking a new tab beside it
+- Select a word on double-click in the editor
+- Handle horizontal mouse-wheel scrolling
+- Cap mouse and keyboard scrolling at the viewport centre so the last line and longest line stay visible
+- Expand the LSP server picker with Kotlin, C#, and Java entries, sort it alphabetically by language, and add a notice that servers must be installed externally
+- Fix Alt+Left / Alt+Right not walking the jump list
+- Fix the sticky header tracking the cursor instead of the scroll position
+- Fix mouse selection landing on the wrong character when word wrap is active
+
 ## v0.4.2
 
 - Fix crash when arrow-navigating up or down into a line containing wide multi-byte characters (e.g. box-drawing `─` in YAML comments): the cursor's preferred display column was being applied as a byte offset, landing inside a UTF-8 char and panicking on the next render
