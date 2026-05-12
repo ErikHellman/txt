@@ -150,24 +150,46 @@ pub fn display_col_to_byte(s: &str, target_col: usize) -> usize {
 /// Mirrors `screen_pos_to_byte_offset` but returns the display-column
 /// representation, suitable for box / column selection where each line on
 /// the rectangle wants the same display column regardless of width.
+///
+/// When `viewport.word_wrap` is true, multiple visual rows may map to the
+/// same logical line; this resolves the click to the segment under the
+/// cursor and adds the segment's start display column to the in-segment
+/// column so the returned display column is correct for the original line.
 pub fn screen_pos_to_line_display_col(
     screen_col: u16,
     screen_row: u16,
     editor_area_y: u16,
     gutter_cols: u16,
+    text_width: u16,
     buffer: &Buffer,
     viewport: &Viewport,
 ) -> (usize, usize) {
     let row_in_area = (screen_row as usize).saturating_sub(editor_area_y as usize);
-    let line_idx = (viewport.scroll_row + row_in_area).min(buffer.len_lines().saturating_sub(1));
     let col_in_area = screen_col as usize;
     let gutter = gutter_cols as usize;
-    let display_col = if col_in_area > gutter {
-        (col_in_area - gutter) + viewport.scroll_col
+    let click_in_gutter = col_in_area <= gutter;
+    let col_in_text = col_in_area.saturating_sub(gutter);
+
+    if viewport.word_wrap && text_width > 0 {
+        let (line_idx, seg_byte, _seg_str) =
+            visual_row_at(buffer, viewport, row_in_area, text_width as usize);
+        let seg_start_display_col = display_col_for_byte_in_line(buffer, line_idx, seg_byte);
+        let display_col = if click_in_gutter {
+            seg_start_display_col
+        } else {
+            seg_start_display_col + col_in_text
+        };
+        (line_idx, display_col)
     } else {
-        0
-    };
-    (line_idx, display_col)
+        let line_idx =
+            (viewport.scroll_row + row_in_area).min(buffer.len_lines().saturating_sub(1));
+        let display_col = if click_in_gutter {
+            0
+        } else {
+            col_in_text + viewport.scroll_col
+        };
+        (line_idx, display_col)
+    }
 }
 
 /// Convert a screen position (absolute terminal column + row) to a rope byte offset.
@@ -176,6 +198,7 @@ pub fn screen_pos_to_line_display_col(
 /// - `screen_col`, `screen_row`: absolute terminal coordinates of the click/drag
 /// - `editor_area_y`: the top Y coordinate of the editor area (0 if no title bar)
 /// - `gutter_cols`: number of columns consumed by the line-number gutter + separator
+/// - `text_width`: number of columns available for text (used only when word wrap is on)
 /// - `buffer`, `viewport`: current editor state
 ///
 /// Returns a valid byte offset clamped to `[0, rope.len_bytes()]`.
@@ -184,31 +207,81 @@ pub fn screen_pos_to_byte_offset(
     screen_row: u16,
     editor_area_y: u16,
     gutter_cols: u16,
+    text_width: u16,
     buffer: &Buffer,
     viewport: &Viewport,
 ) -> usize {
-    // Row → line index
     let row_in_area = (screen_row as usize).saturating_sub(editor_area_y as usize);
-    let line_idx = (viewport.scroll_row + row_in_area).min(buffer.len_lines().saturating_sub(1));
-
-    // Column → byte within line, accounting for gutter and horizontal scroll
     let col_in_area = screen_col as usize;
     let gutter = gutter_cols as usize;
+    let click_in_gutter = col_in_area <= gutter;
+    let col_in_text = col_in_area.saturating_sub(gutter);
 
-    let display_col_in_text = if col_in_area > gutter {
-        (col_in_area - gutter) + viewport.scroll_col
+    if viewport.word_wrap && text_width > 0 {
+        let (line_idx, seg_byte, seg_str) =
+            visual_row_at(buffer, viewport, row_in_area, text_width as usize);
+        let line_start = buffer
+            .rope()
+            .char_to_byte(buffer.rope().line_to_char(line_idx));
+        if click_in_gutter {
+            // Click in the gutter — jump to the start of this visual segment.
+            return line_start + seg_byte;
+        }
+        let byte_in_segment = display_col_to_byte(&seg_str, col_in_text);
+        line_start + seg_byte + byte_in_segment
     } else {
-        // Click was in the gutter — jump to start of line
-        0
-    };
+        let line_idx =
+            (viewport.scroll_row + row_in_area).min(buffer.len_lines().saturating_sub(1));
+        let line_start = buffer
+            .rope()
+            .char_to_byte(buffer.rope().line_to_char(line_idx));
+        if click_in_gutter {
+            // Click in the gutter — jump to the logical start of the line.
+            return line_start;
+        }
+        let line_str = buffer.line_str(line_idx);
+        let byte_in_line = display_col_to_byte(&line_str, col_in_text + viewport.scroll_col);
+        line_start + byte_in_line
+    }
+}
 
+/// Resolve a visual row index (counted from `viewport.scroll_row` at row 0)
+/// to the corresponding wrapped segment. Returns
+/// `(line_idx, seg_byte_within_line, segment_string)`.
+///
+/// If the row is past the end of the buffer, returns the last visible
+/// segment. If the buffer is empty, returns `(0, 0, "")`.
+fn visual_row_at(
+    buffer: &Buffer,
+    viewport: &Viewport,
+    row_in_area: usize,
+    text_width: usize,
+) -> (usize, usize, String) {
+    if buffer.len_lines() == 0 {
+        return (0, 0, String::new());
+    }
+    let mut visited = 0usize;
+    let mut last: Option<(usize, usize, String)> = None;
+    for line_idx in viewport.scroll_row..buffer.len_lines() {
+        let line_str = buffer.line_str(line_idx);
+        for (seg_byte, seg_str) in split_line_at_width(&line_str, text_width) {
+            if visited == row_in_area {
+                return (line_idx, seg_byte, seg_str);
+            }
+            visited += 1;
+            last = Some((line_idx, seg_byte, seg_str));
+        }
+    }
+    last.unwrap_or((0, 0, String::new()))
+}
+
+/// Display column of `byte_in_line` within `line_idx`'s line string.
+fn display_col_for_byte_in_line(buffer: &Buffer, line_idx: usize, byte_in_line: usize) -> usize {
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
     let line_str = buffer.line_str(line_idx);
-    let byte_in_line = display_col_to_byte(&line_str, display_col_in_text);
-
-    let line_start = buffer
-        .rope()
-        .char_to_byte(buffer.rope().line_to_char(line_idx));
-    line_start + byte_in_line
+    let prefix = &line_str[..byte_in_line.min(line_str.len())];
+    prefix.graphemes(true).map(UnicodeWidthStr::width).sum()
 }
 
 /// Returns the substring of `s` starting from display column `skip_cols`.
@@ -351,7 +424,7 @@ mod tests {
         let b = buf("hello\nworld");
         let vp = Viewport::new(); // scroll_row=0, scroll_col=0
         // gutter for 2 lines = 1 digit + 1 pad = 2 cols
-        let offset = screen_pos_to_byte_offset(2, 0, 0, 2, &b, &vp);
+        let offset = screen_pos_to_byte_offset(2, 0, 0, 2, 80, &b, &vp);
         assert_eq!(offset, 0); // first char of line 0
     }
 
@@ -360,7 +433,7 @@ mod tests {
         let b = buf("hello\nworld");
         let vp = Viewport::new();
         // gutter = 2, clicking col=4 on row=1 → line 1, display_col=2
-        let offset = screen_pos_to_byte_offset(4, 1, 0, 2, &b, &vp);
+        let offset = screen_pos_to_byte_offset(4, 1, 0, 2, 80, &b, &vp);
         // line 1 starts at byte 6 ("hello\n" = 6), display_col=2 → byte 2 within line
         assert_eq!(offset, 8);
     }
@@ -370,7 +443,7 @@ mod tests {
         let b = buf("hello\nworld");
         let vp = Viewport::new();
         // click at col=1 (inside 2-col gutter) → should land at start of line 1
-        let offset = screen_pos_to_byte_offset(1, 1, 0, 2, &b, &vp);
+        let offset = screen_pos_to_byte_offset(1, 1, 0, 2, 80, &b, &vp);
         assert_eq!(offset, 6); // "hello\n".len() = 6
     }
 
@@ -384,9 +457,105 @@ mod tests {
             word_wrap: false,
         };
         // click on row=0 of the editor area → should map to buffer line 10
-        let offset = screen_pos_to_byte_offset(2, 0, 0, 2, &b, &vp);
+        let offset = screen_pos_to_byte_offset(2, 0, 0, 2, 80, &b, &vp);
         let expected_line_start = b.rope().char_to_byte(b.rope().line_to_char(10));
         assert_eq!(offset, expected_line_start);
+    }
+
+    // ── Word-wrap mouse mapping ────────────────────────────────────────
+
+    #[test]
+    fn screen_pos_word_wrap_second_segment() {
+        // "abcdefghij" wrapped at width 5 renders as:
+        //   row 0: "abcde"
+        //   row 1: "fghij"
+        // Clicking row=1 col=gutter+2 → 'h' (byte 7 in the line).
+        let b = buf("abcdefghij");
+        let vp = Viewport {
+            scroll_row: 0,
+            scroll_col: 0,
+            word_wrap: true,
+        };
+        let offset = screen_pos_to_byte_offset(/*col*/ 4, /*row*/ 1, 0, 2, 5, &b, &vp);
+        assert_eq!(offset, 7);
+    }
+
+    #[test]
+    fn screen_pos_word_wrap_after_short_line() {
+        // "ab\nabcdefghij" with width 5:
+        //   row 0: "ab"          (line 0)
+        //   row 1: "abcde"       (line 1, seg 0)
+        //   row 2: "fghij"       (line 1, seg 1)
+        // Click row=2 col=gutter+1 → 'g' (byte 1 in segment 2 of line 1).
+        let b = buf("ab\nabcdefghij");
+        let vp = Viewport {
+            scroll_row: 0,
+            scroll_col: 0,
+            word_wrap: true,
+        };
+        let offset = screen_pos_to_byte_offset(3, 2, 0, 2, 5, &b, &vp);
+        // line 1 starts at byte 3 ("ab\n"), seg_byte=5, byte_in_seg=1 → 3 + 5 + 1 = 9
+        assert_eq!(offset, 9);
+    }
+
+    #[test]
+    fn screen_pos_word_wrap_first_segment_first_char() {
+        // Sanity: clicking the first character of a wrapped line still works.
+        let b = buf("abcdefghij");
+        let vp = Viewport {
+            scroll_row: 0,
+            scroll_col: 0,
+            word_wrap: true,
+        };
+        let offset = screen_pos_to_byte_offset(2, 0, 0, 2, 5, &b, &vp);
+        assert_eq!(offset, 0);
+    }
+
+    #[test]
+    fn screen_pos_word_wrap_past_end_clamps_to_last_segment() {
+        // Click below the last visual row should land at the end of the buffer.
+        let b = buf("abcde");
+        let vp = Viewport {
+            scroll_row: 0,
+            scroll_col: 0,
+            word_wrap: true,
+        };
+        // row=10 is way past the only visible row.
+        let offset = screen_pos_to_byte_offset(100, 10, 0, 2, 5, &b, &vp);
+        assert_eq!(offset, 5);
+    }
+
+    #[test]
+    fn screen_pos_word_wrap_respects_scroll_row() {
+        // Two long lines. With scroll_row=1, the top of the editor area shows
+        // the second line's first segment.
+        let b = buf("abcdefghij\nklmnopqrst");
+        let vp = Viewport {
+            scroll_row: 1,
+            scroll_col: 0,
+            word_wrap: true,
+        };
+        // Click row=0 col=gutter+1 → 'l' (byte 1 in line 1).
+        let offset = screen_pos_to_byte_offset(3, 0, 0, 2, 5, &b, &vp);
+        // line 1 starts at byte 11 ("abcdefghij\n"), seg 0, byte in seg = 1 → 12
+        assert_eq!(offset, 12);
+    }
+
+    // ── screen_pos_to_line_display_col + word wrap ─────────────────────
+
+    #[test]
+    fn screen_pos_line_display_col_wrap_second_segment() {
+        // "abcdefghij" wrapped at width 5 → row 1 col=gutter+2 should yield
+        // line 0 with display_col = 5 + 2 = 7.
+        let b = buf("abcdefghij");
+        let vp = Viewport {
+            scroll_row: 0,
+            scroll_col: 0,
+            word_wrap: true,
+        };
+        let (line, dcol) = screen_pos_to_line_display_col(4, 1, 0, 2, 5, &b, &vp);
+        assert_eq!(line, 0);
+        assert_eq!(dcol, 7);
     }
 
     // ── split_line_at_width ────────────────────────────────────────────────

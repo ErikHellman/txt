@@ -15,13 +15,13 @@ use crate::syntax::highlighter::{HighlightSpan, style_for_kind};
 use crate::theme::ThemeColors;
 
 /// Width of a single space used as a separator between gutter and text.
-const GUTTER_PAD: u16 = 1;
+pub const GUTTER_PAD: u16 = 1;
 /// Width of the git gutter column (shown left of line numbers when active).
-const GIT_GUTTER_W: u16 = 1;
+pub const GIT_GUTTER_W: u16 = 1;
 /// Width of the diagnostic gutter column (shown when diagnostics are present).
-const DIAG_GUTTER_W: u16 = 1;
+pub const DIAG_GUTTER_W: u16 = 1;
 /// Width of the fold-chevron gutter column (shown when any fold candidates exist).
-const FOLD_GUTTER_W: u16 = 1;
+pub const FOLD_GUTTER_W: u16 = 1;
 
 /// Render the text editing area into the ratatui terminal buffer.
 ///
