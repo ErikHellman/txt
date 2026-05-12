@@ -151,19 +151,22 @@ A natural extension is a workspace‑wide symbol index built on file open and re
 
 ### Tier 3 — power features that round out the editor
 
-#### 3.1 Persistent sessions per workspace
+All seven Tier 3 features have been implemented on branch
+`claude/tier-3-features-tests-fNbG8` (one commit per feature).
+
+#### 3.1 Persistent sessions per workspace ✅ implemented
 
 Save open tabs, cursor positions, fold state, marks, and sidebar expansion to `<workspace>/.txt/session.json` and restore on `txt .` in the same directory. Opt‑in via config to keep "starts instantly" honest.
 
-#### 3.2 Persistent undo
+#### 3.2 Persistent undo ✅ implemented
 
 `Buffer::history` already serialises cleanly. Writing it to `<workspace>/.txt/undo/<file-hash>.bin` on save, and reloading on open, gives Vim‑style cross‑session undo. Bounded by the existing 1000‑entry cap so disk use stays predictable.
 
-#### 3.3 Clipboard ring (registers without modal pain)
+#### 3.3 Clipboard ring (registers without modal pain) ✅ implemented
 
 A bounded ring of the last *N* yanks/cuts. `Ctrl+Shift+V` opens a small picker showing each entry's first line; `Enter` pastes. The system clipboard remains the default target — the ring is purely additive and lives only in memory.
 
-#### 3.4 Surround / change‑pair
+#### 3.4 Surround / change‑pair ✅ implemented
 
 A non‑modal version of vim‑surround:
 - `Ctrl+'` followed by a delimiter wraps the current selection in `''`, `""`, `()`, `[]`, `{}`, `<>`, or HTML tags.
@@ -171,18 +174,18 @@ A non‑modal version of vim‑surround:
 
 Bracket auto‑close on insertion (`(`→`()`) with smart skip on the matching close is the obvious companion. Both are toggle‑able in config because half the audience hates auto‑pairs.
 
-#### 3.5 Diff‑aware navigation and partial revert
+#### 3.5 Diff‑aware navigation and partial revert ✅ implemented
 
 The git gutter already classifies each line. Add:
 - `Alt+]` / `Alt+[` — jump to next / previous changed hunk.
 - `Ctrl+Shift+U` — revert the hunk at the cursor (replace with `HEAD` content). Exists in `git_dialog.rs` philosophy already.
 - Inline diff peek: `Ctrl+Shift+D` opens a small float showing the `HEAD` version of the surrounding lines.
 
-#### 3.6 Trailing whitespace, mixed indentation, tabs visualisation
+#### 3.6 Trailing whitespace, mixed indentation, tabs visualisation ✅ implemented
 
 Already half‑there via `show_whitespace`. Add a subtle red highlight for trailing whitespace at end of line, and a one‑line warning in the status bar when a file mixes tabs and spaces. `format_on_save = false` config keeps it opt‑in.
 
-#### 3.7 Quickfix / location list
+#### 3.7 Quickfix / location list ✅ implemented (LSP-diagnostics source; project-search and external-command sources deferred)
 
 A general "list of file:line:col entries with messages" pane reusable for:
 - LSP diagnostics across the workspace.
@@ -212,7 +215,7 @@ A pragmatic 5‑release roadmap that keeps each release shippable on its own:
 | v0.6 | "Multi‑cursor upgrade" | 1.2 add‑next ✅, 1.3 box selection ✅, 3.3 clipboard ring |
 | v0.7 | "Navigate" ✅ shipped | 2.3 marks + jump list ✅, 2.8 file symbols ✅, 3.5 diff navigation |
 | v0.8 | "Rhythm" ✅ shipped | 2.2 macros ✅, 2.1 snippets ✅, 3.4 surround/auto‑pairs |
-| v0.9 | "Polish" ✅ shipped | 2.4 folding ✅, 2.5 sticky header ✅, 2.6 indent guides + rulers ✅, 2.7 EditorConfig ✅, 3.1 sessions, 3.2 persistent undo |
+| v0.9 | "Polish" ✅ shipped | 2.4 folding ✅, 2.5 sticky header ✅, 2.6 indent guides + rulers ✅, 2.7 EditorConfig ✅, 3.1 sessions ✅, 3.2 persistent undo ✅ |
 
 ## 5. Constraints to respect
 
