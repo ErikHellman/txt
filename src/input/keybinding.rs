@@ -526,6 +526,10 @@ impl KeyBindings {
         bind("ctrl+shift+f", EditorAction::OpenProjectSearch);
         bind("ctrl+shift+v", EditorAction::OpenClipboardRing);
         bind("alt+'", EditorAction::BeginSurround);
+        bind("alt+]", EditorAction::NextHunk);
+        bind("alt+[", EditorAction::PrevHunk);
+        bind("ctrl+shift+u", EditorAction::RevertHunkAtCursor);
+        bind("alt+h", EditorAction::PeekHeadAtCursor);
 
         // ── Box / column selection ────────────────────────────────────
         bind(

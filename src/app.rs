@@ -773,6 +773,16 @@ pub struct ReferencesListState {
     pub selected: usize,
 }
 
+/// State for the inline diff-peek float (`Alt+H`). Lists the HEAD lines for
+/// the hunk under the cursor.
+pub struct DiffPeekState {
+    pub head_lines: Vec<String>,
+    /// Cursor line at the time the peek was opened — used to anchor the float
+    /// near the cursor.
+    #[allow(dead_code)]
+    pub anchor_line: usize,
+}
+
 /// State for the clipboard-ring picker overlay (`Ctrl+Shift+V`).
 pub struct ClipboardRingState {
     /// Snapshot of the ring at the time the overlay was opened. Most recent
@@ -947,6 +957,8 @@ pub struct AppState {
     pub references_list: Option<ReferencesListState>,
     /// `Ctrl+Shift+V` overlay listing the last N clipboard entries.
     pub clipboard_ring: Option<ClipboardRingState>,
+    /// `Alt+H` float showing HEAD content for the hunk at the cursor.
+    pub diff_peek: Option<DiffPeekState>,
     pub git_gutter: Option<GitGutter>,
     pub git_dialog: Option<GitDialogState>,
     pub config: Config,
@@ -1065,6 +1077,7 @@ impl AppState {
             hover: None,
             references_list: None,
             clipboard_ring: None,
+            diff_peek: None,
             git_gutter: None,
             git_dialog: None,
             config,
@@ -2020,6 +2033,18 @@ impl AppState {
                         selected: 0,
                     });
                 }
+            }
+            EditorAction::NextHunk => {
+                self.jump_to_relative_hunk(1);
+            }
+            EditorAction::PrevHunk => {
+                self.jump_to_relative_hunk(-1);
+            }
+            EditorAction::RevertHunkAtCursor => {
+                self.revert_hunk_at_cursor();
+            }
+            EditorAction::PeekHeadAtCursor => {
+                self.toggle_diff_peek();
             }
             EditorAction::TriggerCompletion => {
                 self.trigger_completion();
@@ -4293,6 +4318,155 @@ impl AppState {
     }
 
     /// Recompute the git gutter for the currently active buffer (if it has a path).
+    /// Move the cursor to the start of the next (`step == 1`) or previous
+    /// (`step == -1`) git hunk. No-op when there are no hunks or git is off.
+    fn jump_to_relative_hunk(&mut self, step: i32) {
+        let Some(gutter) = self.git_gutter.as_ref() else {
+            return;
+        };
+        let hunks = gutter.hunks();
+        if hunks.is_empty() {
+            self.status_error = Some("No git hunks in this buffer".into());
+            return;
+        }
+        let cur_line = self.editor.active().buffer.cursors.primary().line;
+        let target = if step > 0 {
+            hunks
+                .iter()
+                .find(|h| h.start_line > cur_line)
+                .copied()
+                .unwrap_or(hunks[0])
+        } else {
+            hunks
+                .iter()
+                .rev()
+                .find(|h| h.end_line < cur_line)
+                .copied()
+                .unwrap_or(*hunks.last().unwrap())
+        };
+        self.push_current_to_jump_list();
+        let rope = self.editor.active().buffer.rope().clone();
+        let line = target.start_line.min(rope.len_lines().saturating_sub(1));
+        let cursor = crate::buffer::cursor::Cursor::from_line_col(&rope, line, 0);
+        *self.editor.active_mut().buffer.cursors.primary_mut() = cursor;
+    }
+
+    /// Replace the hunk containing the cursor with its HEAD content.
+    fn revert_hunk_at_cursor(&mut self) {
+        let Some(gutter) = self.git_gutter.as_ref() else {
+            self.status_error = Some("No git gutter available".into());
+            return;
+        };
+        let cur_line = self.editor.active().buffer.cursors.primary().line;
+        let hunk_opt = gutter
+            .hunks()
+            .into_iter()
+            .find(|h| cur_line >= h.start_line && cur_line <= h.end_line);
+        let Some(hunk) = hunk_opt else {
+            self.status_error = Some("Cursor is not inside a hunk".into());
+            return;
+        };
+        let Some(path) = self.editor.active().path.clone() else {
+            self.status_error = Some("Save the file before reverting a hunk".into());
+            return;
+        };
+        let head_content = match crate::git::fetch_head_content(&path) {
+            Some(c) => c,
+            None => {
+                self.status_error = Some("File is not tracked in HEAD".into());
+                return;
+            }
+        };
+        // Recompute the hunk's HEAD-side line span by re-running the same
+        // diff that produced the gutter. We need to find the HEAD lines that
+        // map to this hunk's [start_line, end_line] range in the current
+        // buffer.
+        let current_full = self.editor.active().buffer.to_string();
+        let head_lines: Vec<&str> = head_content.lines().collect();
+        let current_lines: Vec<&str> = current_full.lines().collect();
+        let (head_start, head_end) = crate::git::head_range_for_hunk(
+            &head_lines,
+            &current_lines,
+            hunk.start_line,
+            hunk.end_line,
+        );
+
+        // Replace the buffer slice [hunk.start_line, hunk.end_line] with the
+        // HEAD content slice [head_start, head_end].
+        let replacement = if head_start <= head_end && head_end < head_lines.len() {
+            let mut s = head_lines[head_start..=head_end].join("\n");
+            // Keep the trailing newline so we don't merge the next line into
+            // the hunk's last line.
+            s.push('\n');
+            s
+        } else {
+            // Pure deletion in HEAD — replacement is empty (matches: hunk
+            // exists in current but has no HEAD counterpart).
+            String::new()
+        };
+
+        let buf = &mut self.editor.active_mut().buffer;
+        let start_byte = buf.line_start_byte(hunk.start_line);
+        let end_line = (hunk.end_line + 1).min(buf.len_lines());
+        let end_byte = buf.line_start_byte(end_line);
+        buf.begin_batch();
+        buf.delete_range(start_byte, end_byte);
+        if !replacement.is_empty() {
+            buf.cursors.primary_mut().byte_offset = start_byte;
+            buf.insert_str(&replacement);
+        }
+        buf.commit_batch();
+        self.refresh_git_gutter();
+    }
+
+    /// Toggle the inline diff-peek float for the hunk under the cursor.
+    fn toggle_diff_peek(&mut self) {
+        if self.diff_peek.is_some() {
+            self.diff_peek = None;
+            return;
+        }
+        let Some(gutter) = self.git_gutter.as_ref() else {
+            return;
+        };
+        let cur_line = self.editor.active().buffer.cursors.primary().line;
+        let Some(hunk) = gutter
+            .hunks()
+            .into_iter()
+            .find(|h| cur_line >= h.start_line && cur_line <= h.end_line)
+        else {
+            self.status_error = Some("Cursor is not inside a hunk".into());
+            return;
+        };
+        let Some(path) = self.editor.active().path.clone() else {
+            return;
+        };
+        let Some(head_content) = crate::git::fetch_head_content(&path) else {
+            self.status_error = Some("File is not tracked in HEAD".into());
+            return;
+        };
+        let current_full = self.editor.active().buffer.to_string();
+        let head_lines: Vec<&str> = head_content.lines().collect();
+        let current_lines: Vec<&str> = current_full.lines().collect();
+        let (head_start, head_end) = crate::git::head_range_for_hunk(
+            &head_lines,
+            &current_lines,
+            hunk.start_line,
+            hunk.end_line,
+        );
+        let lines: Vec<String> = if head_start <= head_end && head_end < head_lines.len() {
+            head_lines[head_start..=head_end]
+                .iter()
+                .map(|s| s.to_string())
+                .collect()
+        } else {
+            vec!["(no HEAD content for this hunk)".into()]
+        };
+        self.diff_peek = Some(DiffPeekState {
+            head_lines: lines,
+            anchor_line: cur_line,
+        });
+    }
+
     fn refresh_git_gutter(&mut self) {
         let path = self.editor.active().path.clone();
         if let Some(path) = path {

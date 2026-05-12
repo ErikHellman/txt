@@ -1917,7 +1917,7 @@ impl Buffer {
     // Helpers
     // ------------------------------------------------------------------ //
 
-    fn line_start_byte(&self, line: usize) -> usize {
+    pub fn line_start_byte(&self, line: usize) -> usize {
         self.rope.char_to_byte(self.rope.line_to_char(line))
     }
 

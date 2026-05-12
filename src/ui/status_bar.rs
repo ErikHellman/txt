@@ -124,6 +124,21 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
     } else {
         String::new()
     };
+    let hunk_str = state
+        .git_gutter
+        .as_ref()
+        .map(|g| g.hunks())
+        .and_then(|hunks| {
+            if hunks.is_empty() {
+                return None;
+            }
+            let cur_line = handle.buffer.cursors.primary().line;
+            hunks
+                .iter()
+                .position(|h| cur_line >= h.start_line && cur_line <= h.end_line)
+                .map(|i| format!(" hunk {}/{}", i + 1, hunks.len()))
+        })
+        .unwrap_or_default();
     let rec_str = state
         .macros
         .recording_slot()
@@ -132,8 +147,9 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
 
     // Right side: branch + word-wrap flag + LSP/TS mode + diagnostics + language + indent + REC + position + memory + encoding
     let right = format!(
-        "{}{}{}{}{}{}{}{}  {}{}{}",
+        "{}{}{}{}{}{}{}{}{}  {}{}{}",
         branch_str,
+        hunk_str,
         wrap_flag,
         lsp_flag,
         diag_str,

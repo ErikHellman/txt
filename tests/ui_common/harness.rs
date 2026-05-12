@@ -37,6 +37,9 @@ pub struct SessionOptions {
     pub size: (u16, u16),
     /// Additional environment variables.  Override the harness defaults.
     pub extra_env: Vec<(String, String)>,
+    /// When `true`, do not set `TXT_DISABLE_GIT`. Used by tests that need
+    /// the spawned binary to read the git gutter.
+    pub allow_git: bool,
 }
 
 impl SessionOptions {
@@ -47,7 +50,16 @@ impl SessionOptions {
             config_dir,
             size: (24, 80),
             extra_env: Vec::new(),
+            allow_git: false,
         }
+    }
+
+    /// Allow the spawned binary to call git (the harness default disables
+    /// it for determinism). Required by tests that exercise the git gutter,
+    /// hunk navigation, or branch indicator.
+    pub fn allow_git(mut self) -> Self {
+        self.allow_git = true;
+        self
     }
 
     pub fn arg(mut self, a: impl Into<String>) -> Self {
@@ -102,8 +114,12 @@ impl TxtSession {
         cmd.env("HOME", &opts.cwd); // any writable dir; not used because TXT_CONFIG_DIR is set
         cmd.env("TERM", "xterm-256color");
         cmd.env("TXT_CONFIG_DIR", &opts.config_dir);
+        // Tests can override these by adding the same key to `extra_env`
+        // below — the later `cmd.env` call wins.
         cmd.env("TXT_DISABLE_LSP", "1");
-        cmd.env("TXT_DISABLE_GIT", "1");
+        if !opts.allow_git {
+            cmd.env("TXT_DISABLE_GIT", "1");
+        }
         cmd.env("TXT_DISABLE_WATCHER", "1");
         // Avoid clipboard side-effects under the test runner.
         cmd.env("WAYLAND_DISPLAY", "");

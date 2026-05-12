@@ -224,6 +224,18 @@ const TEMPLATE: &[HelpEntry] = &[
         actions: &["surround"],
         desc: "Surround selection with delimiter (next char picks pair)",
     },
+    HelpEntry::Binding {
+        actions: &["next_hunk", "prev_hunk"],
+        desc: "Next / Prev git hunk",
+    },
+    HelpEntry::Binding {
+        actions: &["revert_hunk"],
+        desc: "Revert hunk under cursor to HEAD",
+    },
+    HelpEntry::Binding {
+        actions: &["peek_head"],
+        desc: "Peek HEAD content for hunk under cursor",
+    },
     // ── File & Tabs ──────────────────────────────────────────────────
     HelpEntry::Section("File & Tabs"),
     HelpEntry::Binding {

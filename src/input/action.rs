@@ -238,6 +238,15 @@ pub enum EditorAction {
     /// and wraps the current selection (or word under cursor when no
     /// selection is active). Bound to Alt+' by default.
     BeginSurround,
+    /// Jump the cursor to the next git diff hunk (Alt+]).
+    NextHunk,
+    /// Jump the cursor to the previous git diff hunk (Alt+[).
+    PrevHunk,
+    /// Revert the hunk under the cursor to its HEAD content (Ctrl+Shift+U).
+    RevertHunkAtCursor,
+    /// Open a small float showing the HEAD content for the hunk under the
+    /// cursor (Alt+H).
+    PeekHeadAtCursor,
     /// Toggle the file tree sidebar visibility (Ctrl+Shift+B).
     ToggleSidebar,
     /// Focus-jump between the editor and the sidebar (Ctrl+B).
@@ -440,6 +449,10 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::StopRecordMacro => "stop_recording_macro",
         EditorAction::BeginReplayMacro => "replay_macro",
         EditorAction::BeginSurround => "surround",
+        EditorAction::NextHunk => "next_hunk",
+        EditorAction::PrevHunk => "prev_hunk",
+        EditorAction::RevertHunkAtCursor => "revert_hunk",
+        EditorAction::PeekHeadAtCursor => "peek_head",
         EditorAction::ToggleSidebar => "toggle_sidebar",
         EditorAction::FocusSidebar => "focus_sidebar",
         // View / UI toggles
@@ -596,6 +609,10 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "stop_recording_macro" => EditorAction::StopRecordMacro,
         "replay_macro" => EditorAction::BeginReplayMacro,
         "surround" => EditorAction::BeginSurround,
+        "next_hunk" => EditorAction::NextHunk,
+        "prev_hunk" => EditorAction::PrevHunk,
+        "revert_hunk" => EditorAction::RevertHunkAtCursor,
+        "peek_head" => EditorAction::PeekHeadAtCursor,
         "toggle_sidebar" => EditorAction::ToggleSidebar,
         "focus_sidebar" => EditorAction::FocusSidebar,
         // View / UI toggles

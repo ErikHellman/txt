@@ -2,6 +2,7 @@ pub mod changelog_overlay;
 pub mod clipboard_ring;
 pub mod command_palette;
 pub mod completion_popup;
+pub mod diff_peek;
 pub mod editor_view;
 pub mod fuzzy_picker;
 pub mod git_dialog;
@@ -363,5 +364,10 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
     // ── Clipboard-ring overlay ───────────────────────────────────────────────
     if let Some(ring) = &state.clipboard_ring {
         clipboard_ring::render(ring, area, buf);
+    }
+
+    // ── Diff-peek float ──────────────────────────────────────────────────────
+    if let Some(peek) = &state.diff_peek {
+        diff_peek::render(peek, area, buf);
     }
 }
