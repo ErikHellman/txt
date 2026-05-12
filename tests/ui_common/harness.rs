@@ -105,6 +105,7 @@ impl TxtSession {
         cmd.env("TXT_DISABLE_LSP", "1");
         cmd.env("TXT_DISABLE_GIT", "1");
         cmd.env("TXT_DISABLE_WATCHER", "1");
+        cmd.env("TXT_DISABLE_VERSION_CHECK", "1");
         // Avoid clipboard side-effects under the test runner.
         cmd.env("WAYLAND_DISPLAY", "");
         cmd.env("DISPLAY", "");

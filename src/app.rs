@@ -23,7 +23,7 @@ use crate::{
     search::{SearchState, project::ProjectSearchResults},
     ui,
     ui::command_palette::CommandPaletteState,
-    ui::editor_view::gutter_width,
+    ui::editor_view::effective_gutter_width,
     ui::git_dialog::GitDialogState,
     watcher::FileWatcher,
 };
@@ -966,6 +966,9 @@ pub struct AppState {
     /// on a 2 s cadence so external `git checkout`s are picked up live.
     pub git_branch: Option<String>,
     git_branch_last_checked: Instant,
+    /// Background "is there a newer release?" checker. Always present, but
+    /// stays inert when `TXT_DISABLE_VERSION_CHECK` is set (used by tests).
+    pub version_check: crate::version_check::VersionChecker,
 }
 
 impl AppState {
@@ -1068,6 +1071,7 @@ impl AppState {
             memory_last_checked: Instant::now(),
             git_branch,
             git_branch_last_checked: Instant::now(),
+            version_check: crate::version_check::VersionChecker::spawn(),
         };
         // Apply config to initial buffer.
         if state.config.word_wrap {
@@ -4236,6 +4240,14 @@ impl AppState {
         }
     }
 
+    /// Owned copy of the row-0 gutter badge string ("↑X.Y.Z") that
+    /// `editor_view::render` overlays when a newer release is available. Used
+    /// by the layout helpers to widen the gutter width consistently across
+    /// renderer and mouse hit-testing.
+    pub fn version_badge(&self) -> Option<String> {
+        self.version_check.newer_version().map(|v| format!("↑{v}"))
+    }
+
     /// Recompute the git gutter for the currently active buffer (if it has a path).
     fn refresh_git_gutter(&mut self) {
         let path = self.editor.active().path.clone();
@@ -5463,7 +5475,8 @@ impl AppState {
     /// the buffer-derived dimensions from current `AppState`.
     fn clamp_viewport_scroll(&mut self, text_h: usize) {
         let total_lines = self.editor.active().buffer.len_lines();
-        let gutter = crate::ui::editor_view::gutter_width(total_lines);
+        let label = self.version_badge();
+        let gutter = effective_gutter_width(total_lines, label.as_deref());
         let sidebar_w: u16 = if self.sidebar.is_some() {
             self.sidebar_width + 1
         } else {
@@ -5576,7 +5589,8 @@ impl AppState {
         let adjusted_col = col.saturating_sub(sidebar_offset);
         let handle = self.editor.active();
         let total_lines = handle.buffer.len_lines();
-        let gutter = gutter_width(total_lines);
+        let label = self.version_badge();
+        let gutter = effective_gutter_width(total_lines, label.as_deref());
         let git_col_w: u16 = if self.git_gutter.is_some() {
             crate::ui::editor_view::GIT_GUTTER_W
         } else {
@@ -5650,7 +5664,9 @@ impl App {
             } else {
                 0
             };
-            let gutter = gutter_width(state.editor.active().buffer.len_lines());
+            let badge = state.version_badge();
+            let gutter =
+                effective_gutter_width(state.editor.active().buffer.len_lines(), badge.as_deref());
             let text_w = term_width.saturating_sub(gutter + 1 + sidebar_w) as usize;
 
             let curr_anchor = (
@@ -5679,6 +5695,7 @@ impl App {
             state.poll_auto_save();
             state.refresh_memory();
             state.refresh_git_branch();
+            state.version_check.poll();
 
             // Drain pending LSP server updates (non-blocking).
             state.poll_lsp_updates();
