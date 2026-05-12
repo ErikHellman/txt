@@ -269,6 +269,50 @@ const TEMPLATE: &[HelpEntry] = &[
         desc: "Fuzzy file picker",
     },
     HelpEntry::Binding {
+        actions: &["open_symbol_picker"],
+        desc: "Symbols in file picker",
+    },
+    HelpEntry::Binding {
+        actions: &["toggle_fold_at_cursor"],
+        desc: "Toggle fold at cursor",
+    },
+    HelpEntry::Binding {
+        actions: &["fold_all"],
+        desc: "Fold all (Alt+0)",
+    },
+    HelpEntry::Binding {
+        actions: &["unfold_all"],
+        desc: "Unfold all (Alt+Shift+0)",
+    },
+    HelpEntry::Binding {
+        actions: &["set_mark"],
+        desc: "Set named mark (Ctrl+M then a–z)",
+    },
+    HelpEntry::Binding {
+        actions: &["jump_to_mark"],
+        desc: "Jump to named mark (Ctrl+' then a–z)",
+    },
+    HelpEntry::Binding {
+        actions: &["jump_list_back"],
+        desc: "Jump-list back",
+    },
+    HelpEntry::Binding {
+        actions: &["jump_list_forward"],
+        desc: "Jump-list forward",
+    },
+    HelpEntry::Binding {
+        actions: &["expand_snippet"],
+        desc: "Expand snippet at cursor (Tab; see ~/.config/txt/snippets/)",
+    },
+    HelpEntry::Binding {
+        actions: &["record_macro"],
+        desc: "Record/stop keyboard macro (a–z slot)",
+    },
+    HelpEntry::Binding {
+        actions: &["replay_macro"],
+        desc: "Replay keyboard macro (a–z slot)",
+    },
+    HelpEntry::Binding {
         actions: &["open_recent_files"],
         desc: "Recent files",
     },

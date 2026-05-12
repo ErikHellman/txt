@@ -62,6 +62,61 @@ pub static COMMANDS: &[CommandEntry] = &[
         action: || EditorAction::OpenFuzzyPicker,
     },
     CommandEntry {
+        name: "Go to Symbol in File",
+        key_hint: "Ctrl+Shift+O",
+        action: || EditorAction::OpenSymbolPicker,
+    },
+    CommandEntry {
+        name: "Toggle Fold at Cursor",
+        key_hint: "Ctrl+Shift+[",
+        action: || EditorAction::ToggleFoldAtCursor,
+    },
+    CommandEntry {
+        name: "Fold All",
+        key_hint: "Alt+0",
+        action: || EditorAction::FoldAll,
+    },
+    CommandEntry {
+        name: "Unfold All",
+        key_hint: "Alt+Shift+0",
+        action: || EditorAction::UnfoldAll,
+    },
+    CommandEntry {
+        name: "Set Mark…",
+        key_hint: "Ctrl+M",
+        action: || EditorAction::BeginSetMark,
+    },
+    CommandEntry {
+        name: "Jump to Mark…",
+        key_hint: "Ctrl+'",
+        action: || EditorAction::BeginJumpToMark,
+    },
+    CommandEntry {
+        name: "Jump-list Back",
+        key_hint: "Alt+Left",
+        action: || EditorAction::JumpListBack,
+    },
+    CommandEntry {
+        name: "Jump-list Forward",
+        key_hint: "Alt+Right",
+        action: || EditorAction::JumpListForward,
+    },
+    CommandEntry {
+        name: "Expand Snippet at Cursor",
+        key_hint: "Tab",
+        action: || EditorAction::ExpandSnippetAtCursor,
+    },
+    CommandEntry {
+        name: "Record / Stop Macro",
+        key_hint: "Ctrl+Shift+R",
+        action: || EditorAction::BeginRecordMacro,
+    },
+    CommandEntry {
+        name: "Replay Macro…",
+        key_hint: "Ctrl+Alt+R",
+        action: || EditorAction::BeginReplayMacro,
+    },
+    CommandEntry {
         name: "Buffer Switcher",
         key_hint: "Ctrl+Shift+E",
         action: || EditorAction::OpenBufferSwitcher,

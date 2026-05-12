@@ -15,6 +15,8 @@ pub mod search_bar;
 pub mod settings_overlay;
 pub mod sidebar;
 pub mod status_bar;
+pub mod sticky_header;
+pub mod symbol_picker;
 pub mod tab_bar;
 pub mod welcome_overlay;
 
@@ -172,11 +174,45 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
 
     let editor_focused = !state.sidebar_focused
         && state.fuzzy_picker.is_none()
+        && state.symbol_picker.is_none()
         && state.command_palette.is_none()
         && !state.show_help
         && !state.show_settings
         && !state.show_welcome
         && !state.show_changelog;
+
+    // Compute the sticky header path from the *top visible line* of the
+    // editor pane (not the cursor) so that scrolling through a class
+    // updates the header even when the cursor stays put. The cursor's
+    // position is a poor signal here: a user reading code by scrolling
+    // would otherwise see the header stuck on whichever function the
+    // cursor happens to be inside.
+    let sticky_path = if state.config.sticky_header && editor_area.height >= 3 {
+        let rope = handle.buffer.rope();
+        let scroll_row = handle.viewport.scroll_row;
+        let total_lines = rope.len_lines();
+        let top_line = scroll_row.min(total_lines.saturating_sub(1));
+        let top_byte = if top_line >= total_lines {
+            rope.len_bytes()
+        } else {
+            rope.line_to_byte(top_line)
+        };
+        handle.syntax.enclosing_named_path(rope, top_byte)
+    } else {
+        Vec::new()
+    };
+    let (header_area, editor_area) = if !sticky_path.is_empty() {
+        let header = Rect::new(editor_area.x, editor_area.y, editor_area.width, 1);
+        let body = Rect::new(
+            editor_area.x,
+            editor_area.y + 1,
+            editor_area.width,
+            editor_area.height.saturating_sub(1),
+        );
+        (Some(header), body)
+    } else {
+        (None, editor_area)
+    };
 
     editor_view::render(
         handle,
@@ -186,10 +222,16 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
         editor_focused,
         state.config.show_whitespace,
         state.config.tab_size,
+        state.config.indent_guides,
+        &state.config.rulers,
         &theme,
         editor_area,
         buf,
     );
+
+    if let Some(ha) = header_area {
+        sticky_header::render(&sticky_path, ha, buf);
+    }
 
     if let Some(sa) = search_area_opt
         && let Some(ss) = &state.search_state
@@ -241,6 +283,11 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
     // ── Fuzzy picker floating overlay ─────────────────────────────────────────
     if let Some(picker) = &state.fuzzy_picker {
         fuzzy_picker::render(picker, &theme, area, buf);
+    }
+
+    // ── Symbols-in-file picker overlay ────────────────────────────────────────
+    if let Some(picker) = &state.symbol_picker {
+        symbol_picker::render(picker, &theme, area, buf);
     }
 
     // ── Command palette overlay ───────────────────────────────────────────────
