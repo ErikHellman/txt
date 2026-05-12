@@ -102,6 +102,13 @@ pub struct Config {
     /// enclosing function/class/module of the cursor's position.
     #[serde(default = "default_sticky_header")]
     pub sticky_header: bool,
+    /// Exclude the `.git` directory from go-to-file and project search.
+    /// Implied when `hide_dot_folders` is true. Defaults to `true`.
+    #[serde(default = "default_hide_git_folder")]
+    pub hide_git_folder: bool,
+    /// Exclude every dot-prefixed directory from go-to-file and project search.
+    #[serde(default)]
+    pub hide_dot_folders: bool,
 }
 
 fn default_tab_size() -> usize {
@@ -113,6 +120,10 @@ fn default_indent_guides() -> bool {
 }
 
 fn default_sticky_header() -> bool {
+    true
+}
+
+fn default_hide_git_folder() -> bool {
     true
 }
 
@@ -132,6 +143,8 @@ impl Default for Config {
             indent_guides: default_indent_guides(),
             rulers: Vec::new(),
             sticky_header: default_sticky_header(),
+            hide_git_folder: true,
+            hide_dot_folders: false,
         }
     }
 }
@@ -313,6 +326,8 @@ mod tests {
             indent_guides: false,
             rulers: vec![80, 120],
             sticky_header: false,
+            hide_git_folder: true,
+            hide_dot_folders: true,
         };
         let serialized = toml::to_string(&original).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();
@@ -344,6 +359,29 @@ mod tests {
         let toml_text = "rulers = [80, 100, 120]\n";
         let cfg: Config = toml::from_str(toml_text).unwrap();
         assert_eq!(cfg.rulers, vec![80, 100, 120]);
+    }
+
+    #[test]
+    fn hide_folder_defaults() {
+        let cfg = Config::default();
+        assert!(cfg.hide_git_folder);
+        assert!(!cfg.hide_dot_folders);
+    }
+
+    #[test]
+    fn hide_git_folder_default_applies_to_partial_toml() {
+        // Missing hide_git_folder must deserialise to true (matching Default),
+        // not to bool's intrinsic false.
+        let cfg: Config = toml::from_str("tab_size = 2\n").unwrap();
+        assert!(cfg.hide_git_folder);
+    }
+
+    #[test]
+    fn hide_folder_round_trips() {
+        let toml_text = "hide_git_folder = false\nhide_dot_folders = true\n";
+        let cfg: Config = toml::from_str(toml_text).unwrap();
+        assert!(!cfg.hide_git_folder);
+        assert!(cfg.hide_dot_folders);
     }
 
     #[test]

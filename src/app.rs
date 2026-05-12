@@ -104,14 +104,14 @@ pub struct FuzzyPickerState {
 
 impl FuzzyPickerState {
     /// Build by walking the current directory with `ignore` (respects .gitignore).
-    pub fn new() -> Self {
+    /// `hide_git` skips the `.git` directory; `hide_dot` skips every dot-prefixed
+    /// directory (and implies `hide_git`).
+    pub fn new(hide_git: bool, hide_dot: bool) -> Self {
         let mut all_files = Vec::new();
-        for entry in ignore::WalkBuilder::new(".")
-            .hidden(false)
-            .git_ignore(true)
-            .build()
-            .flatten()
-        {
+        let mut builder = ignore::WalkBuilder::new(".");
+        builder.hidden(false).git_ignore(true);
+        crate::search::apply_hidden_dir_filters(&mut builder, hide_git, hide_dot);
+        for entry in builder.build().flatten() {
             if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
                 // Strip the leading "./" for display clarity.
                 let p = entry.into_path();
@@ -881,6 +881,10 @@ pub struct AppState {
     /// frame. Used by mouse-event routing to translate `(col, row)` into either
     /// an entry hit, a separator hit, or a fall-through to the editor.
     pub sidebar_area: Option<Rect>,
+    /// Tab-bar rect from the most recent frame, or `None` when the strip is
+    /// not shown (single tab). Used by mouse-event routing to hit-test tab
+    /// labels.
+    pub tab_bar_area: Option<Rect>,
     /// Active separator-drag, if any.
     pub sidebar_drag: Option<SidebarDrag>,
     /// Active Alt+drag box-select anchor, in (line, display_col).
@@ -1004,6 +1008,7 @@ impl AppState {
             sidebar_focused: false,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
             sidebar_area: None,
+            tab_bar_area: None,
             sidebar_drag: None,
             box_drag_anchor: None,
             saved_sidebar: None,
@@ -1528,7 +1533,10 @@ impl AppState {
 
             // ── Mouse ─────────────────────────────────────────────────
             EditorAction::MouseClick { col, row } => {
-                if self.point_on_separator(col, row) {
+                if let Some(idx) = self.tab_bar_tab_at(col, row) {
+                    self.editor.go_to_tab(idx);
+                    self.sidebar_focused = false;
+                } else if self.point_on_separator(col, row) {
                     // Begin a sidebar resize drag.
                     self.sidebar_drag = Some(SidebarDrag {
                         start_col: col,
@@ -1799,7 +1807,10 @@ impl AppState {
                 self.input_mode = InputMode::JumpToLine(String::new());
             }
             EditorAction::OpenFuzzyPicker => {
-                self.fuzzy_picker = Some(FuzzyPickerState::new());
+                self.fuzzy_picker = Some(FuzzyPickerState::new(
+                    self.config.hide_git_folder,
+                    self.config.hide_dot_folders,
+                ));
             }
             EditorAction::OpenSymbolPicker => {
                 let active = self.editor.active();
@@ -2631,8 +2642,14 @@ impl AppState {
             Some(ps) => (ps.query.clone(), ps.is_regex, ps.case_sensitive),
             None => return,
         };
-        let results =
-            crate::search::project::run(&self.workspace, &query, is_regex, case_sensitive);
+        let results = crate::search::project::run(
+            &self.workspace,
+            &query,
+            is_regex,
+            case_sensitive,
+            self.config.hide_git_folder,
+            self.config.hide_dot_folders,
+        );
         if let Some(ps) = &mut self.project_search {
             ps.results = results;
             ps.selected = 0;
@@ -3093,7 +3110,7 @@ impl AppState {
     /// Handle input while the settings overlay is open.
     /// Returns `true` if the action was consumed, `false` to let it fall through.
     fn handle_settings(&mut self, action: &EditorAction) -> bool {
-        const NUM_ROWS: usize = 5;
+        const NUM_ROWS: usize = crate::ui::settings_overlay::NUM_SETTINGS;
         match action {
             EditorAction::MoveCursor(Direction::Up) => {
                 self.settings_cursor = self.settings_cursor.saturating_sub(1);
@@ -3137,7 +3154,9 @@ impl AppState {
             0 => self.config.confirm_exit = !self.config.confirm_exit,
             1 => self.config.auto_save = !self.config.auto_save,
             2 => self.config.show_whitespace = !self.config.show_whitespace,
-            3 => {
+            3 => self.config.hide_git_folder = !self.config.hide_git_folder,
+            4 => self.config.hide_dot_folders = !self.config.hide_dot_folders,
+            5 => {
                 let all = Theme::ALL;
                 let idx = all
                     .iter()
@@ -3150,7 +3169,7 @@ impl AppState {
                 };
                 self.config.theme = all[next].clone();
             }
-            4 => {
+            6 => {
                 let all = KeymapPreset::ALL;
                 let idx = all
                     .iter()
@@ -5382,6 +5401,13 @@ impl AppState {
                 .slice(start..end)
                 .to_string(),
         )
+    }
+
+    /// Hit-test the tab strip. Returns the tab index when `(col, row)`
+    /// lands on a rendered tab label.
+    fn tab_bar_tab_at(&self, col: u16, row: u16) -> Option<usize> {
+        let area = self.tab_bar_area?;
+        crate::ui::tab_bar::tab_at(&self.editor, area, col, row)
     }
 
     /// Returns true if the given screen point is inside the sidebar's

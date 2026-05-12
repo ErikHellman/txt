@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.2
+
+- Fix crash when arrow-navigating up or down into a line containing wide multi-byte characters (e.g. box-drawing `─` in YAML comments): the cursor's preferred display column was being applied as a byte offset, landing inside a UTF-8 char and panicking on the next render
+
 ## v0.4.1
 
 - Fix Ctrl+1..9 tab shortcuts on AZERTY keyboards — the v0.4.0 fix matched a key event the terminal never sends; this version maps the actual top-row glyphs (`& é " ' ( - è _ ç`) to tabs 1..9

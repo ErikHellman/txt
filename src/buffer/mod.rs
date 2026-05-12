@@ -608,7 +608,7 @@ impl Buffer {
                 .map(|c| {
                     let preferred = c.preferred_col;
                     let target_line = c.line.saturating_sub(1);
-                    let col = preferred.min(line_byte_len_no_newline(&self.rope, target_line));
+                    let col = byte_col_at_display_col(&self.rope, target_line, preferred);
                     let offset = self.rope.char_to_byte(self.rope.line_to_char(target_line)) + col;
                     (offset, preferred)
                 })
@@ -622,7 +622,7 @@ impl Buffer {
             }
             let target_line = cursor.line - 1;
             let preferred = cursor.preferred_col;
-            let col = preferred.min(line_byte_len_no_newline(&self.rope, target_line));
+            let col = byte_col_at_display_col(&self.rope, target_line, preferred);
             let new_offset = self.rope.char_to_byte(self.rope.line_to_char(target_line)) + col;
             self.cursors
                 .primary_mut()
@@ -642,7 +642,7 @@ impl Buffer {
                 .map(|c| {
                     let preferred = c.preferred_col;
                     let target_line = (c.line + 1).min(last_line);
-                    let col = preferred.min(line_byte_len_no_newline(&self.rope, target_line));
+                    let col = byte_col_at_display_col(&self.rope, target_line, preferred);
                     let offset = self.rope.char_to_byte(self.rope.line_to_char(target_line)) + col;
                     (offset, preferred)
                 })
@@ -657,7 +657,7 @@ impl Buffer {
             }
             let target_line = cursor.line + 1;
             let preferred = cursor.preferred_col;
-            let col = preferred.min(line_byte_len_no_newline(&self.rope, target_line));
+            let col = byte_col_at_display_col(&self.rope, target_line, preferred);
             let new_offset = self.rope.char_to_byte(self.rope.line_to_char(target_line)) + col;
             self.cursors
                 .primary_mut()
@@ -2152,6 +2152,41 @@ mod tests {
         // Should be on line 1, col 1 (byte 7: 6 + 1)
         assert_eq!(buf.cursors.primary().line, 1);
         assert_eq!(buf.cursors.primary().col, 1);
+    }
+
+    #[test]
+    fn move_down_into_multibyte_line_lands_on_char_boundary() {
+        // Regression for crash when navigating into a line whose display
+        // column N falls inside a multi-byte grapheme (e.g. U+2500 BOX
+        // DRAWINGS LIGHT HORIZONTAL is 3 bytes wide / 1 cell wide).
+        // Previously preferred_col (display) was added as a byte offset,
+        // producing a cursor whose `col` was not on a UTF-8 char boundary,
+        // which then panicked in `display_col_at` during render.
+        let mut buf = Buffer::from_str("hello world\n# ──────────────\n");
+        buf.move_cursor_to(3, false); // line 0, after "hel"
+        buf.move_cursor_down(false);
+        let primary = buf.cursors.primary();
+        assert_eq!(primary.line, 1);
+        // display col 3 on "# ─…" = "# " (2 cells) + one "─" (1 cell) = 3,
+        // which corresponds to byte col 2 + 3 = 5 (a char boundary).
+        assert_eq!(primary.col, 5);
+        // And display_col_at must not panic on the result.
+        let dcol = crate::buffer::cursor::display_col_at(buf.rope(), primary.line, primary.col);
+        assert_eq!(dcol, 3);
+    }
+
+    #[test]
+    fn move_up_into_multibyte_line_lands_on_char_boundary() {
+        let mut buf = Buffer::from_str("# ──────────────\nhello world\n");
+        // Line 0 = "# " (2 bytes) + 14*"─" (42 bytes) + "\n" (1 byte) = 45 bytes,
+        // so byte 48 = line 1, after "hel".
+        buf.move_cursor_to(48, false);
+        buf.move_cursor_up(false);
+        let primary = buf.cursors.primary();
+        assert_eq!(primary.line, 0);
+        assert_eq!(primary.col, 5);
+        let dcol = crate::buffer::cursor::display_col_at(buf.rope(), primary.line, primary.col);
+        assert_eq!(dcol, 3);
     }
 
     #[test]

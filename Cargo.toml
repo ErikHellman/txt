@@ -1,6 +1,6 @@
 [package]
 name = "txt"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 rust-version = "1.88"
 description = "A fast, intuitive terminal text editor"
@@ -55,7 +55,7 @@ notify = "8"
 url = "2"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
-sha2 = "0.10"
+sha2 = "0.11"
 which = "8"
 
 [dev-dependencies]
