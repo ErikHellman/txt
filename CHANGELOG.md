@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.6.0
+
+- Add per-workspace session persistence — when `restore_session = true`, a clean shutdown writes the open tabs (with cursor and viewport) to `<workspace>/.txt/session.json` and re-opens them on next launch; a positional file argument suppresses the restore
+- Add persistent undo across sessions — when `persistent_undo = true`, every save writes the `UndoStack` and an FNV-1a content hash to `<workspace>/.txt/undo/<digest>.json`; Ctrl+Z reaches back across restarts when the on-disk hash still matches
+- Add a clipboard ring (Ctrl+Shift+V) — the last 32 copy/cut values are tracked in a bounded in-memory ring; the overlay shows first-line previews, Enter pastes the entry and promotes it to the front, and adjacent duplicates are coalesced
+- Add bracket auto-pair and a surround prompt — typing `(`, `[`, `{`, `"`, `'`, `` ` `` with no selection inserts the matching close and steps between them; quotes are suppressed adjacent to word characters (disable with `auto_pair = false`). Alt+' wraps the selection (or word under the cursor) in a chosen delimiter pair in a single undo batch
+- Add diff-aware hunk navigation — Alt+] and Alt+[ jump between git hunks (and push to the jump list), Ctrl+Shift+U reverts the hunk under the cursor to its HEAD content in a single undo batch, Alt+H pops up an inline float showing the HEAD lines, and the status bar gains a `hunk i/n` segment inside a hunk
+- Add a quickfix list overlay (Alt+1) for LSP diagnostics across every open buffer, sorted by severity then path/line; F8 and Shift+F8 step through entries without opening the overlay
+- Highlight trailing whitespace on inactive lines with a subtle red background and surface a `mixed-indent` status-bar segment when a buffer mixes tab- and space-leading lines (disable via `highlight_trailing_whitespace = false` / `warn_mixed_indent = false`)
+- Add an async startup version check — a background thread asks the GitHub Releases API for the latest tag and overlays a `↑X.Y.Z` badge on the first gutter row when a newer version exists; failures are silent. `TXT_DISABLE_VERSION_CHECK` keeps tests offline
+- Expose every new Tier 3 toggle in the Ctrl+, settings dialog (restore session, persistent undo, auto-pair brackets, highlight trailing whitespace, warn on mixed indent) so users no longer need to hand-edit `config.toml`
+- Add Mac- and compact-keyboard-friendly aliases for document/page navigation: Alt+, / Alt+. (file start/end), Alt+< / Alt+> (extend to file start/end), Alt+V / Alt+Shift+V (page up/down); the existing Home/End/PageUp/PageDown bindings remain canonical
+- Switch the Kotlin LSP preset to JetBrains' `kotlin-lsp`
+- Drain queued input events per frame and drop no-op vertical scrolls so mouse-wheel bursts and held Ctrl+Up/Down no longer leave the editor a frame behind or queue keystrokes behind a burst
+- Fix a help-overlay panic when the key/description column was truncated inside a multibyte character (e.g. the en-dash in `Ctrl+M then a–z`)
+- Group the new Tier 3 help entries under their proper sections (surround under Editing, hunk actions under Git, quickfix under LSP)
+
 ## v0.5.0
 
 - Add keyboard macros: Ctrl+Shift+R prompts for a slot (a–z) and toggles recording, Ctrl+Alt+R replays a slot inside a single undo batch
