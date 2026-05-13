@@ -190,6 +190,10 @@ const TEMPLATE: &[HelpEntry] = &[
         actions: &["toggle_line_comment"],
         desc: "Toggle line comment",
     },
+    HelpEntry::Binding {
+        actions: &["surround"],
+        desc: "Surround selection with delimiter (next char picks pair)",
+    },
     HelpEntry::Static {
         key: "Tab / Shift+Tab",
         desc: "Indent / dedent selection",
@@ -219,30 +223,6 @@ const TEMPLATE: &[HelpEntry] = &[
     HelpEntry::Binding {
         actions: &["open_clipboard_ring"],
         desc: "Clipboard ring (recent yanks)",
-    },
-    HelpEntry::Binding {
-        actions: &["surround"],
-        desc: "Surround selection with delimiter (next char picks pair)",
-    },
-    HelpEntry::Binding {
-        actions: &["next_hunk", "prev_hunk"],
-        desc: "Next / Prev git hunk",
-    },
-    HelpEntry::Binding {
-        actions: &["revert_hunk"],
-        desc: "Revert hunk under cursor to HEAD",
-    },
-    HelpEntry::Binding {
-        actions: &["peek_head"],
-        desc: "Peek HEAD content for hunk under cursor",
-    },
-    HelpEntry::Binding {
-        actions: &["open_quickfix"],
-        desc: "Quickfix list (workspace LSP diagnostics)",
-    },
-    HelpEntry::Binding {
-        actions: &["quickfix_next", "quickfix_prev"],
-        desc: "Next / Prev quickfix entry",
     },
     // ── File & Tabs ──────────────────────────────────────────────────
     HelpEntry::Section("File & Tabs"),
@@ -408,6 +388,14 @@ const TEMPLATE: &[HelpEntry] = &[
         actions: &["code_action"],
         desc: "Code action / quick fix",
     },
+    HelpEntry::Binding {
+        actions: &["open_quickfix"],
+        desc: "Quickfix list (workspace LSP diagnostics)",
+    },
+    HelpEntry::Binding {
+        actions: &["quickfix_next", "quickfix_prev"],
+        desc: "Next / Prev quickfix entry",
+    },
     // ── Sidebar ──────────────────────────────────────────────────────
     HelpEntry::Section("Sidebar"),
     HelpEntry::Static {
@@ -461,6 +449,18 @@ const TEMPLATE: &[HelpEntry] = &[
     HelpEntry::Binding {
         actions: &["open_git_dialog"],
         desc: "Open git operations dialog",
+    },
+    HelpEntry::Binding {
+        actions: &["next_hunk", "prev_hunk"],
+        desc: "Next / Prev git hunk",
+    },
+    HelpEntry::Binding {
+        actions: &["revert_hunk"],
+        desc: "Revert hunk under cursor to HEAD",
+    },
+    HelpEntry::Binding {
+        actions: &["peek_head"],
+        desc: "Peek HEAD content for hunk under cursor",
     },
     HelpEntry::Static {
         key: "y / n",
