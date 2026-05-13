@@ -222,6 +222,7 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
         state.search_state.as_ref(),
         &highlight_spans,
         state.git_gutter.as_ref(),
+        state.version_check.newer_version(),
         editor_focused,
         state.config.show_whitespace,
         state.config.tab_size,

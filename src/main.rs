@@ -18,6 +18,7 @@ mod snippet;
 mod syntax;
 mod theme;
 mod ui;
+mod version_check;
 mod watcher;
 
 use std::{io, path::PathBuf};

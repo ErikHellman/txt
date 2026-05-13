@@ -39,6 +39,7 @@ pub fn render(
     search: Option<&SearchState>,
     highlights: &[HighlightSpan],
     git_gutter: Option<&GitGutter>,
+    new_version: Option<&str>,
     focused: bool,
     show_whitespace: bool,
     tab_size: usize,
@@ -62,7 +63,10 @@ pub fn render(
     // candidate range — keeps the gutter tight for plaintext and short files.
     let has_folds = (0..total_lines).any(|i| handle.folds.is_fold_start_candidate(i));
     let fold_col_w: u16 = if has_folds { FOLD_GUTTER_W } else { 0 };
-    let gw = gutter_width(total_lines);
+    // When a newer release is available, widen the line-number gutter just
+    // enough to fit `↑X.Y.Z` on row 0 so the badge never has to truncate.
+    let version_label = new_version.map(|v| format!("↑{v}"));
+    let gw = effective_gutter_width(total_lines, version_label.as_deref());
     let text_area = text_area(area, gw, git_col_w, diag_col_w, fold_col_w);
 
     // Build per-line diagnostic severity map (highest severity per line).
@@ -254,7 +258,21 @@ pub fn render(
         } else {
             line_num_style
         };
-        if vl.is_first_seg {
+        if screen_row == 0 && version_label.is_some() {
+            // Overlay the topmost gutter row with the "new release available"
+            // badge — the line number for this row gets replaced.
+            let label = version_label.as_deref().unwrap();
+            let badge_style = Style::default()
+                .fg(Color::Rgb(255, 230, 100))
+                .bg(Color::Rgb(80, 60, 0))
+                .add_modifier(Modifier::BOLD);
+            let mut padded = label.to_string();
+            let label_w = UnicodeWidthStr::width(label) as u16;
+            if label_w < gw {
+                padded.push_str(&" ".repeat((gw - label_w) as usize));
+            }
+            buf.set_string(gutter_x, y, &padded, badge_style);
+        } else if vl.is_first_seg {
             let num_str = format!("{:>width$}", line_idx + 1, width = gw as usize);
             buf.set_string(gutter_x, y, &num_str, num_style);
         } else {
@@ -640,6 +658,17 @@ pub fn gutter_width(total_lines: usize) -> u16 {
         (total_lines as f64).log10().floor() as u16 + 1
     };
     digits.max(1)
+}
+
+/// Line-number gutter width, widened to fit a row-0 badge such as the
+/// "new release available" indicator. Mouse hit-testing must use this so the
+/// text area's x-origin matches the renderer.
+pub fn effective_gutter_width(total_lines: usize, version_label: Option<&str>) -> u16 {
+    let base = gutter_width(total_lines);
+    match version_label {
+        Some(l) => base.max(UnicodeWidthStr::width(l) as u16),
+        None => base,
+    }
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
