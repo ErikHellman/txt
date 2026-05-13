@@ -434,6 +434,27 @@ impl KeyBindings {
             EditorAction::MoveCursor(super::action::Direction::Right),
         );
 
+        // ── Mac-friendly document navigation (Emacs convention) ────
+        // Mac laptops and other compact keyboards lack dedicated Home /
+        // End / PageUp / PageDown keys. These Alt-based aliases let users
+        // navigate without relying on Fn+Arrow combinations. Bound BEFORE
+        // the dedicated-key bindings below so the reverse map (used by the
+        // toml writer) keeps `ctrl+home` etc. as the canonical key for
+        // backward compatibility with existing user configs; both keys
+        // remain functional and the help overlay shows both.
+        bind("alt+,", EditorAction::MoveCursorFileStart);
+        bind("alt+.", EditorAction::MoveCursorFileEnd);
+        bind("alt+<", EditorAction::ExtendSelectionFileStart);
+        bind("alt+>", EditorAction::ExtendSelectionFileEnd);
+        bind(
+            "alt+v",
+            EditorAction::MoveCursorPage(super::action::Direction::Up),
+        );
+        bind(
+            "alt+shift+v",
+            EditorAction::MoveCursorPage(super::action::Direction::Down),
+        );
+
         // ── Home / End ─────────────────────────────────────────────
         bind("ctrl+shift+home", EditorAction::ExtendSelectionFileStart);
         bind("ctrl+shift+end", EditorAction::ExtendSelectionFileEnd);
@@ -568,9 +589,24 @@ impl KeyBindings {
         self.map.get(combo)
     }
 
-    /// Get the display string for a key bound to the named action.
-    pub fn display_key_for_action(&self, action_name: &str) -> Option<&str> {
-        self.reverse.get(action_name).map(|s| s.as_str())
+    /// Return every key combo currently bound to the named action.
+    ///
+    /// Used by the help overlay to surface multiple bindings (e.g. both
+    /// `ctrl+home` and `alt+,` for `move_cursor_file_start`) so users on
+    /// keyboards without dedicated Home/End/PgUp/PgDn keys can discover
+    /// the Alt-modifier aliases. Sorted for deterministic display.
+    pub fn display_keys_for_action(&self, action_name: &str) -> Vec<String> {
+        let Some(target) = action_from_name(action_name) else {
+            return Vec::new();
+        };
+        let mut keys: Vec<String> = self
+            .map
+            .iter()
+            .filter(|(_, a)| **a == target)
+            .map(|(k, _)| k.to_string())
+            .collect();
+        keys.sort();
+        keys
     }
 
     /// Path to the keybindings config file.
@@ -933,11 +969,11 @@ mod tests {
     fn defaults_have_all_expected_actions() {
         let kb = KeyBindings::defaults();
         // Spot-check a few
-        assert!(kb.display_key_for_action("quit").is_some());
-        assert!(kb.display_key_for_action("save_file").is_some());
-        assert!(kb.display_key_for_action("undo").is_some());
-        assert!(kb.display_key_for_action("toggle_help").is_some());
-        assert!(kb.display_key_for_action("paste").is_some());
+        assert!(!kb.display_keys_for_action("quit").is_empty());
+        assert!(!kb.display_keys_for_action("save_file").is_empty());
+        assert!(!kb.display_keys_for_action("undo").is_empty());
+        assert!(!kb.display_keys_for_action("toggle_help").is_empty());
+        assert!(!kb.display_keys_for_action("paste").is_empty());
     }
 
     #[test]
@@ -1075,6 +1111,96 @@ mod tests {
         let kb = KeyBindings::vscode_defaults();
         let combo: KeyCombo = "ctrl+shift+d".parse().unwrap();
         assert_eq!(kb.lookup(&combo), Some(&EditorAction::DuplicateLine));
+    }
+
+    #[test]
+    fn mac_friendly_document_navigation_aliases_exist() {
+        // Mac laptops lack Home/End/PgUp/PgDn keys; verify the Emacs-style
+        // Alt aliases are bound by default and coexist with the dedicated-
+        // key bindings.
+        let kb = KeyBindings::defaults();
+
+        let alt_comma: KeyCombo = "alt+,".parse().unwrap();
+        assert_eq!(
+            kb.lookup(&alt_comma),
+            Some(&EditorAction::MoveCursorFileStart)
+        );
+
+        let alt_period: KeyCombo = "alt+.".parse().unwrap();
+        assert_eq!(
+            kb.lookup(&alt_period),
+            Some(&EditorAction::MoveCursorFileEnd)
+        );
+
+        let alt_lt: KeyCombo = "alt+<".parse().unwrap();
+        assert_eq!(
+            kb.lookup(&alt_lt),
+            Some(&EditorAction::ExtendSelectionFileStart)
+        );
+
+        let alt_gt: KeyCombo = "alt+>".parse().unwrap();
+        assert_eq!(
+            kb.lookup(&alt_gt),
+            Some(&EditorAction::ExtendSelectionFileEnd)
+        );
+
+        let alt_v: KeyCombo = "alt+v".parse().unwrap();
+        assert_eq!(
+            kb.lookup(&alt_v),
+            Some(&EditorAction::MoveCursorPage(
+                super::super::action::Direction::Up
+            ))
+        );
+
+        let alt_shift_v: KeyCombo = "alt+shift+v".parse().unwrap();
+        assert_eq!(
+            kb.lookup(&alt_shift_v),
+            Some(&EditorAction::MoveCursorPage(
+                super::super::action::Direction::Down
+            ))
+        );
+
+        // The legacy dedicated-key bindings must still work.
+        let ctrl_home: KeyCombo = "ctrl+home".parse().unwrap();
+        assert_eq!(
+            kb.lookup(&ctrl_home),
+            Some(&EditorAction::MoveCursorFileStart)
+        );
+        let ctrl_end: KeyCombo = "ctrl+end".parse().unwrap();
+        assert_eq!(kb.lookup(&ctrl_end), Some(&EditorAction::MoveCursorFileEnd));
+        let pageup: KeyCombo = "pageup".parse().unwrap();
+        assert_eq!(
+            kb.lookup(&pageup),
+            Some(&EditorAction::MoveCursorPage(
+                super::super::action::Direction::Up
+            ))
+        );
+    }
+
+    #[test]
+    fn display_keys_for_action_returns_all_bindings() {
+        // The help overlay relies on this to show both the dedicated-key
+        // and the Mac-friendly alias for actions that have both.
+        let kb = KeyBindings::defaults();
+        let keys = kb.display_keys_for_action("move_cursor_file_start");
+        assert!(
+            keys.iter().any(|k| k == "ctrl+home"),
+            "expected ctrl+home in {keys:?}"
+        );
+        assert!(
+            keys.iter().any(|k| k == "alt+,"),
+            "expected alt+, in {keys:?}"
+        );
+
+        let page_up_keys = kb.display_keys_for_action("move_cursor_page_up");
+        assert!(page_up_keys.iter().any(|k| k == "pageup"));
+        assert!(page_up_keys.iter().any(|k| k == "alt+v"));
+    }
+
+    #[test]
+    fn display_keys_for_action_unknown_returns_empty() {
+        let kb = KeyBindings::defaults();
+        assert!(kb.display_keys_for_action("not_a_real_action").is_empty());
     }
 
     #[test]
