@@ -6061,6 +6061,64 @@ impl AppState {
             .clamp_user_scroll(total_lines, longest, text_h, text_w);
     }
 
+    /// Returns `true` when `action` is a vertical scroll that the viewport
+    /// (or sidebar) can't honour because it's already at the corresponding
+    /// edge. Used by the run loop to drop end-of-buffer wheel spam before
+    /// it ever reaches `update` and triggers a redraw.
+    ///
+    /// Horizontal and non-scroll actions always return `false` — the
+    /// horizontal case would need an O(n) max-line-width scan per event,
+    /// which is more expensive than letting `update` handle it normally.
+    pub(crate) fn scroll_action_is_no_op(
+        &self,
+        action: &EditorAction,
+        terminal_height: u16,
+    ) -> bool {
+        let dir = match action {
+            EditorAction::Scroll(d) => *d,
+            EditorAction::MouseScroll { dir, col, row } => {
+                if self.point_in_sidebar(*col, *row) {
+                    return self.sidebar_scroll_is_no_op(*dir);
+                }
+                *dir
+            }
+            _ => return false,
+        };
+
+        // Match the value `update` derives for scroll handlers.
+        let text_h = (terminal_height as usize).saturating_sub(1);
+        let tab = self.editor.active();
+        let vp = &tab.viewport;
+        let total_lines = tab.buffer.len_lines();
+        let max_row = total_lines.saturating_sub(1).saturating_sub(text_h / 2);
+
+        match dir {
+            ScrollDir::Up | ScrollDir::HalfPageUp => vp.scroll_row == 0,
+            ScrollDir::Down | ScrollDir::HalfPageDown => vp.scroll_row >= max_row,
+            ScrollDir::Left | ScrollDir::Right => false,
+        }
+    }
+
+    /// Whether a wheel-scroll over the sidebar would be a no-op (already at
+    /// top or already past the end of the entry list).
+    fn sidebar_scroll_is_no_op(&self, dir: ScrollDir) -> bool {
+        let sb = match self.sidebar.as_ref() {
+            Some(sb) => sb,
+            None => return true,
+        };
+        let h = self.sidebar_area.map(|r| r.height as usize).unwrap_or(0);
+        let max = if h == 0 || sb.entries.len() <= h {
+            0
+        } else {
+            sb.entries.len() - h
+        };
+        match dir {
+            ScrollDir::Up => sb.scroll_offset == 0,
+            ScrollDir::Down => sb.scroll_offset >= max,
+            _ => true,
+        }
+    }
+
     /// Returns true if the given screen point is inside the sidebar's
     /// entry-list area (excludes the separator column).
     fn point_in_sidebar(&self, col: u16, row: u16) -> bool {
@@ -6297,14 +6355,33 @@ impl App {
                 continue;
             }
 
-            let action = match event::read()? {
-                Event::Key(k) if k.kind == KeyEventKind::Press => state.input.handle_key(k),
-                Event::Mouse(m) => state.input.handle_mouse(m),
-                Event::Resize(_, _) => EditorAction::Unhandled,
-                _ => EditorAction::Unhandled,
-            };
-
-            state.update(action, term_height);
+            // Drain everything already queued up before the next draw. A
+            // mouse-wheel spin or held arrow key can generate input faster
+            // than a single frame can render, so without this the editor
+            // falls one render behind every event and visibly "freezes"
+            // while it catches up — keystrokes queued behind a scroll
+            // burst then take ages to register.
+            //
+            // A scroll the viewport can't honour (already at the top or
+            // bottom) is dropped before it reaches `update`, so a held
+            // wheel at end-of-file costs nothing.
+            loop {
+                let action = match event::read()? {
+                    Event::Key(k) if k.kind == KeyEventKind::Press => state.input.handle_key(k),
+                    Event::Mouse(m) => state.input.handle_mouse(m),
+                    Event::Resize(_, _) => EditorAction::Unhandled,
+                    _ => EditorAction::Unhandled,
+                };
+                if !state.scroll_action_is_no_op(&action, term_height) {
+                    state.update(action, term_height);
+                    if state.should_quit {
+                        break;
+                    }
+                }
+                if !event::poll(Duration::from_millis(0))? {
+                    break;
+                }
+            }
 
             if state.should_quit {
                 break;
