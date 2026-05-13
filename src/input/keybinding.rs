@@ -524,6 +524,15 @@ impl KeyBindings {
         bind("ctrl+shift+i", EditorAction::FormatBuffer);
         bind("ctrl+shift+g", EditorAction::OpenGitDialog);
         bind("ctrl+shift+f", EditorAction::OpenProjectSearch);
+        bind("ctrl+shift+v", EditorAction::OpenClipboardRing);
+        bind("alt+'", EditorAction::BeginSurround);
+        bind("alt+]", EditorAction::NextHunk);
+        bind("alt+[", EditorAction::PrevHunk);
+        bind("ctrl+shift+u", EditorAction::RevertHunkAtCursor);
+        bind("alt+h", EditorAction::PeekHeadAtCursor);
+        bind("alt+1", EditorAction::OpenQuickfix);
+        bind("f8", EditorAction::QuickfixNext);
+        bind("shift+f8", EditorAction::QuickfixPrev);
 
         // ── Box / column selection ────────────────────────────────────
         bind(

@@ -87,6 +87,9 @@ pub enum InputMode {
     RecordMacroChar,
     /// "Replay macro from slot: " — next char names the slot a–z.
     ReplayMacroChar,
+    /// Alt+': "Surround with: " — wraps the current selection in a chosen
+    /// delimiter pair on the next typed character.
+    SurroundChar,
 }
 
 impl InputMode {
@@ -770,6 +773,25 @@ pub struct ReferencesListState {
     pub selected: usize,
 }
 
+/// State for the inline diff-peek float (`Alt+H`). Lists the HEAD lines for
+/// the hunk under the cursor.
+pub struct DiffPeekState {
+    pub head_lines: Vec<String>,
+    /// Cursor line at the time the peek was opened — used to anchor the float
+    /// near the cursor.
+    #[allow(dead_code)]
+    pub anchor_line: usize,
+}
+
+/// State for the clipboard-ring picker overlay (`Ctrl+Shift+V`).
+pub struct ClipboardRingState {
+    /// Snapshot of the ring at the time the overlay was opened. Most recent
+    /// entry first. Mutated only via `selected`; the underlying
+    /// `ClipboardManager` is not touched until the user confirms a pick.
+    pub entries: Vec<String>,
+    pub selected: usize,
+}
+
 /// A single reference location.
 pub struct ReferenceItem {
     pub path: PathBuf,
@@ -928,6 +950,12 @@ pub struct AppState {
     pub completion: Option<CompletionState>,
     pub hover: Option<HoverState>,
     pub references_list: Option<ReferencesListState>,
+    /// `Ctrl+Shift+V` overlay listing the last N clipboard entries.
+    pub clipboard_ring: Option<ClipboardRingState>,
+    /// `Alt+H` float showing HEAD content for the hunk at the cursor.
+    pub diff_peek: Option<DiffPeekState>,
+    /// `Alt+1` overlay listing every LSP diagnostic across the workspace.
+    pub quickfix: Option<crate::quickfix::QuickfixState>,
     pub git_gutter: Option<GitGutter>,
     pub git_dialog: Option<GitDialogState>,
     pub config: Config,
@@ -1045,6 +1073,9 @@ impl AppState {
             completion: None,
             hover: None,
             references_list: None,
+            clipboard_ring: None,
+            diff_peek: None,
+            quickfix: None,
             git_gutter: None,
             git_dialog: None,
             config,
@@ -1206,6 +1237,16 @@ impl AppState {
             return;
         }
 
+        // Clipboard ring picker — captured input
+        if self.clipboard_ring.is_some() && self.handle_clipboard_ring(&action) {
+            return;
+        }
+
+        // Quickfix list — captured input
+        if self.quickfix.is_some() && self.handle_quickfix_input(&action) {
+            return;
+        }
+
         // Search / replace bar — captured input (navigation still falls through)
         if self.search_state.is_some() && self.handle_search_input(action.clone()) {
             return;
@@ -1280,14 +1321,26 @@ impl AppState {
 
             // ── Text insertion ────────────────────────────────────────
             EditorAction::InsertChar(c) => {
-                let (indent, rules) = self.indent_for_active();
-                if self.editor.active().buffer.cursors.is_multi() {
-                    self.editor.active_mut().buffer.multi_insert_char(c);
-                } else {
-                    self.editor
-                        .active_mut()
-                        .buffer
-                        .insert_char_with_indent(c, &indent, rules);
+                // Auto-pair: when the user types one of the configured open
+                // delimiters with no active selection, also insert the
+                // matching close delimiter and step the cursor back one byte
+                // so they keep typing inside the pair. Skip-on-close: when
+                // the user types a close delimiter and the next char already
+                // is that close, just advance the cursor instead of
+                // inserting a duplicate.
+                let auto_paired = self.config.auto_pair
+                    && !self.editor.active().buffer.cursors.is_multi()
+                    && self.try_auto_pair(c);
+                if !auto_paired {
+                    let (indent, rules) = self.indent_for_active();
+                    if self.editor.active().buffer.cursors.is_multi() {
+                        self.editor.active_mut().buffer.multi_insert_char(c);
+                    } else {
+                        self.editor
+                            .active_mut()
+                            .buffer
+                            .insert_char_with_indent(c, &indent, rules);
+                    }
                 }
             }
             EditorAction::InsertNewline => {
@@ -1924,6 +1977,9 @@ impl AppState {
             EditorAction::BeginReplayMacro => {
                 self.input_mode = InputMode::ReplayMacroChar;
             }
+            EditorAction::BeginSurround => {
+                self.input_mode = InputMode::SurroundChar;
+            }
             EditorAction::ToggleSidebar => {
                 if self.sidebar.is_none() {
                     // Restore saved state or create fresh, then expand to current file.
@@ -1971,6 +2027,41 @@ impl AppState {
             }
             EditorAction::OpenGitDialog => {
                 self.open_git_dialog();
+            }
+            EditorAction::OpenClipboardRing => {
+                let entries = self.clipboard.ring_entries();
+                if !entries.is_empty() {
+                    self.clipboard_ring = Some(ClipboardRingState {
+                        entries,
+                        selected: 0,
+                    });
+                }
+            }
+            EditorAction::NextHunk => {
+                self.jump_to_relative_hunk(1);
+            }
+            EditorAction::PrevHunk => {
+                self.jump_to_relative_hunk(-1);
+            }
+            EditorAction::RevertHunkAtCursor => {
+                self.revert_hunk_at_cursor();
+            }
+            EditorAction::PeekHeadAtCursor => {
+                self.toggle_diff_peek();
+            }
+            EditorAction::OpenQuickfix => {
+                let entries = crate::quickfix::collect_lsp_diagnostics(&self.editor);
+                if entries.is_empty() {
+                    self.status_error = Some("No diagnostics".into());
+                } else {
+                    self.quickfix = Some(crate::quickfix::QuickfixState::new(entries));
+                }
+            }
+            EditorAction::QuickfixNext => {
+                self.quickfix_step(1);
+            }
+            EditorAction::QuickfixPrev => {
+                self.quickfix_step(-1);
             }
             EditorAction::TriggerCompletion => {
                 self.trigger_completion();
@@ -2293,6 +2384,11 @@ impl AppState {
                     self.replay_macro_slot(c);
                     return;
                 }
+                InputMode::SurroundChar => {
+                    self.input_mode = InputMode::Normal;
+                    self.apply_surround(c);
+                    return;
+                }
                 _ => {}
             }
         }
@@ -2338,7 +2434,8 @@ impl AppState {
                     | InputMode::SetMarkChar
                     | InputMode::JumpToMarkChar
                     | InputMode::RecordMacroChar
-                    | InputMode::ReplayMacroChar => {}
+                    | InputMode::ReplayMacroChar
+                    | InputMode::SurroundChar => {}
                 }
                 return;
             }
@@ -2453,7 +2550,8 @@ impl AppState {
                     | InputMode::SetMarkChar
                     | InputMode::JumpToMarkChar
                     | InputMode::RecordMacroChar
-                    | InputMode::ReplayMacroChar => {}
+                    | InputMode::ReplayMacroChar
+                    | InputMode::SurroundChar => {}
                 }
             }
             EditorAction::Quit | EditorAction::Unhandled => {
@@ -3198,9 +3296,17 @@ impl AppState {
             0 => self.config.confirm_exit = !self.config.confirm_exit,
             1 => self.config.auto_save = !self.config.auto_save,
             2 => self.config.show_whitespace = !self.config.show_whitespace,
-            3 => self.config.hide_git_folder = !self.config.hide_git_folder,
-            4 => self.config.hide_dot_folders = !self.config.hide_dot_folders,
-            5 => {
+            3 => {
+                self.config.highlight_trailing_whitespace =
+                    !self.config.highlight_trailing_whitespace;
+            }
+            4 => self.config.warn_mixed_indent = !self.config.warn_mixed_indent,
+            5 => self.config.auto_pair = !self.config.auto_pair,
+            6 => self.config.hide_git_folder = !self.config.hide_git_folder,
+            7 => self.config.hide_dot_folders = !self.config.hide_dot_folders,
+            8 => self.config.restore_session = !self.config.restore_session,
+            9 => self.config.persistent_undo = !self.config.persistent_undo,
+            10 => {
                 let all = Theme::ALL;
                 let idx = all
                     .iter()
@@ -3213,7 +3319,7 @@ impl AppState {
                 };
                 self.config.theme = all[next].clone();
             }
-            6 => {
+            11 => {
                 let all = KeymapPreset::ALL;
                 let idx = all
                     .iter()
@@ -4231,12 +4337,228 @@ impl AppState {
             self.lsp_dirty_since = None;
             self.lsp_change_sent = false;
             self.notify_lsp_did_save();
+            // Persist undo history (opt-in) so Ctrl+Z still works after a
+            // restart. Silent on I/O failure.
+            if self.config.persistent_undo {
+                let tab = self.editor.active();
+                if let Some(path) = &tab.path {
+                    let content = tab.buffer.to_string();
+                    let snap = tab.buffer.history_snapshot();
+                    crate::buffer::persistent_undo::save(&self.workspace, path, &content, &snap);
+                }
+            }
         } else {
             self.input_mode = InputMode::SaveAsPath(String::new());
         }
     }
 
     /// Recompute the git gutter for the currently active buffer (if it has a path).
+    /// Move the cursor to the start of the next (`step == 1`) or previous
+    /// (`step == -1`) git hunk. No-op when there are no hunks or git is off.
+    fn jump_to_relative_hunk(&mut self, step: i32) {
+        let Some(gutter) = self.git_gutter.as_ref() else {
+            return;
+        };
+        let hunks = gutter.hunks();
+        if hunks.is_empty() {
+            self.status_error = Some("No git hunks in this buffer".into());
+            return;
+        }
+        let cur_line = self.editor.active().buffer.cursors.primary().line;
+        let target = if step > 0 {
+            hunks
+                .iter()
+                .find(|h| h.start_line > cur_line)
+                .copied()
+                .unwrap_or(hunks[0])
+        } else {
+            hunks
+                .iter()
+                .rev()
+                .find(|h| h.end_line < cur_line)
+                .copied()
+                .unwrap_or(*hunks.last().unwrap())
+        };
+        self.push_current_to_jump_list();
+        let rope = self.editor.active().buffer.rope().clone();
+        let line = target.start_line.min(rope.len_lines().saturating_sub(1));
+        let cursor = crate::buffer::cursor::Cursor::from_line_col(&rope, line, 0);
+        *self.editor.active_mut().buffer.cursors.primary_mut() = cursor;
+    }
+
+    /// Replace the hunk containing the cursor with its HEAD content.
+    fn revert_hunk_at_cursor(&mut self) {
+        let Some(gutter) = self.git_gutter.as_ref() else {
+            self.status_error = Some("No git gutter available".into());
+            return;
+        };
+        let cur_line = self.editor.active().buffer.cursors.primary().line;
+        let hunk_opt = gutter
+            .hunks()
+            .into_iter()
+            .find(|h| cur_line >= h.start_line && cur_line <= h.end_line);
+        let Some(hunk) = hunk_opt else {
+            self.status_error = Some("Cursor is not inside a hunk".into());
+            return;
+        };
+        let Some(path) = self.editor.active().path.clone() else {
+            self.status_error = Some("Save the file before reverting a hunk".into());
+            return;
+        };
+        let head_content = match crate::git::fetch_head_content(&path) {
+            Some(c) => c,
+            None => {
+                self.status_error = Some("File is not tracked in HEAD".into());
+                return;
+            }
+        };
+        // Recompute the hunk's HEAD-side line span by re-running the same
+        // diff that produced the gutter. We need to find the HEAD lines that
+        // map to this hunk's [start_line, end_line] range in the current
+        // buffer.
+        let current_full = self.editor.active().buffer.to_string();
+        let head_lines: Vec<&str> = head_content.lines().collect();
+        let current_lines: Vec<&str> = current_full.lines().collect();
+        let (head_start, head_end) = crate::git::head_range_for_hunk(
+            &head_lines,
+            &current_lines,
+            hunk.start_line,
+            hunk.end_line,
+        );
+
+        // Replace the buffer slice [hunk.start_line, hunk.end_line] with the
+        // HEAD content slice [head_start, head_end].
+        let replacement = if head_start <= head_end && head_end < head_lines.len() {
+            let mut s = head_lines[head_start..=head_end].join("\n");
+            // Keep the trailing newline so we don't merge the next line into
+            // the hunk's last line.
+            s.push('\n');
+            s
+        } else {
+            // Pure deletion in HEAD — replacement is empty (matches: hunk
+            // exists in current but has no HEAD counterpart).
+            String::new()
+        };
+
+        let buf = &mut self.editor.active_mut().buffer;
+        let start_byte = buf.line_start_byte(hunk.start_line);
+        let end_line = (hunk.end_line + 1).min(buf.len_lines());
+        let end_byte = buf.line_start_byte(end_line);
+        buf.begin_batch();
+        buf.delete_range(start_byte, end_byte);
+        if !replacement.is_empty() {
+            buf.cursors.primary_mut().byte_offset = start_byte;
+            buf.insert_str(&replacement);
+        }
+        buf.commit_batch();
+        self.refresh_git_gutter();
+    }
+
+    /// Toggle the inline diff-peek float for the hunk under the cursor.
+    fn toggle_diff_peek(&mut self) {
+        if self.diff_peek.is_some() {
+            self.diff_peek = None;
+            return;
+        }
+        let Some(gutter) = self.git_gutter.as_ref() else {
+            return;
+        };
+        let cur_line = self.editor.active().buffer.cursors.primary().line;
+        let Some(hunk) = gutter
+            .hunks()
+            .into_iter()
+            .find(|h| cur_line >= h.start_line && cur_line <= h.end_line)
+        else {
+            self.status_error = Some("Cursor is not inside a hunk".into());
+            return;
+        };
+        let Some(path) = self.editor.active().path.clone() else {
+            return;
+        };
+        let Some(head_content) = crate::git::fetch_head_content(&path) else {
+            self.status_error = Some("File is not tracked in HEAD".into());
+            return;
+        };
+        let current_full = self.editor.active().buffer.to_string();
+        let head_lines: Vec<&str> = head_content.lines().collect();
+        let current_lines: Vec<&str> = current_full.lines().collect();
+        let (head_start, head_end) = crate::git::head_range_for_hunk(
+            &head_lines,
+            &current_lines,
+            hunk.start_line,
+            hunk.end_line,
+        );
+        let lines: Vec<String> = if head_start <= head_end && head_end < head_lines.len() {
+            head_lines[head_start..=head_end]
+                .iter()
+                .map(|s| s.to_string())
+                .collect()
+        } else {
+            vec!["(no HEAD content for this hunk)".into()]
+        };
+        self.diff_peek = Some(DiffPeekState {
+            head_lines: lines,
+            anchor_line: cur_line,
+        });
+    }
+
+    /// Build a `Session` snapshot of the current editor state and write it
+    /// to `<workspace>/.txt/session.json`. Called once on clean shutdown
+    /// when `restore_session = true`. Buffers without a saved path are
+    /// skipped — they have nothing to reopen on the next launch.
+    fn save_session(&self) {
+        use crate::session::{Session, TabState};
+        let mut tabs = Vec::new();
+        let mut active_in_session = 0usize;
+        let active_idx = self.editor.active_idx;
+        for (i, tab) in self.editor.tabs.iter().enumerate() {
+            let Some(path) = &tab.path else {
+                continue;
+            };
+            if i <= active_idx {
+                active_in_session = tabs.len();
+            }
+            tabs.push(TabState {
+                path: path.clone(),
+                cursor_byte: tab.buffer.cursors.primary().byte_offset,
+                viewport_top: tab.viewport.scroll_row,
+            });
+        }
+        let session = Session {
+            tabs,
+            active: active_in_session,
+            sidebar_open: self.sidebar.is_some(),
+        };
+        session.save(&self.workspace);
+    }
+
+    /// Open every tab listed in `session` and restore cursor positions /
+    /// viewport tops. Files that no longer exist on disk are skipped.
+    /// Returns `true` when at least one tab was restored.
+    pub fn restore_from_session(&mut self, session: crate::session::Session) -> bool {
+        let mut restored_any = false;
+        for tab in &session.tabs {
+            if !tab.path.exists() {
+                continue;
+            }
+            if self.editor.open_tab(tab.path.clone()).is_ok() {
+                let buf = &mut self.editor.active_mut().buffer;
+                let bound = tab.cursor_byte.min(buf.rope().len_bytes());
+                *buf.cursors.primary_mut() =
+                    crate::buffer::cursor::Cursor::from_byte_offset(buf.rope(), bound);
+                self.editor.active_mut().viewport.scroll_row = tab.viewport_top;
+                restored_any = true;
+            }
+        }
+        if restored_any && session.active < self.editor.tabs.len() {
+            self.editor.active_idx = session.active;
+        }
+        if session.sidebar_open && self.sidebar.is_none() {
+            self.sidebar = Some(SidebarState::new());
+        }
+        restored_any
+    }
+
     fn refresh_git_gutter(&mut self) {
         let path = self.editor.active().path.clone();
         if let Some(path) = path {
@@ -4427,10 +4749,34 @@ impl AppState {
 
     /// Called after a file is opened or saved — updates recent files, git gutter,
     /// installs a file watcher, and notifies the LSP server.
+    /// Attempt to load persistent undo history for the active tab. No-op
+    /// when the feature is disabled, the buffer has no path, or the
+    /// on-disk hash doesn't match the buffer content.
+    pub fn try_load_persistent_undo_for_active(&mut self) {
+        if !self.config.persistent_undo {
+            return;
+        }
+        let path = match self.editor.active().path.clone() {
+            Some(p) => p,
+            None => return,
+        };
+        let content = self.editor.active().buffer.to_string();
+        if let Some(snap) = crate::buffer::persistent_undo::load(&self.workspace, &path, &content) {
+            self.editor.active_mut().buffer.restore_history(snap);
+        }
+    }
+
     fn after_file_open_or_save(&mut self) {
         if let Some(path) = self.editor.active().path.clone() {
             add_to_recent_files(&path, &self.workspace.clone());
             self.file_watcher = FileWatcher::new(&path);
+        }
+        // Persistent undo: a freshly opened buffer has an empty history, so
+        // we use that as the cue that this is an `open` event (not a
+        // `save`). This avoids the load clobbering the in-memory history
+        // that we are about to persist on save.
+        if !self.editor.active().buffer.can_undo() {
+            self.try_load_persistent_undo_for_active();
         }
         self.refresh_git_gutter();
         // Notify LSP server that a file was opened.
@@ -5055,6 +5401,124 @@ impl AppState {
         self.references_list = Some(ReferencesListState { items, selected: 0 });
     }
 
+    /// Walk to the next/previous quickfix entry and jump to it. Does not
+    /// open the overlay — just navigates the list when it is already
+    /// populated. Builds a fresh list from current diagnostics if the
+    /// overlay state is empty.
+    fn quickfix_step(&mut self, step: i32) {
+        if self.quickfix.is_none() {
+            let entries = crate::quickfix::collect_lsp_diagnostics(&self.editor);
+            if entries.is_empty() {
+                self.status_error = Some("No diagnostics".into());
+                return;
+            }
+            self.quickfix = Some(crate::quickfix::QuickfixState::new(entries));
+        }
+        let entry_opt = {
+            let qf = self.quickfix.as_mut().unwrap();
+            let n = qf.entries.len();
+            if n == 0 {
+                None
+            } else {
+                let i = if step > 0 {
+                    (qf.selected + 1) % n
+                } else {
+                    (qf.selected + n - 1) % n
+                };
+                qf.selected = i;
+                Some(qf.entries[i].clone())
+            }
+        };
+        if let Some(e) = entry_opt {
+            self.jump_to_location(&(e.path, e.line, e.col));
+        }
+    }
+
+    /// Handle input while the quickfix list overlay is open.
+    fn handle_quickfix_input(&mut self, action: &EditorAction) -> bool {
+        let n = self.quickfix.as_ref().map(|q| q.entries.len()).unwrap_or(0);
+        match action {
+            EditorAction::MoveCursor(Direction::Up) => {
+                if let Some(q) = &mut self.quickfix {
+                    q.selected = q.selected.saturating_sub(1);
+                }
+                true
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                if let Some(q) = &mut self.quickfix {
+                    q.selected = (q.selected + 1).min(n.saturating_sub(1));
+                }
+                true
+            }
+            EditorAction::InsertNewline => {
+                let target = self.quickfix.as_ref().and_then(|q| {
+                    q.entries
+                        .get(q.selected)
+                        .map(|e| (e.path.clone(), e.line, e.col))
+                });
+                self.quickfix = None;
+                if let Some(loc) = target {
+                    self.jump_to_location(&loc);
+                }
+                true
+            }
+            EditorAction::CloseSearch => {
+                self.quickfix = None;
+                true
+            }
+            EditorAction::Quit | EditorAction::ForceQuit => {
+                self.quickfix = None;
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// Handle input while the clipboard-ring picker is open. Returns `true`
+    /// when the action was consumed, `false` to allow global routing.
+    fn handle_clipboard_ring(&mut self, action: &EditorAction) -> bool {
+        let num_items = self
+            .clipboard_ring
+            .as_ref()
+            .map(|r| r.entries.len())
+            .unwrap_or(0);
+        match action {
+            EditorAction::MoveCursor(Direction::Up) => {
+                if let Some(r) = &mut self.clipboard_ring {
+                    r.selected = r.selected.saturating_sub(1);
+                }
+                true
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                if let Some(r) = &mut self.clipboard_ring {
+                    r.selected = (r.selected + 1).min(num_items.saturating_sub(1));
+                }
+                true
+            }
+            EditorAction::InsertNewline => {
+                if let Some(r) = &self.clipboard_ring {
+                    let idx = r.selected;
+                    if let Some(text) = self.clipboard.pick(idx) {
+                        // Reuse the buffer's insert_str — it already handles
+                        // replacing the active selection, exactly like Paste.
+                        self.editor.active_mut().buffer.insert_str(&text);
+                    }
+                }
+                self.clipboard_ring = None;
+                true
+            }
+            EditorAction::CloseSearch => {
+                self.clipboard_ring = None;
+                true
+            }
+            EditorAction::Quit | EditorAction::ForceQuit => {
+                self.clipboard_ring = None;
+                false
+            }
+            _ => false,
+        }
+    }
+
     fn handle_references_input(&mut self, action: &EditorAction) -> bool {
         let num_items = self
             .references_list
@@ -5432,6 +5896,112 @@ impl AppState {
 
     // ── Coordinate helpers ───────────────────────────────────────────────────
 
+    /// Try to handle `c` as a bracket-pair insertion or skip-on-close.
+    /// Returns `true` when this method consumed the keystroke; the caller
+    /// must skip the normal insert path. Caller already ensured the buffer
+    /// is single-cursor and `config.auto_pair` is on.
+    fn try_auto_pair(&mut self, c: char) -> bool {
+        // Pair table — opener → closer. Symmetric pairs (`"` etc.) close
+        // with the same character.
+        let pair_for = |ch: char| -> Option<char> {
+            match ch {
+                '(' => Some(')'),
+                '[' => Some(']'),
+                '{' => Some('}'),
+                '"' => Some('"'),
+                '\'' => Some('\''),
+                '`' => Some('`'),
+                _ => None,
+            }
+        };
+        let close_for = |ch: char| -> bool { matches!(ch, ')' | ']' | '}' | '"' | '\'' | '`') };
+
+        let buf = &mut self.editor.active_mut().buffer;
+        let cursor = buf.cursors.primary();
+        if cursor.has_selection() {
+            return false;
+        }
+        let at = cursor.byte_offset;
+        let rope = buf.rope();
+        let next_char = if at < rope.len_bytes() {
+            let ch_idx = rope.byte_to_char(at);
+            rope.chars_at(ch_idx).next()
+        } else {
+            None
+        };
+        let prev_char = if at > 0 {
+            let ch_idx = rope.byte_to_char(at);
+            // Walk one char back.
+            let mut iter = rope.chars_at(ch_idx);
+            iter.prev()
+        } else {
+            None
+        };
+
+        // Skip-on-close: typing `)` over an existing `)` just advances.
+        if close_for(c) && next_char == Some(c) {
+            let new_off = at + c.len_utf8();
+            buf.move_cursor_to(new_off, false);
+            return true;
+        }
+
+        // Auto-open: insert `(` `)` and step back. Symmetric pairs need extra
+        // care to avoid pairing a closing quote with itself when the cursor
+        // is right after a word character (e.g. `let's` → don't pair the
+        // apostrophe).
+        if let Some(close) = pair_for(c) {
+            let is_symmetric = c == close;
+            if is_symmetric {
+                // Don't auto-pair quotes when adjacent to a word char on
+                // either side (prevents the `let's` case and contractions).
+                let is_word = |ch: Option<char>| match ch {
+                    Some(c) => c.is_alphanumeric() || c == '_',
+                    None => false,
+                };
+                if is_word(prev_char) || is_word(next_char) {
+                    return false;
+                }
+            }
+            let mut pair = String::with_capacity(c.len_utf8() + close.len_utf8());
+            pair.push(c);
+            pair.push(close);
+            buf.insert_str(&pair);
+            // Step the cursor back one char so the user types inside the pair.
+            let after = buf.cursors.primary().byte_offset;
+            let target = after.saturating_sub(close.len_utf8());
+            buf.move_cursor_to(target, false);
+            return true;
+        }
+        false
+    }
+
+    /// Wrap the active selection (or word at the cursor) in the delimiter
+    /// pair chosen by `ch`. Symmetric punctuation (e.g. `"`, `'`) uses the
+    /// same character on both sides.
+    fn apply_surround(&mut self, ch: char) {
+        let pair: Option<(String, String)> = match ch {
+            '(' | ')' => Some(("(".into(), ")".into())),
+            '[' | ']' => Some(("[".into(), "]".into())),
+            '{' | '}' => Some(("{".into(), "}".into())),
+            '<' | '>' => Some(("<".into(), ">".into())),
+            '"' | '\'' | '`' => Some((ch.to_string(), ch.to_string())),
+            c if c.is_ascii_punctuation() => Some((c.to_string(), c.to_string())),
+            _ => None,
+        };
+        let Some((open, close)) = pair else {
+            self.status_error = Some(format!("No surround pair for '{ch}'"));
+            return;
+        };
+        let ok = self
+            .editor
+            .active_mut()
+            .buffer
+            .surround_selection(&open, &close);
+        if !ok {
+            self.status_error = Some("No selection or word to surround".into());
+        }
+    }
+
     fn selected_text(&self) -> Option<String> {
         let cursor = self.editor.active().buffer.cursors.primary();
         if !cursor.has_selection() {
@@ -5616,12 +6186,30 @@ impl App {
         editor: Editor,
         open_sidebar: bool,
         workspace: PathBuf,
+        pending_session: Option<crate::session::Session>,
     ) -> Result<()> {
         let mut state = AppState::new(editor, workspace);
         if open_sidebar {
             state.sidebar = Some(SidebarState::new());
             state.sidebar_focused = true;
         }
+        // Honour `restore_session = true`: re-open the previously saved
+        // tabs before painting the first frame. Skips silently when no
+        // session is pending.
+        if let Some(session) = pending_session {
+            state.restore_from_session(session);
+            state.refresh_git_gutter();
+        }
+        // Load persistent undo for every tab that was opened during
+        // startup (either via the positional CLI arg or session restore).
+        // Walk by index so we can borrow `state` mutably across iterations;
+        // restore the original active index when done.
+        let saved_active = state.editor.active_idx;
+        for i in 0..state.editor.tabs.len() {
+            state.editor.active_idx = i;
+            state.try_load_persistent_undo_for_active();
+        }
+        state.editor.active_idx = saved_active.min(state.editor.tabs.len().saturating_sub(1));
 
         // Only re-anchor the viewport on the cursor when something actually
         // moved the cursor (or the layout changed); pure scroll actions leave
@@ -5704,6 +6292,12 @@ impl App {
             if state.should_quit {
                 break;
             }
+        }
+
+        // Persist the session for the next launch when the user has opted
+        // in. Silent on I/O failures.
+        if state.config.restore_session {
+            state.save_session();
         }
 
         Ok(())

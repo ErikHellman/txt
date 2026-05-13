@@ -11,7 +11,9 @@ mod input;
 mod lsp;
 mod macros;
 mod marks;
+mod quickfix;
 mod search;
+mod session;
 mod snippet;
 mod syntax;
 mod theme;
@@ -60,6 +62,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    let positional_was_file = matches!(&cli.path, Some(p) if !p.is_dir());
     let (editor, open_sidebar) = match cli.path {
         Some(p) if p.is_dir() => {
             std::env::set_current_dir(&p)?;
@@ -70,6 +73,20 @@ fn main() -> Result<()> {
     };
     let workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
+    // Attempt session restore only when the user did not name a specific
+    // file on the command line. Loading a session over the top of an
+    // explicit `txt foo.rs` would be surprising.
+    let pending_session: Option<crate::session::Session> = if positional_was_file {
+        None
+    } else {
+        let cfg = config::Config::load();
+        if cfg.restore_session {
+            session::Session::load(&workspace)
+        } else {
+            None
+        }
+    };
+
     // Install a panic hook that restores the terminal before printing the panic.
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -78,7 +95,7 @@ fn main() -> Result<()> {
     }));
 
     let terminal = init_terminal()?;
-    let result = App::new().run(terminal, editor, open_sidebar, workspace);
+    let result = App::new().run(terminal, editor, open_sidebar, workspace, pending_session);
     restore_terminal()?;
 
     if let Err(e) = result {

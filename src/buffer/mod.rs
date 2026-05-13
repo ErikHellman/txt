@@ -2,6 +2,7 @@ pub mod cursor;
 pub mod edit;
 pub mod folds;
 pub mod history;
+pub mod persistent_undo;
 
 use ropey::Rope;
 
@@ -102,6 +103,31 @@ impl Buffer {
         s.trim_end_matches(['\r', '\n']).to_string()
     }
 
+    /// Whether the buffer contains both tab-indented and space-indented lines.
+    /// Only leading whitespace is examined; lines whose first non-whitespace
+    /// character is at column 0, or which are entirely whitespace, are ignored.
+    pub fn has_mixed_indent(&self) -> bool {
+        let mut saw_tabs = false;
+        let mut saw_spaces = false;
+        let total = self.rope.len_lines();
+        // Scan up to 5000 lines — enough for every realistic source file but
+        // bounded so a 1 GiB buffer doesn't stall the status bar.
+        let cap = total.min(5000);
+        for i in 0..cap {
+            let line = self.rope.line(i);
+            let first = line.chars().next();
+            match first {
+                Some('\t') => saw_tabs = true,
+                Some(' ') => saw_spaces = true,
+                _ => {}
+            }
+            if saw_tabs && saw_spaces {
+                return true;
+            }
+        }
+        false
+    }
+
     // ------------------------------------------------------------------ //
     // Undo / redo
     // ------------------------------------------------------------------ //
@@ -114,6 +140,19 @@ impl Buffer {
     #[allow(dead_code)]
     pub fn can_redo(&self) -> bool {
         self.history.can_redo()
+    }
+
+    /// Take a serializable snapshot of the undo/redo stacks. Used by
+    /// persistent undo to write history to disk on save.
+    pub fn history_snapshot(&self) -> history::UndoStackSnapshot {
+        self.history.snapshot()
+    }
+
+    /// Restore the undo/redo stacks from `snap` (overwriting whatever is
+    /// currently held). Called once when the buffer is opened and a
+    /// persistent undo record was loaded.
+    pub fn restore_history(&mut self, snap: history::UndoStackSnapshot) {
+        self.history.restore(snap);
     }
 
     /// Number of undo entries currently on the stack. Changes whenever the buffer
@@ -508,6 +547,79 @@ impl Buffer {
         // insert_str handles cursor advance + history recording.
         self.insert_str(&s);
         self.history.commit_batch();
+    }
+
+    /// Wrap the current selection with `open` and `close`. When no selection
+    /// is active, the word boundaries around the cursor are used. Both
+    /// inserts go in a single undo batch.
+    ///
+    /// Returns `true` when an edit was performed; `false` when there was no
+    /// selectable target (empty buffer / cursor on a non-word character with
+    /// no selection).
+    pub fn surround_selection(&mut self, open: &str, close: &str) -> bool {
+        let (start, end) = {
+            let cursor = self.cursors.primary();
+            if cursor.has_selection() {
+                let range = cursor.selection_bytes();
+                (range.start, range.end)
+            } else {
+                let at = cursor.byte_offset;
+                let s = rope_edit::prev_word_boundary(&self.rope, at);
+                // Scan forward from `at` while we keep seeing word characters;
+                // unlike `next_word_boundary`, this does not consume trailing
+                // whitespace so "(hello)" is wrapped, not "(hello )".
+                let char_at = self.rope.byte_to_char(at);
+                let mut e = at;
+                for ch in self.rope.chars_at(char_at) {
+                    let is_word = ch.is_alphanumeric() || ch == '_';
+                    if !is_word {
+                        break;
+                    }
+                    e += ch.len_utf8();
+                }
+                if s == e {
+                    return false;
+                }
+                (s, e)
+            }
+        };
+        let open_bytes = open.len();
+        let close_bytes = close.len();
+
+        self.history.begin_batch();
+        // Insert close first so the open-insert offset doesn't shift.
+        rope_edit::insert(&mut self.rope, end, close);
+        record(
+            &mut self.history,
+            &mut self.pending_edits,
+            EditCommand::Insert {
+                at: end,
+                text: close.to_string(),
+            },
+        );
+        rope_edit::insert(&mut self.rope, start, open);
+        record(
+            &mut self.history,
+            &mut self.pending_edits,
+            EditCommand::Insert {
+                at: start,
+                text: open.to_string(),
+            },
+        );
+        self.history.commit_batch();
+
+        // Update primary cursor + selection to wrap the new inner range
+        // (after the inserted open delimiter, before the inserted close).
+        let inner_start = start + open_bytes;
+        let inner_end = end + open_bytes; // shifted only by the open insert
+        let _ = close_bytes;
+        *self.cursors.primary_mut() = Cursor::from_byte_offset(&self.rope, inner_end);
+        self.cursors.primary_mut().selection = Some(crate::buffer::cursor::Selection::new(
+            inner_start,
+            inner_end,
+        ));
+        self.modified = true;
+        true
     }
 
     /// Duplicate the current line (or selection).
@@ -1819,7 +1931,7 @@ impl Buffer {
     // Helpers
     // ------------------------------------------------------------------ //
 
-    fn line_start_byte(&self, line: usize) -> usize {
+    pub fn line_start_byte(&self, line: usize) -> usize {
         self.rope.char_to_byte(self.rope.line_to_char(line))
     }
 
@@ -2057,6 +2169,70 @@ mod tests {
         buf.insert_str("hello");
         assert_eq!(buf.to_string(), "hello");
         assert!(buf.modified);
+    }
+
+    #[test]
+    fn has_mixed_indent_detects_mixed() {
+        let mut buf = Buffer::new();
+        buf.insert_str("\tfoo\n  bar\n");
+        assert!(buf.has_mixed_indent());
+    }
+
+    #[test]
+    fn has_mixed_indent_pure_tabs() {
+        let mut buf = Buffer::new();
+        buf.insert_str("\tfoo\n\tbar\n");
+        assert!(!buf.has_mixed_indent());
+    }
+
+    #[test]
+    fn has_mixed_indent_pure_spaces() {
+        let mut buf = Buffer::new();
+        buf.insert_str("  foo\n    bar\n");
+        assert!(!buf.has_mixed_indent());
+    }
+
+    #[test]
+    fn has_mixed_indent_ignores_unindented_lines() {
+        let mut buf = Buffer::new();
+        // Top-level lines (column 0 content) don't count either way.
+        buf.insert_str("foo\nbar\n");
+        assert!(!buf.has_mixed_indent());
+    }
+
+    #[test]
+    fn surround_selection_wraps_quotes() {
+        let mut buf = Buffer::new();
+        buf.insert_str("foo bar");
+        // Select "bar" (bytes 4..7).
+        let primary = buf.cursors.primary_mut();
+        primary.byte_offset = 7;
+        primary.selection = Some(crate::buffer::cursor::Selection::new(4, 7));
+        assert!(buf.surround_selection("\"", "\""));
+        assert_eq!(buf.to_string(), "foo \"bar\"");
+    }
+
+    #[test]
+    fn surround_selection_wraps_brackets_around_word_under_cursor() {
+        let mut buf = Buffer::new();
+        buf.insert_str("hello world");
+        // Place cursor inside "hello" (byte 2). No selection.
+        buf.cursors.primary_mut().byte_offset = 2;
+        assert!(buf.surround_selection("(", ")"));
+        assert_eq!(buf.to_string(), "(hello) world");
+    }
+
+    #[test]
+    fn surround_selection_undo_restores_original() {
+        let mut buf = Buffer::new();
+        buf.insert_str("foo");
+        buf.cursors.primary_mut().byte_offset = 0;
+        buf.cursors.primary_mut().selection = Some(crate::buffer::cursor::Selection::new(0, 3));
+        assert!(buf.surround_selection("[", "]"));
+        assert_eq!(buf.to_string(), "[foo]");
+        // Surround inserts go in a single undo batch — one undo reverts both.
+        buf.undo();
+        assert_eq!(buf.to_string(), "foo");
     }
 
     #[test]

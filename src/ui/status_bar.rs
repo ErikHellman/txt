@@ -119,6 +119,26 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
         .unwrap_or_default();
 
     let indent_str = format!(" {}", state.indent_label());
+    let mixed_indent_str = if state.config.warn_mixed_indent && handle.buffer.has_mixed_indent() {
+        " mixed-indent".to_string()
+    } else {
+        String::new()
+    };
+    let hunk_str = state
+        .git_gutter
+        .as_ref()
+        .map(|g| g.hunks())
+        .and_then(|hunks| {
+            if hunks.is_empty() {
+                return None;
+            }
+            let cur_line = handle.buffer.cursors.primary().line;
+            hunks
+                .iter()
+                .position(|h| cur_line >= h.start_line && cur_line <= h.end_line)
+                .map(|i| format!(" hunk {}/{}", i + 1, hunks.len()))
+        })
+        .unwrap_or_default();
     let rec_str = state
         .macros
         .recording_slot()
@@ -127,8 +147,9 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
 
     // Right side: branch + word-wrap flag + LSP/TS mode + diagnostics + language + indent + REC + position + memory + encoding
     let right = format!(
-        "{}{}{}{}{}{}{}  {}{}{}",
+        "{}{}{}{}{}{}{}{}{}  {}{}{}",
         branch_str,
+        hunk_str,
         wrap_flag,
         lsp_flag,
         diag_str,
@@ -138,6 +159,7 @@ pub fn render(state: &AppState, theme: &ThemeColors, area: Rect, buf: &mut TermB
             String::new()
         },
         indent_str,
+        mixed_indent_str,
         rec_str,
         pos,
         mem_str,
@@ -250,6 +272,7 @@ fn modal_prompt(mode: &InputMode) -> Option<String> {
         InputMode::JumpToMarkChar => Some(" Jump to mark: ".to_string()),
         InputMode::RecordMacroChar => Some(" Record macro into slot: ".to_string()),
         InputMode::ReplayMacroChar => Some(" Replay macro from slot: ".to_string()),
+        InputMode::SurroundChar => Some(" Surround with: ".to_string()),
     }
 }
 

@@ -109,6 +109,26 @@ pub struct Config {
     /// Exclude every dot-prefixed directory from go-to-file and project search.
     #[serde(default)]
     pub hide_dot_folders: bool,
+    /// Highlight trailing whitespace at the end of edited lines.
+    #[serde(default = "default_highlight_trailing_whitespace")]
+    pub highlight_trailing_whitespace: bool,
+    /// Show a "mixed indent" status-bar segment when a buffer contains both
+    /// tab-leading and space-leading lines.
+    #[serde(default = "default_warn_mixed_indent")]
+    pub warn_mixed_indent: bool,
+    /// Automatically insert a matching closing delimiter when typing `(`,
+    /// `[`, `{`, `"`, `'`, or `` ` ``. Disable with `auto_pair = false`.
+    #[serde(default = "default_auto_pair")]
+    pub auto_pair: bool,
+    /// Restore the previous session (open tabs, cursor positions, sidebar
+    /// state) from `<workspace>/.txt/session.json` when `txt` is invoked
+    /// without a positional file argument.
+    #[serde(default)]
+    pub restore_session: bool,
+    /// Persist per-file undo history to `<workspace>/.txt/undo/` so that
+    /// `Ctrl+Z` keeps working across editor restarts.
+    #[serde(default)]
+    pub persistent_undo: bool,
 }
 
 fn default_tab_size() -> usize {
@@ -124,6 +144,18 @@ fn default_sticky_header() -> bool {
 }
 
 fn default_hide_git_folder() -> bool {
+    true
+}
+
+fn default_highlight_trailing_whitespace() -> bool {
+    true
+}
+
+fn default_warn_mixed_indent() -> bool {
+    true
+}
+
+fn default_auto_pair() -> bool {
     true
 }
 
@@ -145,6 +177,11 @@ impl Default for Config {
             sticky_header: default_sticky_header(),
             hide_git_folder: true,
             hide_dot_folders: false,
+            highlight_trailing_whitespace: default_highlight_trailing_whitespace(),
+            warn_mixed_indent: default_warn_mixed_indent(),
+            auto_pair: default_auto_pair(),
+            restore_session: false,
+            persistent_undo: false,
         }
     }
 }
@@ -341,6 +378,11 @@ mod tests {
             sticky_header: false,
             hide_git_folder: true,
             hide_dot_folders: true,
+            highlight_trailing_whitespace: false,
+            warn_mixed_indent: false,
+            auto_pair: false,
+            restore_session: true,
+            persistent_undo: true,
         };
         let serialized = toml::to_string(&original).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();
@@ -511,6 +553,30 @@ mod tests {
         assert_eq!(super::parse_minor_version(""), None);
         assert_eq!(super::parse_minor_version("foo"), None);
         assert_eq!(super::parse_minor_version("1"), None);
+    }
+
+    #[test]
+    fn tier3_defaults_match_proposal() {
+        let cfg = Config::default();
+        // 3.6 — passive features default on
+        assert!(cfg.highlight_trailing_whitespace);
+        assert!(cfg.warn_mixed_indent);
+        // 3.4 — auto-pair default on (confirmed by user)
+        assert!(cfg.auto_pair);
+        // 3.1/3.2 — disk-touching features default off ("starts instantly")
+        assert!(!cfg.restore_session);
+        assert!(!cfg.persistent_undo);
+    }
+
+    #[test]
+    fn tier3_keys_round_trip() {
+        let text = "highlight_trailing_whitespace = false\nwarn_mixed_indent = false\nauto_pair = false\nrestore_session = true\npersistent_undo = true\n";
+        let cfg: Config = toml::from_str(text).unwrap();
+        assert!(!cfg.highlight_trailing_whitespace);
+        assert!(!cfg.warn_mixed_indent);
+        assert!(!cfg.auto_pair);
+        assert!(cfg.restore_session);
+        assert!(cfg.persistent_undo);
     }
 
     #[test]

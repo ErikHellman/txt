@@ -81,3 +81,22 @@ fn seed_config(dir: &std::path::Path) {
     let body = format!("last_seen_version = \"{version}\"\n");
     std::fs::write(dir.join("config.toml"), body).expect("seed config.toml");
 }
+
+impl Fixture {
+    /// Append `extra_toml` to the seeded `config.toml`. The first line of
+    /// the seeded file (`last_seen_version = ...`) is preserved, so the
+    /// welcome overlay still stays dismissed. Subsequent calls append more
+    /// keys without re-clobbering.
+    pub fn append_config(&self, extra_toml: &str) {
+        let path = self.config_path().join("config.toml");
+        let mut current = std::fs::read_to_string(&path).unwrap_or_default();
+        if !current.ends_with('\n') {
+            current.push('\n');
+        }
+        current.push_str(extra_toml);
+        if !current.ends_with('\n') {
+            current.push('\n');
+        }
+        std::fs::write(&path, current).expect("rewrite config.toml");
+    }
+}

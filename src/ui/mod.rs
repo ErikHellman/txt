@@ -1,6 +1,8 @@
 pub mod changelog_overlay;
+pub mod clipboard_ring;
 pub mod command_palette;
 pub mod completion_popup;
+pub mod diff_peek;
 pub mod editor_view;
 pub mod fuzzy_picker;
 pub mod git_dialog;
@@ -10,6 +12,7 @@ pub mod lsp_approval;
 pub mod lsp_picker;
 pub mod overlay_chrome;
 pub mod project_search;
+pub mod quickfix_list;
 pub mod references_list;
 pub mod search_bar;
 pub mod settings_overlay;
@@ -224,6 +227,7 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
         state.config.tab_size,
         state.config.indent_guides,
         &state.config.rulers,
+        state.config.highlight_trailing_whitespace,
         &theme,
         editor_area,
         buf,
@@ -356,5 +360,20 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
     // ── References list overlay ──────────────────────────────────────────────
     if let Some(refs) = &state.references_list {
         references_list::render(refs, area, buf);
+    }
+
+    // ── Clipboard-ring overlay ───────────────────────────────────────────────
+    if let Some(ring) = &state.clipboard_ring {
+        clipboard_ring::render(ring, area, buf);
+    }
+
+    // ── Diff-peek float ──────────────────────────────────────────────────────
+    if let Some(peek) = &state.diff_peek {
+        diff_peek::render(peek, area, buf);
+    }
+
+    // ── Quickfix list overlay ────────────────────────────────────────────────
+    if let Some(qf) = &state.quickfix {
+        quickfix_list::render(qf, area, buf);
     }
 }

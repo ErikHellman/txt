@@ -24,6 +24,35 @@ impl GitGutter {
     pub fn get(&self, line: usize) -> Option<GutterMark> {
         self.marks.get(&line).copied()
     }
+
+    /// Group the per-line marks into contiguous hunks of non-`Unchanged`
+    /// lines, sorted ascending by start line. A `Deleted` mark joins the
+    /// hunk of the line it sits on (or starts a new one if isolated).
+    pub fn hunks(&self) -> Vec<Hunk> {
+        let mut lines: Vec<usize> = self.marks.keys().copied().collect();
+        lines.sort_unstable();
+        let mut out: Vec<Hunk> = Vec::new();
+        for line in lines {
+            match out.last_mut() {
+                Some(last) if line == last.end_line + 1 || line == last.end_line => {
+                    last.end_line = line;
+                }
+                _ => out.push(Hunk {
+                    start_line: line,
+                    end_line: line,
+                }),
+            }
+        }
+        out
+    }
+}
+
+/// A contiguous run of changed lines (`Added` / `Modified` / `Deleted`).
+/// Both `start_line` and `end_line` are 0-based and inclusive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Hunk {
+    pub start_line: usize,
+    pub end_line: usize,
 }
 
 // ── Pure diff ────────────────────────────────────────────────────────────────
@@ -121,6 +150,91 @@ fn diff_ops<'a>(original: &[&'a str], current: &[&'a str], dp: &[Vec<usize>]) ->
     }
     ops.reverse();
     ops
+}
+
+/// Given the HEAD and current line vectors, plus a hunk's [start, end] range
+/// in the current buffer, return the corresponding inclusive [head_start,
+/// head_end] line range in HEAD. When the hunk is purely additive in the
+/// current buffer (no HEAD counterpart), returns `(head_pos, head_pos - 1)`
+/// — a malformed range the caller can detect with `head_start > head_end`.
+pub fn head_range_for_hunk(
+    head_lines: &[&str],
+    current_lines: &[&str],
+    hunk_start: usize,
+    hunk_end: usize,
+) -> (usize, usize) {
+    let lcs = lcs_length(head_lines, current_lines);
+    let ops = diff_ops(head_lines, current_lines, &lcs);
+
+    let mut head_i = 0usize;
+    let mut cur_i = 0usize;
+    let mut head_start: Option<usize> = None;
+    let mut head_end: usize = 0;
+    let mut found_any = false;
+
+    for op in &ops {
+        let in_hunk = cur_i >= hunk_start && cur_i <= hunk_end;
+        match op {
+            DiffOp::Equal => {
+                head_i += 1;
+                cur_i += 1;
+            }
+            DiffOp::Insert => {
+                // line only exists in current; no head contribution
+                cur_i += 1;
+            }
+            DiffOp::Delete => {
+                if in_hunk {
+                    if head_start.is_none() {
+                        head_start = Some(head_i);
+                    }
+                    head_end = head_i;
+                    found_any = true;
+                }
+                head_i += 1;
+            }
+        }
+    }
+    // Also catch the case where the hunk is Modified — a modified line is
+    // recorded as Insert+Delete in `ops`; if the insert came before the
+    // delete we may have advanced past the hunk by the time we see the
+    // delete. Walk again recording deletes whose preceding head_i sits at
+    // the same effective position as the hunk's first current line.
+    if !found_any {
+        // Try a coarse fallback: map each current line to its head index via
+        // the LCS alignment, returning the contiguous head range covered by
+        // the hunk's body.
+        let mut head_i = 0usize;
+        let mut cur_i = 0usize;
+        let mut span: Option<(usize, usize)> = None;
+        for op in &ops {
+            let in_hunk = cur_i >= hunk_start && cur_i <= hunk_end;
+            match op {
+                DiffOp::Equal => {
+                    head_i += 1;
+                    cur_i += 1;
+                }
+                DiffOp::Insert => {
+                    if in_hunk {
+                        span = Some(match span {
+                            Some((s, _)) => (s, head_i.saturating_sub(1)),
+                            None => (head_i, head_i.saturating_sub(1)),
+                        });
+                    }
+                    cur_i += 1;
+                }
+                DiffOp::Delete => {
+                    head_i += 1;
+                }
+            }
+        }
+        if let Some((s, e)) = span {
+            return (s, e);
+        }
+        return (head_i, head_i.saturating_sub(1));
+    }
+
+    (head_start.unwrap_or(0), head_end)
 }
 
 // ── Git I/O ──────────────────────────────────────────────────────────────────
@@ -264,5 +378,34 @@ mod tests {
         let m = GutterMark::Added;
         let m2 = m;
         assert_eq!(m, m2);
+    }
+
+    #[test]
+    fn hunks_groups_adjacent_marks() {
+        let mut marks = HashMap::new();
+        marks.insert(2, GutterMark::Modified);
+        marks.insert(3, GutterMark::Added);
+        marks.insert(7, GutterMark::Modified);
+        let gutter = GitGutter { marks };
+        let hunks = gutter.hunks();
+        assert_eq!(
+            hunks,
+            vec![
+                Hunk {
+                    start_line: 2,
+                    end_line: 3
+                },
+                Hunk {
+                    start_line: 7,
+                    end_line: 7
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn hunks_for_empty_gutter() {
+        let gutter = GitGutter::default();
+        assert!(gutter.hunks().is_empty());
     }
 }

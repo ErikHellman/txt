@@ -190,6 +190,10 @@ const TEMPLATE: &[HelpEntry] = &[
         actions: &["toggle_line_comment"],
         desc: "Toggle line comment",
     },
+    HelpEntry::Binding {
+        actions: &["surround"],
+        desc: "Surround selection with delimiter (next char picks pair)",
+    },
     HelpEntry::Static {
         key: "Tab / Shift+Tab",
         desc: "Indent / dedent selection",
@@ -215,6 +219,10 @@ const TEMPLATE: &[HelpEntry] = &[
     HelpEntry::Binding {
         actions: &["copy_file_reference"],
         desc: "Copy file reference",
+    },
+    HelpEntry::Binding {
+        actions: &["open_clipboard_ring"],
+        desc: "Clipboard ring (recent yanks)",
     },
     // ── File & Tabs ──────────────────────────────────────────────────
     HelpEntry::Section("File & Tabs"),
@@ -380,6 +388,14 @@ const TEMPLATE: &[HelpEntry] = &[
         actions: &["code_action"],
         desc: "Code action / quick fix",
     },
+    HelpEntry::Binding {
+        actions: &["open_quickfix"],
+        desc: "Quickfix list (workspace LSP diagnostics)",
+    },
+    HelpEntry::Binding {
+        actions: &["quickfix_next", "quickfix_prev"],
+        desc: "Next / Prev quickfix entry",
+    },
     // ── Sidebar ──────────────────────────────────────────────────────
     HelpEntry::Section("Sidebar"),
     HelpEntry::Static {
@@ -433,6 +449,18 @@ const TEMPLATE: &[HelpEntry] = &[
     HelpEntry::Binding {
         actions: &["open_git_dialog"],
         desc: "Open git operations dialog",
+    },
+    HelpEntry::Binding {
+        actions: &["next_hunk", "prev_hunk"],
+        desc: "Next / Prev git hunk",
+    },
+    HelpEntry::Binding {
+        actions: &["revert_hunk"],
+        desc: "Revert hunk under cursor to HEAD",
+    },
+    HelpEntry::Binding {
+        actions: &["peek_head"],
+        desc: "Peek HEAD content for hunk under cursor",
     },
     HelpEntry::Static {
         key: "y / n",
@@ -494,6 +522,25 @@ fn format_key_display(s: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("+")
+}
+
+/// Truncate `s` to at most `max_width` terminal columns, respecting grapheme
+/// boundaries so the result is always a valid `&str` slice. Cells whose display
+/// width would push the running total past `max_width` are dropped.
+fn truncate_to_width(s: &str, max_width: usize) -> &str {
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
+    let mut width = 0usize;
+    let mut end = 0usize;
+    for (idx, g) in s.grapheme_indices(true) {
+        let gw = UnicodeWidthStr::width(g);
+        if width + gw > max_width {
+            return &s[..end];
+        }
+        width += gw;
+        end = idx + g.len();
+    }
+    s
 }
 
 /// Join key strings with ` / `, collapsing duplicates.
@@ -608,14 +655,14 @@ pub fn render(area: Rect, buf: &mut TermBuffer, scroll: usize, bindings: &KeyBin
         } else {
             // Normal entry: key (fixed width) + space + description.
             let key_str = format!("{:<width$}", key, width = KEY_W);
-            let key_display = &key_str[..key_str.len().min(avail_w)];
+            let key_display = truncate_to_width(&key_str, avail_w);
             buf.set_string(content_x, cy, key_display, key_style);
 
             let desc_x = content_x + KEY_W.min(avail_w) as u16 + 1;
             let desc_avail = (overlay_area.x + overlay_area.width.saturating_sub(1))
                 .saturating_sub(desc_x) as usize;
             if desc_avail > 0 {
-                let desc_display = &desc[..desc.len().min(desc_avail)];
+                let desc_display = truncate_to_width(desc, desc_avail);
                 buf.set_string(desc_x, cy, desc_display, desc_style);
             }
         }
@@ -730,6 +777,30 @@ mod tests {
         assert_eq!(format_key_display("ctrl+shift+s"), "Ctrl+Shift+S");
         assert_eq!(format_key_display("f1"), "F1");
         assert_eq!(format_key_display("alt+z"), "Alt+Z");
+    }
+
+    #[test]
+    fn truncate_to_width_handles_multibyte() {
+        // En-dash is 3 bytes, 1 column. Truncating at a column count that
+        // would land mid-byte must not panic and must return a valid slice.
+        let s = "Set named mark (Ctrl+M then a–z)";
+        for w in 0..=s.chars().count() {
+            let out = truncate_to_width(s, w);
+            assert!(s.starts_with(out));
+        }
+        assert_eq!(truncate_to_width(s, 30), "Set named mark (Ctrl+M then a–");
+        assert_eq!(truncate_to_width(s, 29), "Set named mark (Ctrl+M then a");
+    }
+
+    #[test]
+    fn render_does_not_panic_at_narrow_widths() {
+        // Regression for a panic where the description column was truncated
+        // by byte index, splitting the en-dash in "Ctrl+M then a–z".
+        let bindings = default_bindings();
+        for w in 20..=80 {
+            let (mut buf, area) = make_buf(w, 40);
+            render(area, &mut buf, 0, &bindings);
+        }
     }
 
     #[test]

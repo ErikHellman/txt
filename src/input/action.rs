@@ -234,6 +234,26 @@ pub enum EditorAction {
     StopRecordMacro,
     /// Begin a replay prompt; the next typed char (a–z) selects the slot.
     BeginReplayMacro,
+    /// Begin a surround prompt; the next typed char picks the delimiter pair
+    /// and wraps the current selection (or word under cursor when no
+    /// selection is active). Bound to Alt+' by default.
+    BeginSurround,
+    /// Jump the cursor to the next git diff hunk (Alt+]).
+    NextHunk,
+    /// Jump the cursor to the previous git diff hunk (Alt+[).
+    PrevHunk,
+    /// Revert the hunk under the cursor to its HEAD content (Ctrl+Shift+U).
+    RevertHunkAtCursor,
+    /// Open a small float showing the HEAD content for the hunk under the
+    /// cursor (Alt+H).
+    PeekHeadAtCursor,
+    /// Open the quickfix / location list overlay (Alt+1). Lists every LSP
+    /// diagnostic across the workspace.
+    OpenQuickfix,
+    /// Step to the next quickfix entry and jump to it (F8).
+    QuickfixNext,
+    /// Step to the previous quickfix entry and jump to it (Shift+F8).
+    QuickfixPrev,
     /// Toggle the file tree sidebar visibility (Ctrl+Shift+B).
     ToggleSidebar,
     /// Focus-jump between the editor and the sidebar (Ctrl+B).
@@ -270,6 +290,8 @@ pub enum EditorAction {
     OpenLspConfig,
     /// Open the git operations dialog (Ctrl+Shift+G).
     OpenGitDialog,
+    /// Open the clipboard-ring picker overlay (Ctrl+Shift+V).
+    OpenClipboardRing,
 
     // ── LSP features ─────────────────────────────────────────────────
     /// Trigger code completion (Ctrl+Space).
@@ -433,6 +455,14 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::BeginRecordMacro => "record_macro",
         EditorAction::StopRecordMacro => "stop_recording_macro",
         EditorAction::BeginReplayMacro => "replay_macro",
+        EditorAction::BeginSurround => "surround",
+        EditorAction::NextHunk => "next_hunk",
+        EditorAction::PrevHunk => "prev_hunk",
+        EditorAction::RevertHunkAtCursor => "revert_hunk",
+        EditorAction::PeekHeadAtCursor => "peek_head",
+        EditorAction::OpenQuickfix => "open_quickfix",
+        EditorAction::QuickfixNext => "quickfix_next",
+        EditorAction::QuickfixPrev => "quickfix_prev",
         EditorAction::ToggleSidebar => "toggle_sidebar",
         EditorAction::FocusSidebar => "focus_sidebar",
         // View / UI toggles
@@ -450,6 +480,7 @@ pub fn action_to_name(action: &EditorAction) -> Option<&'static str> {
         EditorAction::OpenBufferSwitcher => "open_buffer_switcher",
         EditorAction::OpenLspConfig => "open_lsp_config",
         EditorAction::OpenGitDialog => "open_git_dialog",
+        EditorAction::OpenClipboardRing => "open_clipboard_ring",
         // LSP features
         EditorAction::TriggerCompletion => "trigger_completion",
         EditorAction::ShowHover => "show_hover",
@@ -587,6 +618,14 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "record_macro" => EditorAction::BeginRecordMacro,
         "stop_recording_macro" => EditorAction::StopRecordMacro,
         "replay_macro" => EditorAction::BeginReplayMacro,
+        "surround" => EditorAction::BeginSurround,
+        "next_hunk" => EditorAction::NextHunk,
+        "prev_hunk" => EditorAction::PrevHunk,
+        "revert_hunk" => EditorAction::RevertHunkAtCursor,
+        "peek_head" => EditorAction::PeekHeadAtCursor,
+        "open_quickfix" => EditorAction::OpenQuickfix,
+        "quickfix_next" => EditorAction::QuickfixNext,
+        "quickfix_prev" => EditorAction::QuickfixPrev,
         "toggle_sidebar" => EditorAction::ToggleSidebar,
         "focus_sidebar" => EditorAction::FocusSidebar,
         // View / UI toggles
@@ -604,6 +643,7 @@ pub fn action_from_name(name: &str) -> Option<EditorAction> {
         "open_buffer_switcher" => EditorAction::OpenBufferSwitcher,
         "open_lsp_config" => EditorAction::OpenLspConfig,
         "open_git_dialog" => EditorAction::OpenGitDialog,
+        "open_clipboard_ring" => EditorAction::OpenClipboardRing,
         // LSP features
         "trigger_completion" => EditorAction::TriggerCompletion,
         "show_hover" => EditorAction::ShowHover,
