@@ -488,8 +488,8 @@ fn build_entries(bindings: &KeyBindings) -> Vec<(String, &'static str)> {
             HelpEntry::Binding { actions, desc } => {
                 let keys: Vec<String> = actions
                     .iter()
-                    .filter_map(|a| bindings.display_key_for_action(a))
-                    .map(format_key_display)
+                    .flat_map(|a| bindings.display_keys_for_action(a))
+                    .map(|k| format_key_display(&k))
                     .collect();
 
                 let key_str = if keys.is_empty() {
