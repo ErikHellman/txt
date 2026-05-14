@@ -5,6 +5,8 @@ use ratatui::{
 };
 
 use crate::input::keybinding::KeyBindings;
+use crate::ui::overlay_chrome::draw_border;
+use crate::ui::text_utils::truncate_to_width;
 
 /// Help template entry.  `Section` headers separate groups of bindings.
 enum HelpEntry {
@@ -524,25 +526,6 @@ fn format_key_display(s: &str) -> String {
         .join("+")
 }
 
-/// Truncate `s` to at most `max_width` terminal columns, respecting grapheme
-/// boundaries so the result is always a valid `&str` slice. Cells whose display
-/// width would push the running total past `max_width` are dropped.
-fn truncate_to_width(s: &str, max_width: usize) -> &str {
-    use unicode_segmentation::UnicodeSegmentation;
-    use unicode_width::UnicodeWidthStr;
-    let mut width = 0usize;
-    let mut end = 0usize;
-    for (idx, g) in s.grapheme_indices(true) {
-        let gw = UnicodeWidthStr::width(g);
-        if width + gw > max_width {
-            return &s[..end];
-        }
-        width += gw;
-        end = idx + g.len();
-    }
-    s
-}
-
 /// Join key strings with ` / `, collapsing duplicates.
 fn dedup_and_join(keys: &[String]) -> String {
     let mut seen = Vec::new();
@@ -684,30 +667,6 @@ pub fn render(area: Rect, buf: &mut TermBuffer, scroll: usize, bindings: &KeyBin
             " \u{2193} ",
             border_style,
         );
-    }
-}
-
-fn draw_border(buf: &mut TermBuffer, area: Rect, style: Style) {
-    if area.width < 2 || area.height < 2 {
-        return;
-    }
-    let x0 = area.x;
-    let y0 = area.y;
-    let x1 = area.x + area.width - 1;
-    let y1 = area.y + area.height - 1;
-
-    buf.set_string(x0, y0, "\u{256d}", style);
-    buf.set_string(x1, y0, "\u{256e}", style);
-    buf.set_string(x0, y1, "\u{2570}", style);
-    buf.set_string(x1, y1, "\u{256f}", style);
-
-    for x in x0 + 1..x1 {
-        buf.set_string(x, y0, "\u{2500}", style);
-        buf.set_string(x, y1, "\u{2500}", style);
-    }
-    for y in y0 + 1..y1 {
-        buf.set_string(x0, y, "\u{2502}", style);
-        buf.set_string(x1, y, "\u{2502}", style);
     }
 }
 

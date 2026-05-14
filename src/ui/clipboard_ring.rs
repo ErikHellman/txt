@@ -10,6 +10,7 @@ use ratatui::{
 };
 
 use crate::app::ClipboardRingState;
+use crate::ui::overlay_chrome::{draw_border, draw_h_separator};
 
 const MAX_VISIBLE: usize = 15;
 
@@ -119,37 +120,6 @@ fn first_line_preview(text: &str, max_w: usize) -> String {
         out.push(ch);
     }
     out
-}
-
-fn draw_border(buf: &mut TermBuffer, area: Rect, style: Style) {
-    if area.width < 2 || area.height < 2 {
-        return;
-    }
-    let (x0, y0) = (area.x, area.y);
-    let (x1, y1) = (area.x + area.width - 1, area.y + area.height - 1);
-    buf.set_string(x0, y0, "╭", style);
-    buf.set_string(x1, y0, "╮", style);
-    buf.set_string(x0, y1, "╰", style);
-    buf.set_string(x1, y1, "╯", style);
-    for x in x0 + 1..x1 {
-        buf.set_string(x, y0, "─", style);
-        buf.set_string(x, y1, "─", style);
-    }
-    for y in y0 + 1..y1 {
-        buf.set_string(x0, y, "│", style);
-        buf.set_string(x1, y, "│", style);
-    }
-}
-
-fn draw_h_separator(buf: &mut TermBuffer, area: Rect, y: u16, style: Style) {
-    if area.width < 2 {
-        return;
-    }
-    buf.set_string(area.x, y, "├", style);
-    buf.set_string(area.x + area.width - 1, y, "┤", style);
-    for x in area.x + 1..area.x + area.width - 1 {
-        buf.set_string(x, y, "─", style);
-    }
 }
 
 #[cfg(test)]

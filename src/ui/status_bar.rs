@@ -6,6 +6,7 @@ use ratatui::{
 
 use crate::app::{AppState, InputMode};
 use crate::theme::ThemeColors;
+use crate::ui::text_utils::truncate_bytes;
 
 /// Render the status bar at the bottom of the screen.
 ///
@@ -287,14 +288,5 @@ fn format_memory(kb: u64) -> String {
 }
 
 fn truncate_str(s: &str, max_bytes: usize) -> String {
-    if s.len() <= max_bytes {
-        s.to_string()
-    } else {
-        // Truncate at a char boundary.
-        let mut end = max_bytes;
-        while end > 0 && !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        s[..end].to_string()
-    }
+    truncate_bytes(s, max_bytes).to_string()
 }

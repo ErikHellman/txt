@@ -5,6 +5,7 @@ use ratatui::{
 };
 
 use crate::app::CompletionState;
+use crate::ui::overlay_chrome::draw_border;
 
 const MAX_VISIBLE: usize = 10;
 
@@ -100,25 +101,5 @@ pub fn render(
                 }
             }
         }
-    }
-}
-
-fn draw_border(buf: &mut TermBuffer, area: Rect, style: Style) {
-    if area.width < 2 || area.height < 2 {
-        return;
-    }
-    let (x0, y0) = (area.x, area.y);
-    let (x1, y1) = (area.x + area.width - 1, area.y + area.height - 1);
-    buf.set_string(x0, y0, "╭", style);
-    buf.set_string(x1, y0, "╮", style);
-    buf.set_string(x0, y1, "╰", style);
-    buf.set_string(x1, y1, "╯", style);
-    for x in x0 + 1..x1 {
-        buf.set_string(x, y0, "─", style);
-        buf.set_string(x, y1, "─", style);
-    }
-    for y in y0 + 1..y1 {
-        buf.set_string(x0, y, "│", style);
-        buf.set_string(x1, y, "│", style);
     }
 }

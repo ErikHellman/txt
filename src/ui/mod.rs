@@ -21,6 +21,7 @@ pub mod status_bar;
 pub mod sticky_header;
 pub mod symbol_picker;
 pub mod tab_bar;
+pub mod text_utils;
 pub mod welcome_overlay;
 
 use ratatui::{

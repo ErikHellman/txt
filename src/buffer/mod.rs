@@ -71,6 +71,68 @@ fn record(history: &mut UndoStack, pending: &mut Vec<EditCommand>, cmd: EditComm
 }
 
 impl Buffer {
+    /// Insert `text` at byte offset `at` and record the matching
+    /// `EditCommand::Insert` for undo and off-buffer trackers. Pairs the
+    /// rope mutation with history recording so the two can't drift apart.
+    fn recorded_insert(&mut self, at: usize, text: &str) {
+        rope_edit::insert(&mut self.rope, at, text);
+        record(
+            &mut self.history,
+            &mut self.pending_edits,
+            EditCommand::Insert {
+                at,
+                text: text.to_string(),
+            },
+        );
+    }
+
+    /// Delete bytes `[start, end)` and record the matching
+    /// `EditCommand::Delete`. Returns the deleted text (also stored on the
+    /// recorded command, so the caller rarely needs the return value).
+    fn recorded_delete(&mut self, start: usize, end: usize) -> String {
+        let deleted = rope_edit::delete(&mut self.rope, start, end);
+        record(
+            &mut self.history,
+            &mut self.pending_edits,
+            EditCommand::Delete {
+                start,
+                end,
+                deleted: deleted.clone(),
+            },
+        );
+        deleted
+    }
+
+    /// Run `f` between `begin_batch` and `commit_batch` so every recorded
+    /// edit inside the closure collapses into a single undo entry. The batch
+    /// is always committed when `f` returns — callers can no longer leak an
+    /// open batch by forgetting a `commit_batch` call on an early return.
+    fn in_batch<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        self.history.begin_batch();
+        let r = f(self);
+        self.history.commit_batch();
+        r
+    }
+
+    /// Replace bytes `[start, end)` with `new_text` and record the matching
+    /// `EditCommand::Replace`.
+    fn recorded_replace(&mut self, start: usize, end: usize, new_text: &str) -> String {
+        let old_text = rope_edit::replace(&mut self.rope, start, end, new_text);
+        record(
+            &mut self.history,
+            &mut self.pending_edits,
+            EditCommand::Replace {
+                start,
+                end,
+                old_text: old_text.clone(),
+                new_text: new_text.to_string(),
+            },
+        );
+        old_text
+    }
+}
+
+impl Buffer {
     // ------------------------------------------------------------------ //
     // Rope accessors (read-only)
     // ------------------------------------------------------------------ //
@@ -252,32 +314,15 @@ impl Buffer {
         let cursor = self.cursors.primary_mut();
         let at = if cursor.has_selection() {
             let range = cursor.selection_bytes();
-            let deleted = rope_edit::delete(&mut self.rope, range.start, range.end);
-            record(
-                &mut self.history,
-                &mut self.pending_edits,
-                EditCommand::Delete {
-                    start: range.start,
-                    end: range.end,
-                    deleted,
-                },
-            );
             cursor.byte_offset = range.start;
             cursor.selection = None;
+            self.recorded_delete(range.start, range.end);
             range.start
         } else {
             cursor.byte_offset
         };
 
-        rope_edit::insert(&mut self.rope, at, text);
-        record(
-            &mut self.history,
-            &mut self.pending_edits,
-            EditCommand::Insert {
-                at,
-                text: text.to_string(),
-            },
-        );
+        self.recorded_insert(at, text);
 
         // Move cursor to after the inserted text
         let new_offset = at + text.len();
@@ -324,16 +369,7 @@ impl Buffer {
         if start == end {
             return;
         }
-        let deleted = rope_edit::delete(&mut self.rope, start, end);
-        record(
-            &mut self.history,
-            &mut self.pending_edits,
-            EditCommand::Delete {
-                start,
-                end,
-                deleted,
-            },
-        );
+        self.recorded_delete(start, end);
         *self.cursors.primary_mut() = Cursor::from_byte_offset(&self.rope, start);
         self.cursors.primary_mut().selection = None;
         self.modified = true;
@@ -398,27 +434,19 @@ impl Buffer {
             tracked.push(s.active);
         }
 
-        self.history.begin_batch();
-        // Insert at each line's start, descending so earlier line offsets stay
-        // valid for the next iteration.
-        for line in (first_line..=last_line).rev() {
-            let start = self.line_start_byte(line);
-            rope_edit::insert(&mut self.rope, start, &unit);
-            record(
-                &mut self.history,
-                &mut self.pending_edits,
-                EditCommand::Insert {
-                    at: start,
-                    text: unit.clone(),
-                },
-            );
-            for off in tracked.iter_mut() {
-                if *off >= start {
-                    *off += unit_bytes;
+        self.in_batch(|buf| {
+            // Insert at each line's start, descending so earlier line offsets
+            // stay valid for the next iteration.
+            for line in (first_line..=last_line).rev() {
+                let start = buf.line_start_byte(line);
+                buf.recorded_insert(start, &unit);
+                for off in tracked.iter_mut() {
+                    if *off >= start {
+                        *off += unit_bytes;
+                    }
                 }
             }
-        }
-        self.history.commit_batch();
+        });
 
         let new_offset = tracked[0];
         *self.cursors.primary_mut() = Cursor::from_byte_offset(&self.rope, new_offset);
@@ -459,31 +487,22 @@ impl Buffer {
             tracked.push(s.active);
         }
 
-        self.history.begin_batch();
-        // Apply highest-offset deletions first so earlier offsets stay valid.
-        for (start, strip) in strips.iter().rev() {
-            let end = start + strip.len();
-            let deleted = rope_edit::delete(&mut self.rope, *start, end);
-            record(
-                &mut self.history,
-                &mut self.pending_edits,
-                EditCommand::Delete {
-                    start: *start,
-                    end,
-                    deleted,
-                },
-            );
-            let strip_len = strip.len();
-            for off in tracked.iter_mut() {
-                if *off >= end {
-                    *off -= strip_len;
-                } else if *off > *start {
-                    // Was inside the stripped whitespace — clamp to start.
-                    *off = *start;
+        self.in_batch(|buf| {
+            // Apply highest-offset deletions first so earlier offsets stay valid.
+            for (start, strip) in strips.iter().rev() {
+                let end = start + strip.len();
+                buf.recorded_delete(*start, end);
+                let strip_len = strip.len();
+                for off in tracked.iter_mut() {
+                    if *off >= end {
+                        *off -= strip_len;
+                    } else if *off > *start {
+                        // Was inside the stripped whitespace — clamp to start.
+                        *off = *start;
+                    }
                 }
             }
-        }
-        self.history.commit_batch();
+        });
 
         let new_offset = tracked[0];
         *self.cursors.primary_mut() = Cursor::from_byte_offset(&self.rope, new_offset);
@@ -509,14 +528,16 @@ impl Buffer {
             self.insert_char(c);
             return;
         }
-        let cursor = self.cursors.primary();
-        if cursor.has_selection() {
+        let (line, cursor_byte_offset, has_sel) = {
+            let cursor = self.cursors.primary();
+            (cursor.line, cursor.byte_offset, cursor.has_selection())
+        };
+        if has_sel {
             self.insert_char(c);
             return;
         }
-        let line = cursor.line;
         let line_start = self.line_start_byte(line);
-        let prefix_bytes = cursor.byte_offset - line_start;
+        let prefix_bytes = cursor_byte_offset - line_start;
         let line_str = self.line_str(line);
         let prefix = &line_str[..prefix_bytes.min(line_str.len())];
         if prefix.is_empty() || !prefix.chars().all(|ch| ch == ' ' || ch == '\t') {
@@ -528,25 +549,16 @@ impl Buffer {
             self.insert_char(c);
             return;
         }
-        self.history.begin_batch();
         let strip_end = line_start + strip.len();
-        let deleted = rope_edit::delete(&mut self.rope, line_start, strip_end);
-        record(
-            &mut self.history,
-            &mut self.pending_edits,
-            EditCommand::Delete {
-                start: line_start,
-                end: strip_end,
-                deleted,
-            },
-        );
-        let new_offset = cursor.byte_offset - strip.len();
-        *self.cursors.primary_mut() = Cursor::from_byte_offset(&self.rope, new_offset);
+        let new_offset = cursor_byte_offset - strip.len();
         let mut s = String::with_capacity(c.len_utf8());
         s.push(c);
-        // insert_str handles cursor advance + history recording.
-        self.insert_str(&s);
-        self.history.commit_batch();
+        self.in_batch(|buf| {
+            buf.recorded_delete(line_start, strip_end);
+            *buf.cursors.primary_mut() = Cursor::from_byte_offset(&buf.rope, new_offset);
+            // insert_str handles cursor advance + history recording.
+            buf.insert_str(&s);
+        });
     }
 
     /// Wrap the current selection with `open` and `close`. When no selection
@@ -586,27 +598,11 @@ impl Buffer {
         let open_bytes = open.len();
         let close_bytes = close.len();
 
-        self.history.begin_batch();
-        // Insert close first so the open-insert offset doesn't shift.
-        rope_edit::insert(&mut self.rope, end, close);
-        record(
-            &mut self.history,
-            &mut self.pending_edits,
-            EditCommand::Insert {
-                at: end,
-                text: close.to_string(),
-            },
-        );
-        rope_edit::insert(&mut self.rope, start, open);
-        record(
-            &mut self.history,
-            &mut self.pending_edits,
-            EditCommand::Insert {
-                at: start,
-                text: open.to_string(),
-            },
-        );
-        self.history.commit_batch();
+        self.in_batch(|buf| {
+            // Insert close first so the open-insert offset doesn't shift.
+            buf.recorded_insert(end, close);
+            buf.recorded_insert(start, open);
+        });
 
         // Update primary cursor + selection to wrap the new inner range
         // (after the inserted open delimiter, before the inserted close).
@@ -633,9 +629,7 @@ impl Buffer {
             .slice(self.rope.byte_to_char(line_start)..self.rope.byte_to_char(line_end))
             .chars()
             .collect();
-        rope_edit::insert(&mut self.rope, line_end, &text);
-        self.history
-            .record(EditCommand::Insert { at: line_end, text });
+        self.recorded_insert(line_end, &text);
         self.modified = true;
     }
 
@@ -1199,46 +1193,29 @@ impl Buffer {
         // new_positions[cursor_idx] = byte offset after the edit.
         let mut new_positions = vec![0usize; n];
 
-        self.history.begin_batch();
-        for op in &ops {
-            if op.del_end > op.ins_pt {
-                let del_len = op.del_end - op.ins_pt;
-                let deleted = rope_edit::delete(&mut self.rope, op.ins_pt, op.del_end);
-                record(
-                    &mut self.history,
-                    &mut self.pending_edits,
-                    EditCommand::Delete {
-                        start: op.ins_pt,
-                        end: op.del_end,
-                        deleted,
-                    },
-                );
-                // Deletion at [ins_pt, del_end) shifts all tracked positions >= del_end down.
-                for pos in new_positions.iter_mut() {
-                    if *pos >= op.del_end {
-                        *pos -= del_len;
+        self.in_batch(|buf| {
+            for op in &ops {
+                if op.del_end > op.ins_pt {
+                    let del_len = op.del_end - op.ins_pt;
+                    buf.recorded_delete(op.ins_pt, op.del_end);
+                    // Deletion at [ins_pt, del_end) shifts all tracked positions >= del_end down.
+                    for pos in new_positions.iter_mut() {
+                        if *pos >= op.del_end {
+                            *pos -= del_len;
+                        }
                     }
                 }
-            }
-            rope_edit::insert(&mut self.rope, op.ins_pt, text);
-            record(
-                &mut self.history,
-                &mut self.pending_edits,
-                EditCommand::Insert {
-                    at: op.ins_pt,
-                    text: text.to_string(),
-                },
-            );
-            // Insertion at ins_pt shifts all tracked positions >= ins_pt up.
-            // (Processed descending, so all previously-set positions are above ins_pt.)
-            for pos in new_positions.iter_mut() {
-                if *pos >= op.ins_pt {
-                    *pos += text.len();
+                buf.recorded_insert(op.ins_pt, text);
+                // Insertion at ins_pt shifts all tracked positions >= ins_pt up.
+                // (Processed descending, so all previously-set positions are above ins_pt.)
+                for pos in new_positions.iter_mut() {
+                    if *pos >= op.ins_pt {
+                        *pos += text.len();
+                    }
                 }
+                new_positions[op.cursor_idx] = op.ins_pt + text.len();
             }
-            new_positions[op.cursor_idx] = op.ins_pt + text.len();
-        }
-        self.history.commit_batch();
+        });
 
         let primary_new = new_positions[primary_cursor_idx];
         let new_cursors: Vec<Cursor> = new_positions
@@ -1318,28 +1295,19 @@ impl Buffer {
             .map(|c| c.byte_offset)
             .collect();
 
-        self.history.begin_batch();
-        for op in &ops {
-            let del_len = op.del_end - op.del_start;
-            let deleted = rope_edit::delete(&mut self.rope, op.del_start, op.del_end);
-            record(
-                &mut self.history,
-                &mut self.pending_edits,
-                EditCommand::Delete {
-                    start: op.del_start,
-                    end: op.del_end,
-                    deleted,
-                },
-            );
-            // Deletion at [del_start, del_end) shifts all tracked positions >= del_end down.
-            for pos in new_positions.iter_mut() {
-                if *pos >= op.del_end {
-                    *pos -= del_len;
+        self.in_batch(|buf| {
+            for op in &ops {
+                let del_len = op.del_end - op.del_start;
+                buf.recorded_delete(op.del_start, op.del_end);
+                // Deletion at [del_start, del_end) shifts all tracked positions >= del_end down.
+                for pos in new_positions.iter_mut() {
+                    if *pos >= op.del_end {
+                        *pos -= del_len;
+                    }
                 }
+                new_positions[op.cursor_idx] = op.del_start;
             }
-            new_positions[op.cursor_idx] = op.del_start;
-        }
-        self.history.commit_batch();
+        });
 
         let primary_new = new_positions[primary_cursor_idx];
         let new_cursors: Vec<Cursor> = new_positions
@@ -1417,28 +1385,19 @@ impl Buffer {
             .map(|c| c.byte_offset)
             .collect();
 
-        self.history.begin_batch();
-        for op in &ops {
-            let del_len = op.del_end - op.del_start;
-            let deleted = rope_edit::delete(&mut self.rope, op.del_start, op.del_end);
-            record(
-                &mut self.history,
-                &mut self.pending_edits,
-                EditCommand::Delete {
-                    start: op.del_start,
-                    end: op.del_end,
-                    deleted,
-                },
-            );
-            // Deletion at [del_start, del_end) shifts all tracked positions >= del_end down.
-            for pos in new_positions.iter_mut() {
-                if *pos >= op.del_end {
-                    *pos -= del_len;
+        self.in_batch(|buf| {
+            for op in &ops {
+                let del_len = op.del_end - op.del_start;
+                buf.recorded_delete(op.del_start, op.del_end);
+                // Deletion at [del_start, del_end) shifts all tracked positions >= del_end down.
+                for pos in new_positions.iter_mut() {
+                    if *pos >= op.del_end {
+                        *pos -= del_len;
+                    }
                 }
+                new_positions[op.cursor_idx] = op.del_start;
             }
-            new_positions[op.cursor_idx] = op.del_start;
-        }
-        self.history.commit_batch();
+        });
 
         let primary_new = new_positions[primary_cursor_idx];
         let new_cursors: Vec<Cursor> = new_positions
@@ -1473,19 +1432,7 @@ impl Buffer {
         // End of the last line content, EXCLUDING its trailing newline.
         let end = self.line_start_byte(last_line) + line_byte_len_no_newline(&self.rope, last_line);
         let new_text = new_lines.join("\n");
-        self.history.begin_batch();
-        let old_text = rope_edit::replace(&mut self.rope, start, end, &new_text);
-        record(
-            &mut self.history,
-            &mut self.pending_edits,
-            EditCommand::Replace {
-                start,
-                end,
-                old_text,
-                new_text: new_text.clone(),
-            },
-        );
-        self.history.commit_batch();
+        self.in_batch(|buf| buf.recorded_replace(start, end, &new_text));
         let new_offset = start + new_text.len();
         *self.cursors.primary_mut() = Cursor::from_byte_offset(&self.rope, new_offset);
         self.cursors.primary_mut().selection = None;
@@ -1599,19 +1546,7 @@ impl Buffer {
         if transformed == original {
             return;
         }
-        self.history.begin_batch();
-        let old_text = rope_edit::replace(&mut self.rope, range.start, range.end, &transformed);
-        record(
-            &mut self.history,
-            &mut self.pending_edits,
-            EditCommand::Replace {
-                start: range.start,
-                end: range.end,
-                old_text,
-                new_text: transformed.clone(),
-            },
-        );
-        self.history.commit_batch();
+        self.in_batch(|buf| buf.recorded_replace(range.start, range.end, &transformed));
         let new_end = range.start + transformed.len();
         *self.cursors.primary_mut() = Cursor::from_byte_offset(&self.rope, new_end);
         self.cursors.primary_mut().selection =
@@ -1665,19 +1600,7 @@ impl Buffer {
         }
         // Trim trailing space introduced if selection ended with newline.
         let joined = joined.trim_end_matches(' ').to_string();
-        self.history.begin_batch();
-        let old_text = rope_edit::replace(&mut self.rope, range.start, range.end, &joined);
-        record(
-            &mut self.history,
-            &mut self.pending_edits,
-            EditCommand::Replace {
-                start: range.start,
-                end: range.end,
-                old_text,
-                new_text: joined.clone(),
-            },
-        );
-        self.history.commit_batch();
+        self.in_batch(|buf| buf.recorded_replace(range.start, range.end, &joined));
         let new_offset = range.start + joined.len();
         *self.cursors.primary_mut() = Cursor::from_byte_offset(&self.rope, new_offset);
         self.cursors.primary_mut().selection = None;
@@ -1776,40 +1699,30 @@ impl Buffer {
         // update positions; cursors are rebuilt from byte offsets.
         let mut new_positions: Vec<usize> = cursors.iter().map(|c| c.byte_offset).collect();
         let primary_idx = self.cursors.primary_idx();
-        self.history.begin_batch();
-        // Process descending.
-        let mut hits_desc = hits;
-        hits_desc.sort_by_key(|h| std::cmp::Reverse(h.start));
-        for h in &hits_desc {
-            let new_str = match h.zero_padded_width {
-                Some(w) => format!("{:0>width$}", h.original, width = w),
-                None => format!("{}", h.original),
-            };
-            let old_text = rope_edit::replace(&mut self.rope, h.start, h.end, &new_str);
-            record(
-                &mut self.history,
-                &mut self.pending_edits,
-                EditCommand::Replace {
-                    start: h.start,
-                    end: h.end,
-                    old_text,
-                    new_text: new_str.clone(),
-                },
-            );
-            // Adjust new_positions for this edit.
-            let old_len = h.end - h.start;
-            let new_len = new_str.len();
-            let delta_len = new_len as i64 - old_len as i64;
-            for pos in new_positions.iter_mut() {
-                if *pos > h.end {
-                    *pos = ((*pos as i64) + delta_len) as usize;
-                } else if *pos >= h.start {
-                    // Cursor was within the digit run; place at end of new.
-                    *pos = h.start + new_len;
+        self.in_batch(|buf| {
+            // Process descending.
+            let mut hits_desc = hits;
+            hits_desc.sort_by_key(|h| std::cmp::Reverse(h.start));
+            for h in &hits_desc {
+                let new_str = match h.zero_padded_width {
+                    Some(w) => format!("{:0>width$}", h.original, width = w),
+                    None => format!("{}", h.original),
+                };
+                buf.recorded_replace(h.start, h.end, &new_str);
+                // Adjust new_positions for this edit.
+                let old_len = h.end - h.start;
+                let new_len = new_str.len();
+                let delta_len = new_len as i64 - old_len as i64;
+                for pos in new_positions.iter_mut() {
+                    if *pos > h.end {
+                        *pos = ((*pos as i64) + delta_len) as usize;
+                    } else if *pos >= h.start {
+                        // Cursor was within the digit run; place at end of new.
+                        *pos = h.start + new_len;
+                    }
                 }
             }
-        }
-        self.history.commit_batch();
+        });
         let new_cursors: Vec<Cursor> = new_positions
             .iter()
             .map(|&off| Cursor::from_byte_offset(&self.rope, off))
@@ -1909,19 +1822,7 @@ impl Buffer {
             return;
         }
         let len = self.rope.len_bytes();
-        self.history.begin_batch();
-        let old_text = rope_edit::replace(&mut self.rope, 0, len, &new_text);
-        record(
-            &mut self.history,
-            &mut self.pending_edits,
-            EditCommand::Replace {
-                start: 0,
-                end: len,
-                old_text,
-                new_text: new_text.clone(),
-            },
-        );
-        self.history.commit_batch();
+        self.in_batch(|buf| buf.recorded_replace(0, len, &new_text));
         *self.cursors.primary_mut() = Cursor::from_byte_offset(&self.rope, 0);
         self.cursors.primary_mut().selection = None;
         self.modified = true;
@@ -2007,28 +1908,8 @@ impl Buffer {
         let b_end = b_start + line_b.len();
 
         // Replace b first (higher offset) so a's offsets stay valid.
-        let old_b = rope_edit::replace(&mut self.rope, b_start, b_end, &line_a);
-        record(
-            &mut self.history,
-            &mut self.pending_edits,
-            EditCommand::Replace {
-                start: b_start,
-                end: b_end,
-                old_text: old_b,
-                new_text: line_a.clone(),
-            },
-        );
-        let old_a = rope_edit::replace(&mut self.rope, a_start, a_end, &line_b);
-        record(
-            &mut self.history,
-            &mut self.pending_edits,
-            EditCommand::Replace {
-                start: a_start,
-                end: a_end,
-                old_text: old_a,
-                new_text: line_b,
-            },
-        );
+        self.recorded_replace(b_start, b_end, &line_a);
+        self.recorded_replace(a_start, a_end, &line_b);
     }
 }
 

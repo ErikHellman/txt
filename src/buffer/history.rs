@@ -1,7 +1,7 @@
 //! Undo/redo history for the text buffer.
 //!
 //! Uses the Command pattern: every edit is recorded as an `EditCommand` that
-//! knows how to undo itself. A `BatchGuard` groups multiple commands into one
+//! knows how to undo itself. `begin_batch` / `commit_batch` group commands into one
 //! logical undo step (e.g., Replace All).
 
 use serde::{Deserialize, Serialize};
@@ -71,7 +71,7 @@ pub struct UndoStack {
     undo_stack: Vec<UndoEntry>,
     /// Future commands (after an undo). Cleared whenever a new edit is made.
     redo_stack: Vec<UndoEntry>,
-    /// Accumulator for the current batch (Some while a BatchGuard is alive).
+    /// Accumulator for the current batch (Some between begin_batch/commit_batch).
     current_batch: Option<Vec<EditCommand>>,
     /// Maximum number of entries on the undo stack. Oldest are dropped when
     /// exceeded.
@@ -208,40 +208,6 @@ pub struct UndoStackSnapshot {
 impl Default for UndoStack {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// RAII guard that keeps a batch open for its lifetime.
-///
-/// Commit by calling `guard.commit(stack)`. If dropped without committing, the
-/// batch is aborted. Typical usage:
-///
-/// ```ignore
-/// let guard = BatchGuard::begin(&mut stack);
-/// // ... record commands ...
-/// guard.commit(&mut stack);
-/// ```
-#[allow(dead_code)]
-pub struct BatchGuard;
-
-#[allow(dead_code)]
-impl BatchGuard {
-    pub fn begin(stack: &mut UndoStack) -> Self {
-        stack.begin_batch();
-        Self
-    }
-
-    pub fn commit(self, stack: &mut UndoStack) {
-        stack.commit_batch();
-        std::mem::forget(self); // prevent Drop from aborting
-    }
-}
-
-impl Drop for BatchGuard {
-    fn drop(&mut self) {
-        // If not committed, the caller should have called commit() or explicitly abort.
-        // We can't access the stack here; callers must be careful.
-        // In practice, always call .commit() before the guard goes out of scope.
     }
 }
 
