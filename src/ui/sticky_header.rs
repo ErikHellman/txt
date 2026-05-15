@@ -12,6 +12,7 @@ use ratatui::{
 };
 
 use crate::syntax::EnclosingSymbol;
+use crate::ui::text_utils::truncate_left_keep_right;
 
 /// Format the breadcrumb path as `kind name › kind name › …`. Returns an
 /// empty string for an empty path.
@@ -55,23 +56,6 @@ pub fn render(path: &[EnclosingSymbol], area: Rect, buf: &mut TermBuffer) {
         &truncated,
         bar_style.add_modifier(Modifier::BOLD),
     );
-}
-
-/// Truncate `s` to fit in `max_chars` columns, keeping the rightmost
-/// (innermost) part of the breadcrumb. Falls back to a left truncate if the
-/// string already fits.
-fn truncate_left_keep_right(s: &str, max_chars: usize) -> String {
-    let len = s.chars().count();
-    if len <= max_chars || max_chars == 0 {
-        return s.chars().take(max_chars).collect();
-    }
-    let want = max_chars.saturating_sub(1);
-    let skip = len - want;
-    let tail: String = s.chars().skip(skip).collect();
-    let mut out = String::with_capacity(tail.len() + 1);
-    out.push('…');
-    out.push_str(&tail);
-    out
 }
 
 #[cfg(test)]

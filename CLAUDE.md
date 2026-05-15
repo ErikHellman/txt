@@ -89,13 +89,34 @@ Actions are intercepted in this order — higher priority handlers `return` earl
 - Syntax highlights are computed only for the visible viewport range — never for the full file.
 - Tree-sitter parsing is synchronous and runs after every edit (`SyntaxHost::reparse_rope()`).
 
+## Shared helpers
+
+When you find yourself reaching for one of these patterns, check the helper first instead of reimplementing:
+
+| Need | Use |
+|---|---|
+| Draw a rounded border around an overlay | `crate::ui::overlay_chrome::draw_border` |
+| Draw `├─────┤` row inside an overlay | `crate::ui::overlay_chrome::draw_h_separator` |
+| Paint a solid background fill | `crate::ui::overlay_chrome::fill_rect` |
+| Centre a title row in an overlay | `crate::ui::overlay_chrome::render_centered_header` |
+| Truncate by terminal columns (grapheme-aware) | `crate::ui::text_utils::truncate_to_width` |
+| Truncate by byte budget at a char boundary | `crate::ui::text_utils::truncate_bytes` |
+| Keep the right side of a path/breadcrumb | `crate::ui::text_utils::truncate_left_keep_right` |
+| Mutate the prompt buffer in any string-carrying `InputMode` | `InputMode::string_mut` |
+| Wrap multi-op edits in a single undo entry | `Buffer::in_batch(\|buf\| { … })` — closure form, can't leak |
+| Insert/delete/replace + record history atomically | `Buffer::recorded_insert` / `recorded_delete` / `recorded_replace` |
+| Scroll a centred overlay on Up/Down/Page/wheel input | `scroll_action(&action, &mut self.x_scroll)` in `app.rs` |
+
 ## Extension points
 
 **New UI overlay:**
-Follow `src/ui/fuzzy_picker.rs` or `src/ui/help_overlay.rs` — centered float rendered last in `ui::render()`, `Option<State>` field on `AppState`, handler that returns `bool` wired into the priority chain above.
+Follow `src/ui/fuzzy_picker.rs` or `src/ui/help_overlay.rs` — centered float rendered last in `ui::render()`, `Option<State>` field on `AppState`, handler that returns `bool` wired into the priority chain above. Use the helpers in `src/ui/overlay_chrome.rs` so the chrome stays consistent.
 
 **New key binding:**
 Add to `src/input/mod.rs` (`handle_key`, `handle_ctrl_char`, or `handle_ctrl_shift_char`) and add a corresponding entry to the `ENTRIES` array in `src/ui/help_overlay.rs`.
+
+**New `InputMode` prompt variant:**
+If the variant carries an editable `String`, add it to the match in `InputMode::string_mut` so the shared `handle_modal_input` InsertChar/DeleteBackward path operates on it automatically.
 
 **Config & data files** (runtime, not source):
 - Config: `~/.config/txt/config.toml`

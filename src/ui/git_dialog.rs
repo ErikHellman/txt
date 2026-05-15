@@ -14,6 +14,7 @@ use ratatui::{
 
 use crate::git::ops::{BranchEntry, StashEntry, StatusEntry};
 use crate::theme::ThemeColors;
+use crate::ui::overlay_chrome::draw_border;
 
 // ── Menu items ───────────────────────────────────────────────────────────────
 
@@ -566,37 +567,8 @@ impl BodyCtx<'_> {
 
 // ── Drawing helpers ──────────────────────────────────────────────────────────
 
-fn draw_border(buf: &mut TermBuffer, area: Rect, style: Style) {
-    if area.width < 2 || area.height < 2 {
-        return;
-    }
-    let (x0, y0) = (area.x, area.y);
-    let (x1, y1) = (area.x + area.width - 1, area.y + area.height - 1);
-
-    buf.set_string(x0, y0, "╭", style);
-    buf.set_string(x1, y0, "╮", style);
-    buf.set_string(x0, y1, "╰", style);
-    buf.set_string(x1, y1, "╯", style);
-    for x in x0 + 1..x1 {
-        buf.set_string(x, y0, "─", style);
-        buf.set_string(x, y1, "─", style);
-    }
-    for y in y0 + 1..y1 {
-        buf.set_string(x0, y, "│", style);
-        buf.set_string(x1, y, "│", style);
-    }
-}
-
 fn clip(s: &str, width: usize) -> String {
-    if s.len() <= width {
-        s.to_string()
-    } else {
-        let mut end = width;
-        while end > 0 && !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        s[..end].to_string()
-    }
+    crate::ui::text_utils::truncate_bytes(s, width).to_string()
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

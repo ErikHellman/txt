@@ -6,6 +6,7 @@ use ratatui::{
 
 use crate::input::action::EditorAction;
 use crate::theme::ThemeColors;
+use crate::ui::overlay_chrome::{draw_border, fill_rect};
 
 /// A single entry in the command palette.
 pub struct CommandEntry {
@@ -453,14 +454,7 @@ pub fn render(
         .bg(theme.picker_sel_bg)
         .fg(Color::Rgb(160, 220, 160));
 
-    // Background fill.
-    for y in overlay.y..overlay.y + overlay.height {
-        for x in overlay.x..overlay.x + overlay.width {
-            buf.set_string(x, y, " ", Style::default().bg(bg));
-        }
-    }
-
-    // Border.
+    fill_rect(buf, overlay, Style::default().bg(bg));
     draw_border(buf, overlay, border_style);
 
     // Query input row.
@@ -521,27 +515,6 @@ pub fn render(
         let kh = pad_clip(cmd.key_hint, kh_w);
         let kh_x = overlay.x + overlay.width - 1 - kh_w as u16;
         buf.set_string(kh_x, y, &kh, kh_style);
-    }
-}
-
-fn draw_border(buf: &mut TermBuffer, area: Rect, style: Style) {
-    if area.width < 2 || area.height < 2 {
-        return;
-    }
-    let (x0, y0) = (area.x, area.y);
-    let (x1, y1) = (area.x + area.width - 1, area.y + area.height - 1);
-
-    buf.set_string(x0, y0, "╭", style);
-    buf.set_string(x1, y0, "╮", style);
-    buf.set_string(x0, y1, "╰", style);
-    buf.set_string(x1, y1, "╯", style);
-    for x in x0 + 1..x1 {
-        buf.set_string(x, y0, "─", style);
-        buf.set_string(x, y1, "─", style);
-    }
-    for y in y0 + 1..y1 {
-        buf.set_string(x0, y, "│", style);
-        buf.set_string(x1, y, "│", style);
     }
 }
 

@@ -31,6 +31,43 @@ use crate::{
 /// The scroll amount for a single scroll-wheel tick or Ctrl+Up/Down.
 const SCROLL_LINES: usize = 3;
 
+/// Translate an action into a scroll-position update for a centred-overlay
+/// scroll counter. Returns `true` if the action was a scroll input that the
+/// caller should consume; on `false` the caller can run its own match arms.
+///
+/// One line per arrow tick, ten lines per page key, `SCROLL_LINES` per
+/// mouse-wheel tick. Saturates at zero; the upper bound is clamped by the
+/// renderer.
+fn scroll_action(action: &EditorAction, scroll: &mut usize) -> bool {
+    match action {
+        EditorAction::MoveCursor(Direction::Up) => {
+            *scroll = scroll.saturating_sub(1);
+            true
+        }
+        EditorAction::MoveCursor(Direction::Down) => {
+            *scroll = scroll.saturating_add(1);
+            true
+        }
+        EditorAction::MoveCursorPage(Direction::Up) => {
+            *scroll = scroll.saturating_sub(10);
+            true
+        }
+        EditorAction::MoveCursorPage(Direction::Down) => {
+            *scroll = scroll.saturating_add(10);
+            true
+        }
+        EditorAction::MouseScroll { dir, .. } => {
+            match dir {
+                ScrollDir::Up => *scroll = scroll.saturating_sub(SCROLL_LINES),
+                ScrollDir::Down => *scroll = scroll.saturating_add(SCROLL_LINES),
+                _ => {}
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
 /// Default sidebar width in terminal columns. The active width is stored on
 /// `AppState::sidebar_width` so the user can resize by dragging the separator.
 pub const DEFAULT_SIDEBAR_WIDTH: u16 = 28;
@@ -95,6 +132,33 @@ pub enum InputMode {
 impl InputMode {
     pub fn is_normal(&self) -> bool {
         matches!(self, InputMode::Normal)
+    }
+
+    /// Mutable access to the prompt buffer for string-carrying variants.
+    ///
+    /// Used by `handle_modal_input` to share a single InsertChar/DeleteBackward
+    /// code path across every text-entry prompt. Returns `None` for variants
+    /// that don't store an editable string (Normal, *Char variants).
+    pub fn string_mut(&mut self) -> Option<&mut String> {
+        match self {
+            InputMode::JumpToLine(s)
+            | InputMode::OpenFilePath(s)
+            | InputMode::SaveAsPath(s)
+            | InputMode::RenamePath(_, s)
+            | InputMode::NewFolderName(_, s)
+            | InputMode::Rename(s)
+            | InputMode::GitCommitMessage(s)
+            | InputMode::GitNewBranch(s)
+            | InputMode::GitStashMessage(s)
+            | InputMode::ShellFilter(s)
+            | InputMode::AlignChar(s) => Some(s),
+            InputMode::Normal
+            | InputMode::SetMarkChar
+            | InputMode::JumpToMarkChar
+            | InputMode::RecordMacroChar
+            | InputMode::ReplayMacroChar
+            | InputMode::SurroundChar => None,
+        }
     }
 }
 
@@ -2399,47 +2463,19 @@ impl AppState {
         // Mutate the input string for typing/backspace without accessing other fields.
         match action {
             EditorAction::InsertChar(c) => {
-                match &mut self.input_mode {
-                    InputMode::JumpToLine(s) if c.is_ascii_digit() || c == ':' => {
-                        s.push(c);
-                    }
-                    InputMode::OpenFilePath(s)
-                    | InputMode::SaveAsPath(s)
-                    | InputMode::RenamePath(_, s)
-                    | InputMode::NewFolderName(_, s)
-                    | InputMode::Rename(s)
-                    | InputMode::GitCommitMessage(s)
-                    | InputMode::GitNewBranch(s)
-                    | InputMode::GitStashMessage(s)
-                    | InputMode::ShellFilter(s)
-                    | InputMode::AlignChar(s) => {
-                        s.push(c);
-                    }
-                    _ => {}
+                // JumpToLine only accepts digits and `:`; every other
+                // string-carrying mode accepts any char.
+                let allow = !matches!(&self.input_mode, InputMode::JumpToLine(_))
+                    || c.is_ascii_digit()
+                    || c == ':';
+                if allow && let Some(s) = self.input_mode.string_mut() {
+                    s.push(c);
                 }
                 return;
             }
             EditorAction::DeleteBackward => {
-                match &mut self.input_mode {
-                    InputMode::JumpToLine(s)
-                    | InputMode::OpenFilePath(s)
-                    | InputMode::SaveAsPath(s)
-                    | InputMode::RenamePath(_, s)
-                    | InputMode::NewFolderName(_, s)
-                    | InputMode::Rename(s)
-                    | InputMode::GitCommitMessage(s)
-                    | InputMode::GitNewBranch(s)
-                    | InputMode::GitStashMessage(s)
-                    | InputMode::ShellFilter(s)
-                    | InputMode::AlignChar(s) => {
-                        s.pop();
-                    }
-                    InputMode::Normal
-                    | InputMode::SetMarkChar
-                    | InputMode::JumpToMarkChar
-                    | InputMode::RecordMacroChar
-                    | InputMode::ReplayMacroChar
-                    | InputMode::SurroundChar => {}
+                if let Some(s) = self.input_mode.string_mut() {
+                    s.pop();
                 }
                 return;
             }
@@ -3117,35 +3153,10 @@ impl AppState {
     /// (Enter / Esc / F1 / Ctrl+Q-style ToggleHelp) dismisses it; arrows and
     /// the mouse wheel scroll its content. Returns `true` to consume.
     fn handle_welcome(&mut self, action: &EditorAction) -> bool {
+        if scroll_action(action, &mut self.welcome_scroll) {
+            return true;
+        }
         match action {
-            EditorAction::MoveCursor(Direction::Up) => {
-                self.welcome_scroll = self.welcome_scroll.saturating_sub(1);
-                true
-            }
-            EditorAction::MoveCursor(Direction::Down) => {
-                self.welcome_scroll = self.welcome_scroll.saturating_add(1);
-                true
-            }
-            EditorAction::MoveCursorPage(Direction::Up) => {
-                self.welcome_scroll = self.welcome_scroll.saturating_sub(10);
-                true
-            }
-            EditorAction::MoveCursorPage(Direction::Down) => {
-                self.welcome_scroll = self.welcome_scroll.saturating_add(10);
-                true
-            }
-            EditorAction::MouseScroll { dir, .. } => {
-                match dir {
-                    ScrollDir::Up => {
-                        self.welcome_scroll = self.welcome_scroll.saturating_sub(SCROLL_LINES);
-                    }
-                    ScrollDir::Down => {
-                        self.welcome_scroll = self.welcome_scroll.saturating_add(SCROLL_LINES);
-                    }
-                    _ => {}
-                }
-                true
-            }
             EditorAction::InsertNewline | EditorAction::CloseSearch => {
                 self.show_welcome = false;
                 self.record_version_seen();
@@ -3160,35 +3171,10 @@ impl AppState {
     /// Handle input while the changelog overlay is visible. Same dismiss /
     /// scroll semantics as the welcome overlay.
     fn handle_changelog(&mut self, action: &EditorAction) -> bool {
+        if scroll_action(action, &mut self.changelog_scroll) {
+            return true;
+        }
         match action {
-            EditorAction::MoveCursor(Direction::Up) => {
-                self.changelog_scroll = self.changelog_scroll.saturating_sub(1);
-                true
-            }
-            EditorAction::MoveCursor(Direction::Down) => {
-                self.changelog_scroll = self.changelog_scroll.saturating_add(1);
-                true
-            }
-            EditorAction::MoveCursorPage(Direction::Up) => {
-                self.changelog_scroll = self.changelog_scroll.saturating_sub(10);
-                true
-            }
-            EditorAction::MoveCursorPage(Direction::Down) => {
-                self.changelog_scroll = self.changelog_scroll.saturating_add(10);
-                true
-            }
-            EditorAction::MouseScroll { dir, .. } => {
-                match dir {
-                    ScrollDir::Up => {
-                        self.changelog_scroll = self.changelog_scroll.saturating_sub(SCROLL_LINES);
-                    }
-                    ScrollDir::Down => {
-                        self.changelog_scroll = self.changelog_scroll.saturating_add(SCROLL_LINES);
-                    }
-                    _ => {}
-                }
-                true
-            }
             EditorAction::InsertNewline | EditorAction::CloseSearch => {
                 self.show_changelog = false;
                 self.record_version_seen();
@@ -3202,41 +3188,16 @@ impl AppState {
     /// Handle input while the help overlay is visible.
     /// Returns `true` if the action was consumed (caller should `return`).
     fn handle_help(&mut self, action: &EditorAction) -> bool {
+        if scroll_action(action, &mut self.help_scroll) {
+            return true;
+        }
         match action {
-            EditorAction::MoveCursor(Direction::Up) => {
-                self.help_scroll = self.help_scroll.saturating_sub(1);
-                true
-            }
-            EditorAction::MoveCursor(Direction::Down) => {
-                self.help_scroll = self.help_scroll.saturating_add(1);
-                true
-            }
-            EditorAction::MoveCursorPage(Direction::Up) => {
-                self.help_scroll = self.help_scroll.saturating_sub(10);
-                true
-            }
-            EditorAction::MoveCursorPage(Direction::Down) => {
-                self.help_scroll = self.help_scroll.saturating_add(10);
-                true
-            }
             EditorAction::MoveCursorFileStart => {
                 self.help_scroll = 0;
                 true
             }
             EditorAction::MoveCursorFileEnd => {
                 self.help_scroll = usize::MAX; // clamped in render
-                true
-            }
-            EditorAction::MouseScroll { dir, .. } => {
-                match dir {
-                    ScrollDir::Up => {
-                        self.help_scroll = self.help_scroll.saturating_sub(SCROLL_LINES);
-                    }
-                    ScrollDir::Down => {
-                        self.help_scroll = self.help_scroll.saturating_add(SCROLL_LINES);
-                    }
-                    _ => {}
-                }
                 true
             }
             EditorAction::ToggleHelp | EditorAction::CloseSearch => {

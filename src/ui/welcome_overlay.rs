@@ -159,10 +159,7 @@ pub fn render(area: Rect, buf: &mut TermBuffer, scroll: usize, version: &str) {
 }
 
 fn truncate_to(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    s.chars().take(max).collect()
+    crate::ui::text_utils::truncate_to_width(s, max).to_string()
 }
 
 #[cfg(test)]
