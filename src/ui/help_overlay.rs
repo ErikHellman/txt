@@ -3,6 +3,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::input::keybinding::KeyBindings;
 
@@ -472,18 +473,55 @@ const TEMPLATE: &[HelpEntry] = &[
     },
 ];
 
-/// Build a flat list of `(key_display, description)` entries from the template,
-/// resolving dynamic bindings via `KeyBindings`.
-fn build_entries(bindings: &KeyBindings) -> Vec<(String, &'static str)> {
-    let mut entries = Vec::new();
+/// Layout constants for the 4-column help overlay.
+const MIN_OVERLAY_W: u16 = 50;
+const MAX_OVERLAY_W: u16 = 160;
+const COL_GAP: u16 = 2;
+const NUM_COLS: usize = 4;
+/// Top border (1) + header (1) + separator (1) + bottom border (1).
+const CHROME_ROWS: u16 = 4;
+
+/// Section names assigned to each of the 4 columns. Sections are kept in
+/// reading order and grouped to roughly balance column heights.
+const COLUMN_ASSIGNMENT: [&[&str]; NUM_COLS] = [
+    &["Navigation", "Selection"],
+    &["Multi-cursor", "Line transforms", "Editing"],
+    &["Clipboard", "File & Tabs", "Panels & Pickers"],
+    &[
+        "Search",
+        "LSP (when active)",
+        "Sidebar",
+        "View & App",
+        "Git",
+    ],
+];
+
+/// One semantic entry under a section (before width-based wrapping).
+struct HelpItem {
+    key: String,
+    desc: &'static str,
+}
+
+/// Group template entries by section, resolving dynamic bindings.
+fn build_grouped(bindings: &KeyBindings) -> Vec<(&'static str, Vec<HelpItem>)> {
+    let mut groups: Vec<(&'static str, Vec<HelpItem>)> = Vec::new();
+    let mut current: Option<(&'static str, Vec<HelpItem>)> = None;
 
     for entry in TEMPLATE {
         match entry {
             HelpEntry::Section(name) => {
-                entries.push((String::new(), *name));
+                if let Some(g) = current.take() {
+                    groups.push(g);
+                }
+                current = Some((*name, Vec::new()));
             }
             HelpEntry::Static { key, desc } => {
-                entries.push(((*key).to_string(), *desc));
+                if let Some((_, items)) = current.as_mut() {
+                    items.push(HelpItem {
+                        key: (*key).to_string(),
+                        desc,
+                    });
+                }
             }
             HelpEntry::Binding { actions, desc } => {
                 let keys: Vec<String> = actions
@@ -491,19 +529,163 @@ fn build_entries(bindings: &KeyBindings) -> Vec<(String, &'static str)> {
                     .flat_map(|a| bindings.display_keys_for_action(a))
                     .map(|k| format_key_display(&k))
                     .collect();
-
                 let key_str = if keys.is_empty() {
                     "(unbound)".to_string()
                 } else {
                     dedup_and_join(&keys)
                 };
-
-                entries.push((key_str, *desc));
+                if let Some((_, items)) = current.as_mut() {
+                    items.push(HelpItem { key: key_str, desc });
+                }
             }
         }
     }
+    if let Some(g) = current.take() {
+        groups.push(g);
+    }
+    groups
+}
 
-    entries
+/// One rendered line inside a column, after wrapping.
+enum ColumnLine {
+    Section(&'static str),
+    Entry { key: String, desc: String },
+    Blank,
+}
+
+/// Word-wrap `s` into lines that each fit in at most `max` display columns,
+/// breaking on whitespace. A word wider than `max` is truncated.
+fn wrap_str(s: &str, max: usize) -> Vec<String> {
+    if max == 0 {
+        return Vec::new();
+    }
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_w = 0usize;
+
+    for word in s.split_whitespace() {
+        let word_w = UnicodeWidthStr::width(word);
+        if current.is_empty() {
+            if word_w <= max {
+                current.push_str(word);
+                current_w = word_w;
+            } else {
+                lines.push(truncate_to_width(word, max).to_string());
+            }
+        } else if current_w + 1 + word_w <= max {
+            current.push(' ');
+            current.push_str(word);
+            current_w += 1 + word_w;
+        } else {
+            lines.push(std::mem::take(&mut current));
+            current_w = 0;
+            if word_w <= max {
+                current.push_str(word);
+                current_w = word_w;
+            } else {
+                lines.push(truncate_to_width(word, max).to_string());
+            }
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+/// Wrap a key display string. Prefer breaking on " / " boundaries (so each
+/// line ends with " /" except the last); fall back to whitespace wrapping.
+fn wrap_key(key: &str, max: usize) -> Vec<String> {
+    if max == 0 {
+        return Vec::new();
+    }
+    if UnicodeWidthStr::width(key) <= max {
+        return vec![key.to_string()];
+    }
+    let parts: Vec<&str> = key.split(" / ").collect();
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_w = 0usize;
+
+    for (i, part) in parts.iter().enumerate() {
+        let suffix = if i + 1 < parts.len() { " /" } else { "" };
+        let chunk = format!("{part}{suffix}");
+        let chunk_w = UnicodeWidthStr::width(chunk.as_str());
+
+        if current.is_empty() {
+            if chunk_w <= max {
+                current = chunk;
+                current_w = chunk_w;
+            } else {
+                lines.extend(wrap_str(&chunk, max));
+            }
+        } else if current_w + 1 + chunk_w <= max {
+            current.push(' ');
+            current.push_str(&chunk);
+            current_w += 1 + chunk_w;
+        } else {
+            lines.push(std::mem::take(&mut current));
+            current_w = 0;
+            if chunk_w <= max {
+                current = chunk;
+                current_w = chunk_w;
+            } else {
+                lines.extend(wrap_str(&chunk, max));
+            }
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+/// Build the rendered lines for one column from its assigned sections.
+fn build_column_lines(
+    sections: &[&str],
+    groups: &[(&'static str, Vec<HelpItem>)],
+    key_w: usize,
+    desc_w: usize,
+) -> Vec<ColumnLine> {
+    let mut lines = Vec::new();
+    let mut first = true;
+    for &section_name in sections {
+        let Some((name, items)) = groups.iter().find(|(n, _)| *n == section_name) else {
+            continue;
+        };
+        if !first {
+            lines.push(ColumnLine::Blank);
+        }
+        first = false;
+        lines.push(ColumnLine::Section(name));
+        for item in items {
+            let key_lines = wrap_key(&item.key, key_w);
+            let desc_lines = wrap_str(item.desc, desc_w);
+            let n = key_lines.len().max(desc_lines.len()).max(1);
+            for i in 0..n {
+                let k = key_lines.get(i).cloned().unwrap_or_default();
+                let d = desc_lines.get(i).cloned().unwrap_or_default();
+                lines.push(ColumnLine::Entry { key: k, desc: d });
+            }
+        }
+    }
+    lines
+}
+
+/// Pad `s` with trailing spaces to exactly `w` display columns, truncating
+/// first if it would overflow.
+fn pad_to_width(s: &str, w: usize) -> String {
+    let truncated = truncate_to_width(s, w);
+    let truncated_w = UnicodeWidthStr::width(truncated);
+    let mut out = truncated.to_string();
+    out.push_str(&" ".repeat(w.saturating_sub(truncated_w)));
+    out
 }
 
 /// Capitalize a key combo display string for the help overlay.
@@ -554,16 +736,15 @@ fn dedup_and_join(keys: &[String]) -> String {
     seen.join(" / ")
 }
 
-/// Render a scrollable keybinding cheat-sheet as a centered floating overlay.
+/// Render a scrollable keybinding cheat-sheet as a 4-column overlay that
+/// stretches to nearly the full terminal width (capped at `MAX_OVERLAY_W`).
 ///
-/// `scroll` is the number of rows to skip from the top of the entry list.
-/// The render function clamps it so it can never scroll past the last entry.
+/// `scroll` is the number of rows to skip from the top of each column. The
+/// render function clamps it to the tallest column's row count.
 pub fn render(area: Rect, buf: &mut TermBuffer, scroll: usize, bindings: &KeyBindings) {
     if area.width < 20 || area.height < 6 {
         return;
     }
-
-    let entries = build_entries(bindings);
 
     let bg = Color::Rgb(18, 22, 40);
     let border_col = Color::Rgb(80, 100, 160);
@@ -579,38 +760,33 @@ pub fn render(area: Rect, buf: &mut TermBuffer, scroll: usize, bindings: &KeyBin
     let key_style = Style::default().bg(bg).fg(Color::Rgb(140, 200, 255));
     let desc_style = Style::default().bg(bg).fg(Color::Rgb(200, 200, 220));
 
-    // ── Overlay dimensions ────────────────────────────────────────────────────
-    // Inner content is: 22 chars for key + 1 space + up-to-30 chars for desc = 53 inner cols.
-    // Total with borders: 55.
-    const KEY_W: usize = 22;
-    const DESC_W: usize = 30;
-    const INNER_W: u16 = (KEY_W + 1 + DESC_W) as u16; // 53
-    const OVERLAY_W: u16 = INNER_W + 2; // +2 for left/right border
-
-    // Header row (1) + blank separator (1) + content rows + bottom border row consumed in height.
-    // Total chrome rows that aren't content: top border (1) + header (1) + separator (1) + bottom border (1) = 4.
-    const CHROME_ROWS: u16 = 4;
-
-    let overlay_w = OVERLAY_W.min(area.width);
-    // Use up to 80% of terminal height, but at least 8 rows.
-    let max_h = area.height.saturating_sub(2).max(8);
-    let overlay_h = max_h.min(area.height);
-
+    // ── Overlay dimensions ────────────────────────────────────────────
+    let target_w = area.width.saturating_sub(2);
+    let overlay_w = target_w.clamp(MIN_OVERLAY_W, MAX_OVERLAY_W).min(area.width);
+    let overlay_h = area.height.saturating_sub(2).max(8).min(area.height);
     let ox = area.x + area.width.saturating_sub(overlay_w) / 2;
     let oy = area.y + area.height.saturating_sub(overlay_h) / 2;
     let overlay_area = Rect::new(ox, oy, overlay_w, overlay_h);
 
-    // ── Fill background ───────────────────────────────────────────────────────
+    // ── Column geometry ───────────────────────────────────────────────
+    let cols = NUM_COLS as u16;
+    let inner_w = overlay_w.saturating_sub(2);
+    let usable = inner_w.saturating_sub(COL_GAP * (cols - 1));
+    let col_w = (usable / cols).max(1) as usize;
+    let key_w = (col_w * 4 / 10).max(6);
+    let desc_w = col_w.saturating_sub(key_w + 1).max(1);
+
+    // ── Fill background ───────────────────────────────────────────────
     for y in overlay_area.y..overlay_area.y + overlay_area.height {
         for x in overlay_area.x..overlay_area.x + overlay_area.width {
             buf.set_string(x, y, " ", Style::default().bg(bg));
         }
     }
 
-    // ── Border ───────────────────────────────────────────────────────────────
+    // ── Border ────────────────────────────────────────────────────────
     draw_border(buf, overlay_area, border_style);
 
-    // ── Header ───────────────────────────────────────────────────────────────
+    // ── Header ────────────────────────────────────────────────────────
     let header = " Keybindings ";
     let hx = overlay_area.x + overlay_area.width.saturating_sub(header.len() as u16) / 2;
     buf.set_string(hx, overlay_area.y, header, header_style);
@@ -621,62 +797,65 @@ pub fn render(area: Rect, buf: &mut TermBuffer, scroll: usize, bindings: &KeyBin
         buf.set_string(x, sep_y, "\u{2500}", border_style);
     }
 
-    // ── Scroll clamping ───────────────────────────────────────────────────────
-    let visible_rows = overlay_h.saturating_sub(CHROME_ROWS + 1) as usize; // +1 for sep row
-    let max_scroll = entries.len().saturating_sub(visible_rows);
+    // ── Build per-column line lists ───────────────────────────────────
+    let groups = build_grouped(bindings);
+    let columns: Vec<Vec<ColumnLine>> = COLUMN_ASSIGNMENT
+        .iter()
+        .map(|sections| build_column_lines(sections, &groups, key_w, desc_w))
+        .collect();
+
+    // ── Scroll clamping ───────────────────────────────────────────────
+    let visible_rows = overlay_h.saturating_sub(CHROME_ROWS) as usize;
+    let max_col_rows = columns.iter().map(|c| c.len()).max().unwrap_or(0);
+    let max_scroll = max_col_rows.saturating_sub(visible_rows);
     let scroll = scroll.min(max_scroll);
 
-    // ── Content rows ─────────────────────────────────────────────────────────
-    let content_x = overlay_area.x + 1;
-    let content_start_y = overlay_area.y + 3; // below top-border + header + sep
+    // ── Render each column ────────────────────────────────────────────
+    let content_start_y = overlay_area.y + 3;
     let content_end_y = overlay_area.y + overlay_area.height.saturating_sub(1);
 
-    for (row_idx, (key, desc)) in entries.iter().skip(scroll).enumerate() {
-        let cy = content_start_y + row_idx as u16;
-        if cy >= content_end_y {
-            break;
-        }
+    for (col_idx, lines) in columns.iter().enumerate() {
+        let col_x = overlay_area.x + 1 + (col_idx as u16) * (col_w as u16 + COL_GAP);
 
-        let avail_w = overlay_w.saturating_sub(2) as usize; // subtract borders
+        for (row_idx, line) in lines.iter().skip(scroll).enumerate() {
+            let cy = content_start_y + row_idx as u16;
+            if cy >= content_end_y {
+                break;
+            }
+            match line {
+                ColumnLine::Blank => {}
+                ColumnLine::Section(name) => {
+                    let label = format!(" {name} ");
+                    let label_w = UnicodeWidthStr::width(label.as_str());
+                    let dashes_left = 1usize;
+                    let dashes_right = col_w.saturating_sub(dashes_left + label_w);
+                    let header_str = format!(
+                        "{}{}{}",
+                        "\u{2500}".repeat(dashes_left),
+                        label,
+                        "\u{2500}".repeat(dashes_right),
+                    );
+                    let display = truncate_to_width(&header_str, col_w);
+                    buf.set_string(col_x, cy, display, section_style);
+                }
+                ColumnLine::Entry { key, desc } => {
+                    let key_str = pad_to_width(key, key_w);
+                    buf.set_string(col_x, cy, &key_str, key_style);
 
-        if key.is_empty() {
-            // Category header: "─── Section Name ───────"
-            let label = format!(" {desc} ");
-            let dashes_left = 1usize;
-            let dashes_right = avail_w.saturating_sub(dashes_left + label.len());
-            let header_str = format!(
-                "{}{}{}",
-                "\u{2500}".repeat(dashes_left),
-                label,
-                "\u{2500}".repeat(dashes_right),
-            );
-            let display: String = header_str.chars().take(avail_w).collect();
-            buf.set_string(content_x, cy, &display, section_style);
-        } else {
-            // Normal entry: key (fixed width) + space + description.
-            let key_str = format!("{:<width$}", key, width = KEY_W);
-            let key_display = truncate_to_width(&key_str, avail_w);
-            buf.set_string(content_x, cy, key_display, key_style);
-
-            let desc_x = content_x + KEY_W.min(avail_w) as u16 + 1;
-            let desc_avail = (overlay_area.x + overlay_area.width.saturating_sub(1))
-                .saturating_sub(desc_x) as usize;
-            if desc_avail > 0 {
-                let desc_display = truncate_to_width(desc, desc_avail);
-                buf.set_string(desc_x, cy, desc_display, desc_style);
+                    let desc_x = col_x + key_w as u16 + 1;
+                    let desc_display = truncate_to_width(desc, desc_w);
+                    buf.set_string(desc_x, cy, desc_display, desc_style);
+                }
             }
         }
     }
 
-    // ── Scroll indicators ─────────────────────────────────────────────────────
+    // ── Scroll indicators ─────────────────────────────────────────────
     if scroll > 0 {
-        // "↑" near top-right of border
         let ind_x = overlay_area.x + overlay_area.width.saturating_sub(5);
         buf.set_string(ind_x, overlay_area.y, " \u{2191} ", border_style);
     }
-    let entries_shown = visible_rows.min(entries.len().saturating_sub(scroll));
-    if scroll + entries_shown < entries.len() {
-        // "↓" near bottom-right of border
+    if scroll + visible_rows < max_col_rows {
         let ind_x = overlay_area.x + overlay_area.width.saturating_sub(5);
         buf.set_string(
             ind_x,
@@ -804,12 +983,66 @@ mod tests {
     }
 
     #[test]
-    fn build_entries_produces_output() {
+    fn build_grouped_produces_sections() {
         let bindings = default_bindings();
-        let entries = build_entries(&bindings);
-        assert!(!entries.is_empty());
-        // First entry should be a section header
-        assert!(entries[0].0.is_empty());
-        assert_eq!(entries[0].1, "Navigation");
+        let groups = build_grouped(&bindings);
+        assert!(!groups.is_empty());
+        assert_eq!(groups[0].0, "Navigation");
+        assert!(!groups[0].1.is_empty());
+        // Every section listed in COLUMN_ASSIGNMENT must exist in TEMPLATE.
+        for sections in COLUMN_ASSIGNMENT.iter() {
+            for &name in sections.iter() {
+                assert!(
+                    groups.iter().any(|(n, _)| *n == name),
+                    "missing section in TEMPLATE: {name}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn wrap_str_breaks_on_whitespace() {
+        let out = wrap_str("Toggle line comment indentation", 12);
+        // Each line must fit in 12 cols.
+        for line in &out {
+            assert!(UnicodeWidthStr::width(line.as_str()) <= 12, "line: {line}");
+        }
+        // Rejoining must round-trip the words.
+        let joined: String = out.join(" ");
+        assert_eq!(
+            joined.split_whitespace().collect::<Vec<_>>().join(" "),
+            "Toggle line comment indentation"
+        );
+    }
+
+    #[test]
+    fn wrap_key_breaks_on_slash() {
+        let out = wrap_key("Ctrl+Shift+Up / Ctrl+Shift+Down", 16);
+        for line in &out {
+            assert!(UnicodeWidthStr::width(line.as_str()) <= 16, "line: {line}");
+        }
+        // Slash boundary preferred.
+        assert!(out.iter().any(|l| l.ends_with(" /")));
+    }
+
+    #[test]
+    fn render_at_wide_width_uses_four_columns() {
+        let (mut buf, area) = make_buf(160, 50);
+        let bindings = default_bindings();
+        render(area, &mut buf, 0, &bindings);
+        // Each column's first section header must appear on screen at scroll=0.
+        let mut found_text = String::new();
+        for y in 0..50 {
+            for x in 0..160 {
+                if let Some(c) = buf.cell((x, y)) {
+                    found_text.push_str(c.symbol());
+                }
+            }
+            found_text.push('\n');
+        }
+        assert!(found_text.contains("Navigation"), "col 1 header missing");
+        assert!(found_text.contains("Multi-cursor"), "col 2 header missing");
+        assert!(found_text.contains("Clipboard"), "col 3 header missing");
+        assert!(found_text.contains("Search"), "col 4 header missing");
     }
 }
