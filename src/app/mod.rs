@@ -976,35 +976,32 @@ impl AppState {
                     }
                 } else {
                     // Route to the editor scroll just like a keyboard scroll.
+                    let total_lines = self.editor.active().buffer.len_lines();
                     let vp = &mut self.editor.active_mut().viewport;
                     match dir {
                         ScrollDir::Up => {
                             vp.scroll_row = vp.scroll_row.saturating_sub(SCROLL_LINES);
                         }
                         ScrollDir::Down => {
-                            vp.scroll_row = vp.scroll_row.saturating_add(SCROLL_LINES);
-                        }
-                        ScrollDir::Left if !vp.word_wrap => {
-                            vp.scroll_col = vp.scroll_col.saturating_sub(4);
-                        }
-                        ScrollDir::Right if !vp.word_wrap => {
-                            vp.scroll_col = vp.scroll_col.saturating_add(4);
+                            vp.scroll_row =
+                                (vp.scroll_row + SCROLL_LINES).min(total_lines.saturating_sub(1));
                         }
                         _ => {}
                     }
-                    self.clamp_viewport_scroll(text_h);
                 }
             }
 
             // ── Scroll ────────────────────────────────────────────────
             EditorAction::Scroll(dir) => {
+                let total_lines = self.editor.active().buffer.len_lines();
                 let vp = &mut self.editor.active_mut().viewport;
                 match dir {
                     ScrollDir::Up => {
                         vp.scroll_row = vp.scroll_row.saturating_sub(SCROLL_LINES);
                     }
                     ScrollDir::Down => {
-                        vp.scroll_row = vp.scroll_row.saturating_add(SCROLL_LINES);
+                        vp.scroll_row =
+                            (vp.scroll_row + SCROLL_LINES).min(total_lines.saturating_sub(1));
                     }
                     ScrollDir::Left => {
                         vp.scroll_col = vp.scroll_col.saturating_sub(4);
@@ -1016,10 +1013,10 @@ impl AppState {
                         vp.scroll_row = vp.scroll_row.saturating_sub(text_h / 2);
                     }
                     ScrollDir::HalfPageDown => {
-                        vp.scroll_row = vp.scroll_row.saturating_add(text_h / 2);
+                        vp.scroll_row =
+                            (vp.scroll_row + text_h / 2).min(total_lines.saturating_sub(1));
                     }
                 }
-                self.clamp_viewport_scroll(text_h);
             }
             EditorAction::ScrollCursorCenter => {
                 let cursor_line = self.editor.active().buffer.cursors.primary().line;
@@ -1621,7 +1618,7 @@ impl App {
                     Event::Resize(_, _) => EditorAction::Unhandled,
                     _ => EditorAction::Unhandled,
                 };
-                if !state.scroll_action_is_no_op(&action, term_height) {
+                if !state.scroll_action_is_no_op(&action) {
                     state.update(action, term_height);
                     if state.should_quit {
                         break;

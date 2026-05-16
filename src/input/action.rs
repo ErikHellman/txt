@@ -674,7 +674,9 @@ pub enum Direction {
 pub enum ScrollDir {
     Up,
     Down,
+    #[allow(dead_code)]
     Left,
+    #[allow(dead_code)]
     Right,
     #[allow(dead_code)]
     HalfPageUp,

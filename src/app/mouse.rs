@@ -11,27 +11,6 @@ impl AppState {
         let area = self.tab_bar_area?;
         crate::ui::tab_bar::tab_at(&self.editor, area, col, row)
     }
-    /// Cap user-initiated scrolling so the last line cannot pass the vertical
-    /// centre of the viewport and the longest line's end cannot pass the
-    /// horizontal centre. Mirrors `Viewport::clamp_user_scroll` but supplies
-    /// the buffer-derived dimensions from current `AppState`.
-    pub(super) fn clamp_viewport_scroll(&mut self, text_h: usize) {
-        let total_lines = self.editor.active().buffer.len_lines();
-        let label = self.version_badge();
-        let gutter = effective_gutter_width(total_lines, label.as_deref());
-        let sidebar_w: u16 = if self.sidebar.is_some() {
-            self.sidebar_width + 1
-        } else {
-            0
-        };
-        let text_w =
-            (self.term_width as usize).saturating_sub(gutter as usize + 1 + sidebar_w as usize);
-
-        let tab = self.editor.active_mut();
-        let longest = crate::editor::viewport::max_line_display_width(&tab.buffer);
-        tab.viewport
-            .clamp_user_scroll(total_lines, longest, text_h, text_w);
-    }
     /// Returns `true` when `action` is a vertical scroll that the viewport
     /// (or sidebar) can't honour because it's already at the corresponding
     /// edge. Used by the run loop to drop end-of-buffer wheel spam before
@@ -40,11 +19,7 @@ impl AppState {
     /// Horizontal and non-scroll actions always return `false` — the
     /// horizontal case would need an O(n) max-line-width scan per event,
     /// which is more expensive than letting `update` handle it normally.
-    pub(crate) fn scroll_action_is_no_op(
-        &self,
-        action: &EditorAction,
-        terminal_height: u16,
-    ) -> bool {
+    pub(crate) fn scroll_action_is_no_op(&self, action: &EditorAction) -> bool {
         let dir = match action {
             EditorAction::Scroll(d) => *d,
             EditorAction::MouseScroll { dir, col, row } => {
@@ -56,12 +31,10 @@ impl AppState {
             _ => return false,
         };
 
-        // Match the value `update` derives for scroll handlers.
-        let text_h = (terminal_height as usize).saturating_sub(1);
         let tab = self.editor.active();
         let vp = &tab.viewport;
         let total_lines = tab.buffer.len_lines();
-        let max_row = total_lines.saturating_sub(1).saturating_sub(text_h / 2);
+        let max_row = total_lines.saturating_sub(1);
 
         match dir {
             ScrollDir::Up | ScrollDir::HalfPageUp => vp.scroll_row == 0,
