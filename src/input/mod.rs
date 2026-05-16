@@ -126,16 +126,6 @@ impl InputHandler {
                 col,
                 row,
             },
-            MouseEventKind::ScrollLeft => EditorAction::MouseScroll {
-                dir: ScrollDir::Left,
-                col,
-                row,
-            },
-            MouseEventKind::ScrollRight => EditorAction::MouseScroll {
-                dir: ScrollDir::Right,
-                col,
-                row,
-            },
             _ => EditorAction::Unhandled,
         }
     }

@@ -46,29 +46,6 @@ impl Viewport {
         }
     }
 
-    /// Cap user-initiated scrolling so the buffer cannot scroll past a
-    /// "half-viewport" margin: the last line cannot move past the vertical
-    /// centre of the viewport, and the longest line's end cannot move past
-    /// the horizontal centre. When `word_wrap` is true, the horizontal cap
-    /// is skipped.
-    pub fn clamp_user_scroll(
-        &mut self,
-        total_lines: usize,
-        longest_line: usize,
-        text_height: usize,
-        text_width: usize,
-    ) {
-        let max_row = total_lines
-            .saturating_sub(1)
-            .saturating_sub(text_height / 2);
-        self.scroll_row = self.scroll_row.min(max_row);
-
-        if !self.word_wrap {
-            let max_col = longest_line.saturating_sub(text_width / 2);
-            self.scroll_col = self.scroll_col.min(max_col);
-        }
-    }
-
     /// Returns an iterator of `(line_index, line_string_without_newline)` for all
     /// lines visible in the current viewport.
     ///
@@ -307,26 +284,6 @@ fn display_col_for_byte_in_line(buffer: &Buffer, line_idx: usize, byte_in_line: 
     prefix.graphemes(true).map(UnicodeWidthStr::width).sum()
 }
 
-/// Display width (in terminal cells) of the widest line in the buffer.
-///
-/// Walks every line once, summing grapheme widths via `unicode-width`. O(n) in
-/// total buffer size, so cache the result if calling more than once per event.
-pub fn max_line_display_width(buffer: &Buffer) -> usize {
-    use unicode_segmentation::UnicodeSegmentation;
-    use unicode_width::UnicodeWidthStr;
-
-    let total = buffer.len_lines();
-    let mut max_w = 0usize;
-    for i in 0..total {
-        let s = buffer.line_str(i);
-        let w: usize = s.graphemes(true).map(UnicodeWidthStr::width).sum();
-        if w > max_w {
-            max_w = w;
-        }
-    }
-    max_w
-}
-
 /// Returns the substring of `s` starting from display column `skip_cols`.
 /// Handles multi-byte / wide characters correctly.
 fn clip_display_cols(s: &str, skip_cols: usize) -> String {
@@ -503,89 +460,6 @@ mod tests {
         let offset = screen_pos_to_byte_offset(2, 0, 0, 2, 80, &b, &vp);
         let expected_line_start = b.rope().char_to_byte(b.rope().line_to_char(10));
         assert_eq!(offset, expected_line_start);
-    }
-
-    // ── clamp_user_scroll ──────────────────────────────────────────────────
-
-    #[test]
-    fn clamp_keeps_last_line_at_vertical_centre() {
-        // 20 lines, height=10 → max_row = 19 - 5 = 14, so the last line ends
-        // up at row 5 (the centre) when scrolled to the bound.
-        let mut vp = Viewport {
-            scroll_row: 100,
-            scroll_col: 0,
-            word_wrap: false,
-        };
-        vp.clamp_user_scroll(20, 0, 10, 80);
-        assert_eq!(vp.scroll_row, 14);
-    }
-
-    #[test]
-    fn clamp_horizontal_stops_at_longest_line_centre() {
-        // Longest line is 40 wide, text_width = 20 → max_col = 40 - 10 = 30.
-        let mut vp = Viewport {
-            scroll_row: 0,
-            scroll_col: 100,
-            word_wrap: false,
-        };
-        vp.clamp_user_scroll(1, 40, 10, 20);
-        assert_eq!(vp.scroll_col, 30);
-    }
-
-    #[test]
-    fn clamp_horizontal_no_op_when_word_wrap() {
-        let mut vp = Viewport {
-            scroll_row: 0,
-            scroll_col: 100,
-            word_wrap: true,
-        };
-        vp.clamp_user_scroll(1, 40, 10, 20);
-        assert_eq!(vp.scroll_col, 100);
-    }
-
-    #[test]
-    fn clamp_horizontal_zero_when_line_fits() {
-        // Longest line (5) is narrower than half the viewport (text_width/2 = 10).
-        let mut vp = Viewport {
-            scroll_row: 0,
-            scroll_col: 50,
-            word_wrap: false,
-        };
-        vp.clamp_user_scroll(1, 5, 10, 20);
-        assert_eq!(vp.scroll_col, 0);
-    }
-
-    #[test]
-    fn clamp_vertical_zero_for_tiny_buffer() {
-        // 2 lines, height=10 → max_row = 1 - 5 saturating = 0.
-        let mut vp = Viewport {
-            scroll_row: 50,
-            scroll_col: 0,
-            word_wrap: false,
-        };
-        vp.clamp_user_scroll(2, 0, 10, 80);
-        assert_eq!(vp.scroll_row, 0);
-    }
-
-    // ── max_line_display_width ─────────────────────────────────────────────
-
-    #[test]
-    fn max_line_width_picks_longest() {
-        let b = buf("ab\nabcdef\nabc");
-        assert_eq!(max_line_display_width(&b), 6);
-    }
-
-    #[test]
-    fn max_line_width_empty_buffer() {
-        let b = buf("");
-        assert_eq!(max_line_display_width(&b), 0);
-    }
-
-    #[test]
-    fn max_line_width_wide_chars() {
-        // 😀 is width 2; "a😀b" → 1+2+1 = 4.
-        let b = buf("a\na😀b");
-        assert_eq!(max_line_display_width(&b), 4);
     }
 
     // ── Word-wrap mouse mapping ────────────────────────────────────────
