@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.7.0
+
+- Fix laggy scrolling on large files — holding a scroll key or spinning the wheel could visibly freeze the editor and stall queued keystrokes because every scroll event walked the whole buffer to sum grapheme widths. Reverts the viewport-centre scroll cap and horizontal mouse-wheel handling added in v0.5.0; the longest line and last line are once again allowed to scroll past the viewport edge, and horizontal mouse-wheel events are ignored. The v0.6.0 input-drain loop and no-op-scroll filter are kept.
+- Widen the F1 help overlay into a 4-column layout grouped by category, stretching to the terminal width (capped at 160 columns); long key combos and descriptions now wrap on whitespace and slash boundaries instead of being truncated
+
 ## v0.6.0
 
 - Add per-workspace session persistence — when `restore_session = true`, a clean shutdown writes the open tabs (with cursor and viewport) to `<workspace>/.txt/session.json` and re-opens them on next launch; a positional file argument suppresses the restore
