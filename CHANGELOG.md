@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.7.1
+
+- Open a new empty buffer instead of exiting with an error when the file named on the command line doesn't exist; the file is created on first save, matching the behavior of common editors
+
 ## v0.7.0
 
 - Fix laggy scrolling on large files — holding a scroll key or spinning the wheel could visibly freeze the editor and stall queued keystrokes because every scroll event walked the whole buffer to sum grapheme widths. Reverts the viewport-centre scroll cap and horizontal mouse-wheel handling added in v0.5.0; the longest line and last line are once again allowed to scroll past the viewport edge, and horizontal mouse-wheel events are ignored. The v0.6.0 input-drain loop and no-op-scroll filter are kept.
