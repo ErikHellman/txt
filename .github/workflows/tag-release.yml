@@ -1,0 +1,71 @@
+name: Tag Release
+
+# Cuts a release by running scripts/release.sh with the latest version from
+# CHANGELOG.md: it bumps Cargo.toml, regenerates Cargo.lock, commits, tags
+# vX.Y.Z, and pushes both main and the tag. Pushing the tag triggers the
+# "Release" workflow (release.yml), which builds the binaries and publishes
+# the GitHub Release.
+#
+# Manual for now (workflow_dispatch). To fully automate once CHANGELOG.md
+# lands on main, add the trigger below — release.sh already no-ops (exits with
+# "already the current version") when Cargo.toml matches the latest entry, so
+# pushes that don't bump the changelog are harmless:
+#
+#   push:
+#     branches: [main]
+#     paths: [CHANGELOG.md]
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (X.Y.Z). Leave blank to use the latest CHANGELOG.md entry."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Tag and push release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # release.sh requires running on main and pushes commits + the tag.
+          ref: main
+          fetch-depth: 0
+          # A PAT in secrets.RELEASE_TOKEN lets the pushed tag trigger the
+          # Release workflow; pushes made with the default GITHUB_TOKEN do not
+          # trigger other workflows. Falls back to GITHUB_TOKEN when unset
+          # (the tag is still created, but release.yml must be started by hand).
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Resolve version from CHANGELOG.md
+        id: version
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="$(grep -m1 -oE '^## v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?' CHANGELOG.md | sed 's/^## v//')"
+          fi
+          VERSION="${VERSION#v}"  # strip a leading 'v' if the input included one
+          if [ -z "$VERSION" ]; then
+            echo "error: could not determine a version from CHANGELOG.md" >&2
+            exit 1
+          fi
+          echo "Releasing version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Run release script
+        run: scripts/release.sh "${{ steps.version.outputs.version }}"
