@@ -86,8 +86,15 @@ impl BufferHandle {
 
     /// Open a file from disk. Detects the language, loads content, and
     /// runs an initial tree-sitter parse.
+    ///
+    /// If `path` does not exist yet, an empty buffer bound to that path is
+    /// returned instead of an error; the file is created on first save.
     pub fn from_path(id: BufferId, path: PathBuf) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(&path)?;
+        let content = match std::fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(err) => return Err(err.into()),
+        };
         let mut buffer = Buffer::from_str(&content);
         buffer.modified = false;
 
@@ -282,5 +289,20 @@ mod tests {
         assert!(o.indent_size.is_none());
         // Sanity: IndentStyle is reachable through this module's imports.
         let _ = IndentStyle::Spaces;
+    }
+
+    #[test]
+    fn from_path_creates_empty_buffer_for_missing_file() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("txt_from_path_missing_{}.txt", std::process::id()));
+        // Ensure the file does not exist.
+        let _ = std::fs::remove_file(&path);
+
+        let handle = BufferHandle::from_path(0, path.clone()).expect("missing file should open");
+        assert_eq!(handle.buffer.to_string(), "");
+        assert!(!handle.buffer.modified);
+        assert_eq!(handle.path.as_deref(), Some(path.as_path()));
+        // Opening a non-existent path must not touch the filesystem.
+        assert!(!path.exists());
     }
 }
