@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.7.2
+
+- Fix the command palette and fuzzy picker (Go To File / Recent Files) silently dropping typed input when the sidebar had focus — the picker handlers now run before the sidebar so an open overlay receives keystrokes regardless of which pane is focused; pressing Esc returns focus to the sidebar
+- Allow the symbols-in-file picker (Ctrl+Shift+O) and project search (Ctrl+Shift+F) to be opened while the sidebar is focused
+
 ## v0.7.1
 
 - Open a new empty buffer instead of exiting with an error when the file named on the command line doesn't exist; the file is created on first save, matching the behavior of common editors
