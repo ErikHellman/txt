@@ -372,10 +372,10 @@ impl AppState {
             return;
         }
 
-        // Sidebar focus — intercept navigation when sidebar has focus
-        if self.sidebar_focused && self.handle_sidebar_input(&action) {
-            return;
-        }
+        // Floating pickers own input whenever they are open, regardless of
+        // whether the sidebar or the editor has focus. They must be checked
+        // before the sidebar so that typing reaches the picker rather than
+        // being swallowed by the sidebar's catch-all.
 
         // Project search overlay — captured input
         if self.project_search.is_some() && self.handle_project_search(action.clone()) {
@@ -397,6 +397,11 @@ impl AppState {
         // Symbol picker — captured input
         if self.symbol_picker.is_some() {
             self.handle_symbol_picker(action);
+            return;
+        }
+
+        // Sidebar focus — intercept navigation when sidebar has focus
+        if self.sidebar_focused && self.handle_sidebar_input(&action) {
             return;
         }
 

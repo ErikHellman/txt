@@ -4,7 +4,7 @@ mod ui_common;
 
 use std::time::Duration;
 
-use ui_common::{Fixture, Key};
+use ui_common::{Fixture, Key, SessionOptions, TxtSession};
 
 #[test]
 fn picker_ctrl_p_opens_fuzzy_picker() {
@@ -64,6 +64,35 @@ fn picker_fuzzy_enter_opens_selected_file() {
     // Status bar now shows the opened file plus a cursor at 1:1.
     s.wait_for_status_contains("alpha.txt");
     s.wait_for_status_contains("1:1");
+    s.shutdown();
+}
+
+#[test]
+fn picker_typing_works_while_sidebar_focused() {
+    // Regression: opening a directory focuses the sidebar. Opening the fuzzy
+    // picker (Ctrl+P) and typing must reach the picker rather than being
+    // swallowed by the sidebar's catch-all input handler.
+    let fx = Fixture::new();
+    fx.write_file("alpha.txt", "a\n");
+    fx.write_file("beta.txt", "b\n");
+    // Launch with the workspace directory as the argument so the sidebar
+    // opens and takes focus.
+    let mut s = TxtSession::launch(
+        SessionOptions::new(fx.workspace_path(), fx.config_path())
+            .arg(fx.workspace_path().to_string_lossy()),
+    );
+    s.wait_for_first_paint();
+    // The sidebar tree lists the seeded files while it has focus.
+    s.wait_until(
+        |sc| sc.contents().contains("alpha.txt"),
+        Duration::from_secs(5),
+    );
+    s.send_key(Key::Ctrl('p'));
+    // Type a distinctive query that occurs nowhere else on screen. The picker
+    // renders it as "> zzqx_"; if the sidebar swallowed the keys the picker
+    // query line would stay empty and this string would never appear.
+    s.send_text("zzqx");
+    s.wait_until(|sc| sc.contents().contains("zzqx"), Duration::from_secs(5));
     s.shutdown();
 }
 

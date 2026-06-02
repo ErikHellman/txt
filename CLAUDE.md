@@ -71,13 +71,15 @@ Actions are intercepted in this order — higher priority handlers `return` earl
 4. `show_settings` → `handle_settings()` — returns `bool`; unhandled actions fall through
 5. `lsp_picker.is_some()` → `handle_lsp_picker()` — returns `bool`; unhandled actions fall through
 6. `!input_mode.is_normal()` → `handle_modal_input()` — status-bar prompts (must come before sidebar so rename/new-folder prompts receive input while sidebar is focused)
-7. `sidebar_focused` → `handle_sidebar_input()` — returns `bool`; unhandled actions fall through
-8. `command_palette.is_some()` → `handle_command_palette()` — captures all input
-9. `fuzzy_picker.is_some()` → `handle_fuzzy_picker()` — captures all input
+7. `git_dialog.is_some()` → `handle_git_dialog()` — captures all input
+8. Floating pickers — `project_search`, `command_palette`, `fuzzy_picker`, `symbol_picker` — must come **before** sidebar so typing reaches the open picker instead of being swallowed by the sidebar's catch-all (`_ => true`)
+9. `sidebar_focused` → `handle_sidebar_input()` — returns `bool`; unhandled actions fall through
 10. `completion.is_some()` → `handle_completion_input()` — partial capture; chars fall through to editing
 11. `references_list.is_some()` → `handle_references_input()` — captures all input
 12. `search_state.is_some()` → `handle_search_input()` — navigation falls through
 13. Normal editing dispatch
+
+**When adding a new floating picker/overlay that owns its input,** place its check before the sidebar (step 8) so it is usable regardless of whether the sidebar or editor has focus, and add its open-action to the fall-through allowlist in `handle_sidebar_input` so the keybinding works while the sidebar is focused.
 
 **When adding a new modal overlay:** make its handler return `bool` so global actions (Quit, ToggleHelp, etc.) are never accidentally swallowed.
 

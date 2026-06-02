@@ -197,6 +197,8 @@ impl AppState {
             | EditorAction::OpenCommandPalette
             | EditorAction::OpenFuzzyPicker
             | EditorAction::OpenRecentFiles
+            | EditorAction::OpenSymbolPicker
+            | EditorAction::OpenProjectSearch
             | EditorAction::OpenLspConfig
             | EditorAction::OpenGitDialog
             | EditorAction::ReloadConfig
