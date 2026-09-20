@@ -1,6 +1,7 @@
 mod app;
 mod buffer;
 mod clipboard;
+mod completions;
 mod config;
 mod editor;
 mod editorconfig;
@@ -52,6 +53,12 @@ struct Cli {
     /// Print shell completion script and exit.
     #[arg(long, value_name = "SHELL")]
     completions: Option<Shell>,
+
+    /// Install shell completions into your shell's startup file and exit.
+    ///
+    /// Without a SHELL argument, the current shell is detected from $SHELL.
+    #[arg(long, value_name = "SHELL", num_args = 0..=1, default_missing_value = "auto")]
+    install_completions: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -60,6 +67,11 @@ fn main() -> Result<()> {
     if let Some(shell) = cli.completions {
         let mut cmd = Cli::command();
         generate(shell, &mut cmd, "txt", &mut io::stdout());
+        return Ok(());
+    }
+
+    if let Some(shell_arg) = &cli.install_completions {
+        completions::install(shell_arg)?;
         return Ok(());
     }
 
