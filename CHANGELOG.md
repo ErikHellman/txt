@@ -1,9 +1,13 @@
 # Changelog
 
+## v0.8.1
+
+- Add a `workspace_storage` setting that controls where per-workspace state (session, marks, jump list, recents, persistent undo, `lsp.toml`, `formatters.toml`) lives: `workspace` (default) keeps `<workspace>/.txt/` as before, `global` stores it under `~/.config/txt/workspaces/<sha256-of-workspace-path>/` so the same tree gets its state regardless of where it's mounted, and `disabled` makes the editor read and write nothing per-workspace. A "Workspace storage" toggle cycles the values in the settings overlay; the change takes effect on the next start, and existing `.txt/` data is not migrated automatically
+- Rebind the settings overlay from Ctrl+, to Ctrl+Alt+, — terminals such as Ghostty consume Ctrl+, for their own config shortcut, so it never reached the editor
+
 ## v0.8.0
 
 - Add typo-tolerant fuzzy file search in the sidebar — Ctrl+F while the sidebar is focused opens an overlay that matches both files and directories; matching runs nucleo first and falls back to a typo-tolerant matcher that tolerates substituted and transposed letters, so misspelled queries still find files. Enter opens a file or navigates the tree to a directory; the editor's Ctrl+F search is unchanged
-- Rebind the settings overlay from Ctrl+, to Ctrl+Alt+, — terminals such as Ghostty consume Ctrl+, for their own config shortcut, so it never reached the editor
 - Split the F1 help overlay into six navigable tabs (Basics, Editing, Files, Panels, Search & LSP, Git & App) so each screen shows a small related group of bindings instead of one long four-column dump
 - Add `txt --install-completions [SHELL]` to set up shell completions automatically — appends a completion snippet to the shell's startup file (`~/.bashrc`, `$ZDOTDIR/.zshrc`, or the XDG fish config), defaulting to the shell detected from `$SHELL` and idempotent on reruns; shells without an rc-file get the generated script printed with instructions
 - Update tree-sitter to 0.27 and raise the related grammar crates
