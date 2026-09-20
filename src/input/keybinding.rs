@@ -516,7 +516,10 @@ impl KeyBindings {
         bind("ctrl+l", EditorAction::OpenLspConfig);
         bind("ctrl+r", EditorAction::OpenRecentFiles);
         bind("ctrl+/", EditorAction::ToggleLineComment);
-        bind("ctrl+,", EditorAction::OpenSettings);
+        // Ctrl+, is swallowed by some terminals (e.g. Ghostty's `open_config`
+        // default), so the settings overlay uses the ctrl+alt alias, which
+        // reaches the application on those terminals.
+        bind("ctrl+alt+,", EditorAction::OpenSettings);
         bind("ctrl+[", EditorAction::PrevTab);
         bind("ctrl+]", EditorAction::NextTab);
 

@@ -78,7 +78,7 @@ fn settings_overlay_lists_restore_session_toggle() {
     );
     s.wait_for_first_paint();
     s.wait_for_status_contains("toggle.txt");
-    s.send_key(Key::Ctrl(','));
+    s.send_key(Key::CtrlAlt(','));
     s.wait_for_screen_contains("Settings");
     s.wait_for_screen_contains("Restore session");
     s.shutdown();
@@ -96,7 +96,7 @@ fn settings_overlay_toggle_persists_restore_session() {
     );
     s.wait_for_first_paint();
     s.wait_for_status_contains("set.txt");
-    s.send_key(Key::Ctrl(','));
+    s.send_key(Key::CtrlAlt(','));
     s.wait_for_screen_contains("Restore session");
     // Settings cursor starts at row 0 (Confirm exit); restore_session is row 8.
     for _ in 0..8 {

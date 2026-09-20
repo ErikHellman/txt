@@ -201,7 +201,7 @@ fn settings_overlay_lists_all_tier3_toggles() {
     let path = fx.write_file("settings.txt", "x\n");
     let mut s = fx.open(&path);
     s.wait_for_status_contains("settings.txt");
-    s.send_key(Key::Ctrl(','));
+    s.send_key(Key::CtrlAlt(','));
     s.wait_for_screen_contains("Settings");
     for label in [
         "Highlight trailing whitespace",
@@ -223,7 +223,7 @@ fn settings_toggle_auto_pair_writes_config() {
     let path = fx.write_file("ap-toggle.txt", "x\n");
     let mut s = fx.open(&path);
     s.wait_for_status_contains("ap-toggle.txt");
-    s.send_key(Key::Ctrl(','));
+    s.send_key(Key::CtrlAlt(','));
     s.wait_for_screen_contains("Auto-pair brackets");
     // Auto-pair is row 5; defaults to ON so Space toggles to OFF.
     for _ in 0..5 {

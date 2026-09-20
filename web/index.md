@@ -123,10 +123,10 @@ Opening a directory brings up the file sidebar automatically. Press `F1` at any 
 | `Ctrl+Y` / `Ctrl+Shift+Z` | Redo |
 | `Ctrl+Shift+G` | Git operations dialog |
 | `Ctrl+L` | Configure LSP server |
-| `Ctrl+,` | Open settings |
+| `Ctrl+Alt+,` | Open settings |
 | `F1` | Show all key bindings |
 
-The default `txt` keymap is shown above. VS Code and IntelliJ IDEA presets are available from the settings UI (`Ctrl+,`), and a `~/.config/txt/keybindings.toml` overrides individual bindings.
+The default `txt` keymap is shown above. VS Code and IntelliJ IDEA presets are available from the settings UI (`Ctrl+Alt+,`), and a `~/.config/txt/keybindings.toml` overrides individual bindings.
 
 ## Configuring LSP servers
 

@@ -51,7 +51,7 @@ fn lines(version: &str) -> Vec<(&'static str, String)> {
         ("_", String::new()),
         ("s", "A few keys to start".to_string()),
         ("k", "F1          Show all key bindings".to_string()),
-        ("k", "Ctrl+,      Open settings".to_string()),
+        ("k", "Ctrl+Alt+,  Open settings".to_string()),
         ("k", "Ctrl+P      Fuzzy file picker".to_string()),
         ("k", "Ctrl+S      Save".to_string()),
         ("k", "Ctrl+Q      Quit".to_string()),
