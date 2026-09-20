@@ -437,7 +437,7 @@ const TEMPLATE: &[HelpEntry] = &[
     },
     HelpEntry::Binding {
         actions: &["toggle_help"],
-        desc: "Toggle this help  (\u{2191}\u{2193} to scroll)",
+        desc: "Toggle this help  (\u{2190}/\u{2192} tabs, \u{2191}\u{2193} scroll)",
     },
     HelpEntry::Binding {
         actions: &["open_settings"],
@@ -475,28 +475,136 @@ const TEMPLATE: &[HelpEntry] = &[
     },
 ];
 
-/// Layout constants for the 4-column help overlay.
+/// One help tab: a display label plus the template sections it contains.
+pub struct HelpTab {
+    pub label: &'static str,
+    pub sections: &'static [&'static str],
+}
+
+/// The help overlay is split into tabs so each screen shows a small,
+/// related set of keybindings instead of one long multi-column dump.
+pub const TABS: &[HelpTab] = &[
+    HelpTab {
+        label: "Basics",
+        sections: &["Navigation", "Selection"],
+    },
+    HelpTab {
+        label: "Editing",
+        sections: &["Multi-cursor", "Line transforms", "Editing"],
+    },
+    HelpTab {
+        label: "Files",
+        sections: &["Clipboard", "File & Tabs"],
+    },
+    HelpTab {
+        label: "Panels",
+        sections: &["Panels & Pickers", "Sidebar"],
+    },
+    HelpTab {
+        label: "Search & LSP",
+        sections: &["Search", "LSP (when active)"],
+    },
+    HelpTab {
+        label: "Git & App",
+        sections: &["View & App", "Git"],
+    },
+];
+
+/// Number of help tabs. Used for digit jumps (1–9) and wrap-around cycling.
+pub const NUM_TABS: usize = TABS.len();
+
+/// Layout constants for the help overlay.
 const MIN_OVERLAY_W: u16 = 50;
 const MAX_OVERLAY_W: u16 = 160;
 const COL_GAP: u16 = 2;
-const NUM_COLS: usize = 4;
-/// Top border (1) + header (1) + separator (1) + bottom border (1).
+/// Upper bound on content columns; fewer are used when the content fits.
+const MAX_COLS: usize = 4;
+/// Minimum sensible display width for one content column.
+const MIN_COL_W: usize = 22;
+/// Top border w/ title (1) + tab bar (1) + separator (1) + bottom border (1).
 const CHROME_ROWS: u16 = 4;
 
-/// Section names assigned to each of the 4 columns. Sections are kept in
-/// reading order and grouped to roughly balance column heights.
-const COLUMN_ASSIGNMENT: [&[&str]; NUM_COLS] = [
-    &["Navigation", "Selection"],
-    &["Multi-cursor", "Line transforms", "Editing"],
-    &["Clipboard", "File & Tabs", "Panels & Pickers"],
-    &[
-        "Search",
-        "LSP (when active)",
-        "Sidebar",
-        "View & App",
-        "Git",
-    ],
-];
+/// Compute the centred overlay rect for a given terminal area. Shared by
+/// the renderer and the mouse hit-tester so they always agree.
+fn overlay_rect(area: Rect) -> Rect {
+    let target_w = area.width.saturating_sub(2);
+    let overlay_w = target_w.clamp(MIN_OVERLAY_W, MAX_OVERLAY_W).min(area.width);
+    let overlay_h = area.height.saturating_sub(2).max(8).min(area.height);
+    let ox = area.x + area.width.saturating_sub(overlay_w) / 2;
+    let oy = area.y + area.height.saturating_sub(overlay_h) / 2;
+    Rect::new(ox, oy, overlay_w, overlay_h)
+}
+
+/// Width of one content column when `n` columns are displayed inside
+/// `inner_w`.
+fn col_width(inner_w: u16, n: usize) -> usize {
+    let n16 = n as u16;
+    let usable = inner_w.saturating_sub(COL_GAP * (n16 - 1));
+    (usable / n16).max(1) as usize
+}
+
+/// Positions of the tab-bar labels for a given terminal area.
+struct TabLayout {
+    /// True when the full label bar does not fit and a compact
+    /// `n / N label` indicator is rendered instead.
+    compact: bool,
+    x: u16,
+    y: u16,
+    widths: Vec<u16>,
+    gap: u16,
+}
+
+fn tab_layout(area: Rect) -> TabLayout {
+    let overlay = overlay_rect(area);
+    let inner_w = overlay.width.saturating_sub(2) as usize;
+    let y = overlay.y + 1;
+    let widths: Vec<usize> = TABS
+        .iter()
+        .map(|t| UnicodeWidthStr::width(t.label) + 2)
+        .collect();
+    let sum: usize = widths.iter().sum();
+    let n = TABS.len();
+    let wide_total = sum + 3 * (n - 1);
+    let (gap, total) = if wide_total <= inner_w {
+        (3, wide_total)
+    } else if sum + (n - 1) <= inner_w {
+        (1, sum + (n - 1))
+    } else {
+        return TabLayout {
+            compact: true,
+            x: overlay.x,
+            y,
+            widths: Vec::new(),
+            gap: 0,
+        };
+    };
+    let x = overlay.x + ((overlay.width as usize).saturating_sub(total) / 2) as u16;
+    TabLayout {
+        compact: false,
+        x,
+        y,
+        widths: widths.iter().map(|&w| w as u16).collect(),
+        gap: gap as u16,
+    }
+}
+
+/// Hit-test the help overlay's tab bar. Returns the tab index when
+/// `(col, row)` lands on a rendered tab label. In compact mode (bar too
+/// wide for the terminal) no tabs are clickable.
+pub fn tab_at(area: Rect, col: u16, row: u16) -> Option<usize> {
+    let layout = tab_layout(area);
+    if layout.compact || row != layout.y {
+        return None;
+    }
+    let mut x = layout.x;
+    for (i, w) in layout.widths.iter().enumerate() {
+        if col >= x && col < x + *w {
+            return Some(i);
+        }
+        x = x.saturating_add(*w).saturating_add(layout.gap);
+    }
+    None
+}
 
 /// One semantic entry under a section (before width-based wrapping).
 struct HelpItem {
@@ -549,6 +657,7 @@ fn build_grouped(bindings: &KeyBindings) -> Vec<(&'static str, Vec<HelpItem>)> {
 }
 
 /// One rendered line inside a column, after wrapping.
+#[derive(Clone)]
 enum ColumnLine {
     Section(&'static str),
     Entry { key: String, desc: String },
@@ -648,36 +757,72 @@ fn wrap_key(key: &str, max: usize) -> Vec<String> {
     lines
 }
 
-/// Build the rendered lines for one column from its assigned sections.
-fn build_column_lines(
+/// Build the rendered lines (one header line plus wrapped entries) for a
+/// single section.
+fn build_section_block(
+    name: &'static str,
+    items: &[HelpItem],
+    key_w: usize,
+    desc_w: usize,
+) -> Vec<ColumnLine> {
+    let mut lines = vec![ColumnLine::Section(name)];
+    for item in items {
+        let key_lines = wrap_key(&item.key, key_w);
+        let desc_lines = wrap_str(item.desc, desc_w);
+        let n = key_lines.len().max(desc_lines.len()).max(1);
+        for i in 0..n {
+            let k = key_lines.get(i).cloned().unwrap_or_default();
+            let d = desc_lines.get(i).cloned().unwrap_or_default();
+            lines.push(ColumnLine::Entry { key: k, desc: d });
+        }
+    }
+    lines
+}
+
+/// Build the wrapped line blocks of one tab's sections, in order.
+fn build_section_blocks(
     sections: &[&str],
     groups: &[(&'static str, Vec<HelpItem>)],
     key_w: usize,
     desc_w: usize,
-) -> Vec<ColumnLine> {
-    let mut lines = Vec::new();
-    let mut first = true;
-    for &section_name in sections {
-        let Some((name, items)) = groups.iter().find(|(n, _)| *n == section_name) else {
-            continue;
-        };
-        if !first {
-            lines.push(ColumnLine::Blank);
+) -> Vec<Vec<ColumnLine>> {
+    sections
+        .iter()
+        .filter_map(|section_name| {
+            groups
+                .iter()
+                .find(|(n, _)| n == section_name)
+                .map(|(name, items)| build_section_block(name, items, key_w, desc_w))
+        })
+        .collect()
+}
+
+/// Greedily distribute whole section blocks into `n` columns, inserting a
+/// blank separator line between blocks within a column. A new column is
+/// only started when the current one already holds content and the next
+/// block would overflow it, so content is never split mid-section unless
+/// a single section alone exceeds `visible` rows.
+fn split_blocks(blocks: &[Vec<ColumnLine>], n: usize, visible: usize) -> Vec<Vec<ColumnLine>> {
+    let mut cols: Vec<Vec<ColumnLine>> = vec![Vec::new(); n];
+    let mut ci = 0usize;
+    for block in blocks {
+        if !cols[ci].is_empty() && cols[ci].len() + 1 + block.len() > visible && ci + 1 < n {
+            ci += 1;
         }
-        first = false;
-        lines.push(ColumnLine::Section(name));
-        for item in items {
-            let key_lines = wrap_key(&item.key, key_w);
-            let desc_lines = wrap_str(item.desc, desc_w);
-            let n = key_lines.len().max(desc_lines.len()).max(1);
-            for i in 0..n {
-                let k = key_lines.get(i).cloned().unwrap_or_default();
-                let d = desc_lines.get(i).cloned().unwrap_or_default();
-                lines.push(ColumnLine::Entry { key: k, desc: d });
-            }
+        if !cols[ci].is_empty() {
+            cols[ci].push(ColumnLine::Blank);
         }
+        cols[ci].extend_from_slice(block);
     }
-    lines
+    cols
+}
+
+/// True when every block of `blocks` fits in `n` columns of `visible` rows
+/// without scrolling.
+fn fits(blocks: &[Vec<ColumnLine>], n: usize, visible: usize) -> bool {
+    split_blocks(blocks, n, visible)
+        .iter()
+        .all(|col| col.len() <= visible)
 }
 
 /// Pad `s` with trailing spaces to exactly `w` display columns, truncating
@@ -719,12 +864,58 @@ fn dedup_and_join(keys: &[String]) -> String {
     seen.join(" / ")
 }
 
-/// Render a scrollable keybinding cheat-sheet as a 4-column overlay that
+/// Render the tab bar row (`overlay.y + 1`). In compact mode a centred
+/// `n / N label` indicator replaces the per-tab labels.
+fn render_tab_bar(
+    buf: &mut TermBuffer,
+    area: Rect,
+    active: usize,
+    active_style: Style,
+    inactive_style: Style,
+    border_style: Style,
+) {
+    let layout = tab_layout(area);
+    if layout.compact {
+        let overlay = overlay_rect(area);
+        let text = format!(" {} / {} {} ", active + 1, NUM_TABS, TABS[active].label);
+        let text = truncate_to_width(&text, overlay.width.saturating_sub(2) as usize);
+        let tx = overlay.x.saturating_add(
+            overlay
+                .width
+                .saturating_sub(UnicodeWidthStr::width(text) as u16)
+                / 2,
+        );
+        buf.set_string(tx, layout.y, text, active_style);
+        return;
+    }
+    let mut x = layout.x;
+    for (i, tab) in TABS.iter().enumerate() {
+        let label = format!(" {} ", tab.label);
+        let style = if i == active {
+            active_style
+        } else {
+            inactive_style
+        };
+        let display = truncate_to_width(&label, layout.widths[i] as usize);
+        buf.set_string(x, layout.y, display, style);
+        x += layout.widths[i];
+        if i + 1 < TABS.len() {
+            // Draw the separator glyph centred in the gap between labels.
+            let sep_x = x + layout.gap / 2;
+            buf.set_string(sep_x, layout.y, "\u{2502}", border_style);
+            x += layout.gap;
+        }
+    }
+}
+
+/// Render one tab of the keybinding cheat-sheet as a centred overlay that
 /// stretches to nearly the full terminal width (capped at `MAX_OVERLAY_W`).
 ///
-/// `scroll` is the number of rows to skip from the top of each column. The
-/// render function clamps it to the tallest column's row count.
-pub fn render(area: Rect, buf: &mut TermBuffer, scroll: usize, bindings: &KeyBindings) {
+/// `tab` selects the active help tab (clamped to range). `scroll` is the
+/// number of rows to skip from the top of each content column; it is
+/// clamped to the tallest column's row count. Content is laid out in the
+/// smallest number of columns (1–4) that fits without scrolling.
+pub fn render(area: Rect, buf: &mut TermBuffer, tab: usize, scroll: usize, bindings: &KeyBindings) {
     if area.width < 20 || area.height < 6 {
         return;
     }
@@ -736,6 +927,11 @@ pub fn render(area: Rect, buf: &mut TermBuffer, scroll: usize, bindings: &KeyBin
         .bg(bg)
         .fg(Color::Rgb(200, 200, 255))
         .add_modifier(Modifier::BOLD);
+    let active_tab_style = Style::default()
+        .bg(bg)
+        .fg(Color::Rgb(160, 210, 255))
+        .add_modifier(Modifier::BOLD);
+    let inactive_tab_style = Style::default().bg(bg).fg(Color::Rgb(110, 125, 165));
     let section_style = Style::default()
         .bg(bg)
         .fg(Color::Rgb(100, 130, 180))
@@ -744,20 +940,8 @@ pub fn render(area: Rect, buf: &mut TermBuffer, scroll: usize, bindings: &KeyBin
     let desc_style = Style::default().bg(bg).fg(Color::Rgb(200, 200, 220));
 
     // ── Overlay dimensions ────────────────────────────────────────────
-    let target_w = area.width.saturating_sub(2);
-    let overlay_w = target_w.clamp(MIN_OVERLAY_W, MAX_OVERLAY_W).min(area.width);
-    let overlay_h = area.height.saturating_sub(2).max(8).min(area.height);
-    let ox = area.x + area.width.saturating_sub(overlay_w) / 2;
-    let oy = area.y + area.height.saturating_sub(overlay_h) / 2;
-    let overlay_area = Rect::new(ox, oy, overlay_w, overlay_h);
-
-    // ── Column geometry ───────────────────────────────────────────────
-    let cols = NUM_COLS as u16;
-    let inner_w = overlay_w.saturating_sub(2);
-    let usable = inner_w.saturating_sub(COL_GAP * (cols - 1));
-    let col_w = (usable / cols).max(1) as usize;
-    let key_w = (col_w * 4 / 10).max(6);
-    let desc_w = col_w.saturating_sub(key_w + 1).max(1);
+    let overlay_area = overlay_rect(area);
+    let tab = tab.min(NUM_TABS.saturating_sub(1));
 
     // ── Fill background ───────────────────────────────────────────────
     for y in overlay_area.y..overlay_area.y + overlay_area.height {
@@ -769,26 +953,66 @@ pub fn render(area: Rect, buf: &mut TermBuffer, scroll: usize, bindings: &KeyBin
     // ── Border ────────────────────────────────────────────────────────
     draw_border(buf, overlay_area, border_style);
 
-    // ── Header ────────────────────────────────────────────────────────
+    // ── Header (on the top border row) ────────────────────────────────
     let header = " Keybindings ";
     let hx = overlay_area.x + overlay_area.width.saturating_sub(header.len() as u16) / 2;
     buf.set_string(hx, overlay_area.y, header, header_style);
 
-    // Separator line beneath header.
+    // ── Tab bar ───────────────────────────────────────────────────────
+    render_tab_bar(
+        buf,
+        area,
+        tab,
+        active_tab_style,
+        inactive_tab_style,
+        border_style,
+    );
+
+    // Separator line beneath the tab bar.
     let sep_y = overlay_area.y + 2;
     for x in overlay_area.x + 1..overlay_area.x + overlay_area.width.saturating_sub(1) {
         buf.set_string(x, sep_y, "\u{2500}", border_style);
     }
 
-    // ── Build per-column line lists ───────────────────────────────────
+    // ── Adaptive column layout for the active tab ─────────────────────
+    let inner_w = overlay_area.width.saturating_sub(2);
+    let visible_rows = overlay_area.height.saturating_sub(CHROME_ROWS) as usize;
+    let max_cols_by_width = (1..=MAX_COLS)
+        .take_while(|&n| n == 1 || col_width(inner_w, n) >= MIN_COL_W)
+        .count()
+        .max(1);
+
     let groups = build_grouped(bindings);
-    let columns: Vec<Vec<ColumnLine>> = COLUMN_ASSIGNMENT
-        .iter()
-        .map(|sections| build_column_lines(sections, &groups, key_w, desc_w))
-        .collect();
+    let active_tab = &TABS[tab];
+
+    let build_cols = |n: usize| {
+        let c = col_width(inner_w, n);
+        let key_w = (c * 4 / 10).max(6);
+        let desc_w = c.saturating_sub(key_w + 1).max(1);
+        let blocks = build_section_blocks(active_tab.sections, &groups, key_w, desc_w);
+        (c, key_w, desc_w, blocks)
+    };
+
+    let (col_w, key_w, desc_w, columns) = {
+        let mut chosen: Option<(usize, usize, usize, Vec<Vec<ColumnLine>>)> = None;
+        for n in 1..=max_cols_by_width {
+            let (c, kw, dw, blocks) = build_cols(n);
+            if fits(&blocks, n, visible_rows) {
+                chosen = Some((c, kw, dw, split_blocks(&blocks, n, visible_rows)));
+                break;
+            }
+        }
+        match chosen {
+            Some((c, kw, dw, cols)) => (c, kw, dw, cols),
+            None => {
+                let (c, kw, dw, blocks) = build_cols(max_cols_by_width);
+                let cols = split_blocks(&blocks, max_cols_by_width, visible_rows);
+                (c, kw, dw, cols)
+            }
+        }
+    };
 
     // ── Scroll clamping ───────────────────────────────────────────────
-    let visible_rows = overlay_h.saturating_sub(CHROME_ROWS) as usize;
     let max_col_rows = columns.iter().map(|c| c.len()).max().unwrap_or(0);
     let max_scroll = max_col_rows.saturating_sub(visible_rows);
     let scroll = scroll.min(max_scroll);
@@ -867,7 +1091,7 @@ mod tests {
     fn render_does_not_panic_on_normal_area() {
         let (mut buf, area) = make_buf(120, 40);
         let bindings = default_bindings();
-        render(area, &mut buf, 0, &bindings);
+        render(area, &mut buf, 0, 0, &bindings);
         let content: String = (0..120)
             .map(|x| {
                 buf.cell((x, 2))
@@ -885,7 +1109,7 @@ mod tests {
     fn render_skips_tiny_area() {
         let (mut buf, area) = make_buf(10, 5);
         let bindings = default_bindings();
-        render(area, &mut buf, 0, &bindings);
+        render(area, &mut buf, 0, 0, &bindings);
         let all_spaces = buf.content().iter().all(|c| c.symbol() == " ");
         assert!(all_spaces, "tiny area should produce no output");
     }
@@ -894,7 +1118,7 @@ mod tests {
     fn render_large_area_has_border_chars() {
         let (mut buf, area) = make_buf(100, 40);
         let bindings = default_bindings();
-        render(area, &mut buf, 0, &bindings);
+        render(area, &mut buf, 0, 0, &bindings);
         let has_border = buf
             .content()
             .iter()
@@ -906,8 +1130,8 @@ mod tests {
     fn render_with_scroll_does_not_panic() {
         let (mut buf, area) = make_buf(100, 40);
         let bindings = default_bindings();
-        render(area, &mut buf, 5, &bindings);
-        render(area, &mut buf, 9999, &bindings); // clamped, should not panic
+        render(area, &mut buf, 0, 5, &bindings);
+        render(area, &mut buf, 0, 9999, &bindings); // clamped, should not panic
     }
 
     #[test]
@@ -937,7 +1161,7 @@ mod tests {
         let bindings = default_bindings();
         for w in 20..=80 {
             let (mut buf, area) = make_buf(w, 40);
-            render(area, &mut buf, 0, &bindings);
+            render(area, &mut buf, 0, 0, &bindings);
         }
     }
 
@@ -948,9 +1172,9 @@ mod tests {
         assert!(!groups.is_empty());
         assert_eq!(groups[0].0, "Navigation");
         assert!(!groups[0].1.is_empty());
-        // Every section listed in COLUMN_ASSIGNMENT must exist in TEMPLATE.
-        for sections in COLUMN_ASSIGNMENT.iter() {
-            for &name in sections.iter() {
+        // Every section listed in TABS must exist in TEMPLATE.
+        for tab in TABS.iter() {
+            for &name in tab.sections.iter() {
                 assert!(
                     groups.iter().any(|(n, _)| *n == name),
                     "missing section in TEMPLATE: {name}"
@@ -984,24 +1208,139 @@ mod tests {
         assert!(out.iter().any(|l| l.ends_with(" /")));
     }
 
-    #[test]
-    fn render_at_wide_width_uses_four_columns() {
-        let (mut buf, area) = make_buf(160, 50);
-        let bindings = default_bindings();
-        render(area, &mut buf, 0, &bindings);
-        // Each column's first section header must appear on screen at scroll=0.
-        let mut found_text = String::new();
-        for y in 0..50 {
-            for x in 0..160 {
+    fn dump(area: Rect, buf: &TermBuffer) -> String {
+        let mut text = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
                 if let Some(c) = buf.cell((x, y)) {
-                    found_text.push_str(c.symbol());
+                    text.push_str(c.symbol());
                 }
             }
-            found_text.push('\n');
+            text.push('\n');
         }
-        assert!(found_text.contains("Navigation"), "col 1 header missing");
-        assert!(found_text.contains("Multi-cursor"), "col 2 header missing");
-        assert!(found_text.contains("Clipboard"), "col 3 header missing");
-        assert!(found_text.contains("Search"), "col 4 header missing");
+        text
+    }
+
+    #[test]
+    fn render_shows_tab_bar_and_active_sections() {
+        let (mut buf, area) = make_buf(160, 50);
+        let bindings = default_bindings();
+        render(area, &mut buf, 0, 0, &bindings);
+        let text = dump(area, &buf);
+        // All tab labels are visible on a wide terminal.
+        for tab in TABS.iter() {
+            assert!(text.contains(tab.label), "tab label missing: {}", tab.label);
+        }
+        // Tab 0 shows both of its sections.
+        assert!(text.contains("Navigation"), "tab 0 header missing");
+        assert!(text.contains("Selection"), "tab 0 second header missing");
+        // Sections from other tabs must not leak into tab 0.
+        assert!(!text.contains("Clipboard"), "foreign section leaked");
+    }
+
+    #[test]
+    fn render_each_tab_shows_its_sections() {
+        let bindings = default_bindings();
+        for (i, tab) in TABS.iter().enumerate() {
+            let (mut buf, area) = make_buf(160, 50);
+            render(area, &mut buf, i, 0, &bindings);
+            let text = dump(area, &buf);
+            for &section in tab.sections.iter() {
+                assert!(
+                    text.contains(section),
+                    "tab {i} ({}) missing section: {section}",
+                    tab.label
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tab_at_hit_tests_tab_bar() {
+        let area = Rect::new(0, 0, 120, 40);
+        let overlay = overlay_rect(area);
+        let layout = tab_layout(area);
+        assert!(!layout.compact, "labels should fit at 120 cols");
+        assert_eq!(layout.y, overlay.y + 1);
+
+        // First label starts at layout.x; edges outside the bar are not tabs.
+        assert_eq!(tab_at(area, layout.x, layout.y), Some(0));
+        assert_eq!(tab_at(area, overlay.x, layout.y), None);
+        assert_eq!(tab_at(area, layout.x, layout.y + 1), None);
+
+        // Just past the final label is not a tab.
+        let end =
+            layout.x + layout.widths.iter().sum::<u16>() + layout.gap * (TABS.len() as u16 - 1);
+        assert_eq!(tab_at(area, end, layout.y), None);
+
+        // Every tab label midpoint resolves to its own index.
+        let mut x = layout.x;
+        for (i, w) in layout.widths.iter().enumerate() {
+            let mid = x + w / 2;
+            assert_eq!(tab_at(area, mid, layout.y), Some(i));
+            x += w + layout.gap;
+        }
+    }
+
+    #[test]
+    fn tab_at_compact_mode_is_not_clickable() {
+        // At 24 cols the overlay is tiny and the label bar cannot fit.
+        let area = Rect::new(0, 0, 24, 12);
+        assert!(tab_layout(area).compact);
+        let row = tab_layout(area).y;
+        assert_eq!(tab_at(area, 0, row), None);
+    }
+
+    #[test]
+    fn split_blocks_never_splits_sections_when_they_fit() {
+        let bindings = default_bindings();
+        let groups = build_grouped(&bindings);
+        let blocks = build_section_blocks(TABS[0].sections, &groups, 30, 20);
+        let total: usize = blocks.iter().map(|b| b.len()).sum();
+        // Everything fits in one wide column, with one blank between blocks.
+        let one = split_blocks(&blocks, 1, 1000);
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].len(), total + blocks.len() - 1);
+        // Two columns with room to spare: the second stays empty.
+        let two = split_blocks(&blocks, 2, 1000);
+        assert!(two[1].is_empty());
+    }
+
+    #[test]
+    fn render_adapts_column_count_to_content() {
+        // On a tall terminal a tab that fits needs no scrolling.
+        let (mut buf, area) = make_buf(120, 60);
+        let bindings = default_bindings();
+        render(area, &mut buf, 3, 0, &bindings);
+        let text = dump(area, &buf);
+        assert!(text.contains("Panels & Pickers"));
+        assert!(text.contains("Sidebar"));
+        // Both sections appear without a down-scroll hint.
+        assert!(!text.contains(" \u{2193} "), "tab should fit at 120x60");
+    }
+
+    #[test]
+    fn render_all_tabs_do_not_panic_at_narrow_widths() {
+        let bindings = default_bindings();
+        for tab in 0..NUM_TABS {
+            for w in 20..=80 {
+                let (mut buf, area) = make_buf(w, 40);
+                render(area, &mut buf, tab, 0, &bindings);
+            }
+        }
+    }
+
+    #[test]
+    fn render_out_of_range_tab_is_clamped() {
+        let (mut buf, area) = make_buf(120, 40);
+        let bindings = default_bindings();
+        render(area, &mut buf, NUM_TABS, 0, &bindings);
+        render(area, &mut buf, usize::MAX, 0, &bindings);
+        let text = dump(area, &buf);
+        // Clamp lands on the last tab.
+        assert!(
+            text.contains("View & App"),
+            "clamped tab should render last tab"
+        );
     }
 }

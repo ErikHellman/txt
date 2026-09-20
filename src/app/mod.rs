@@ -86,6 +86,9 @@ pub struct AppState {
     /// not shown (single tab). Used by mouse-event routing to hit-test tab
     /// labels.
     pub tab_bar_area: Option<Rect>,
+    /// Full terminal rect captured while the help overlay is open, so mouse
+    /// events can hit-test the help tab bar. `None` when help is closed.
+    pub help_area: Option<Rect>,
     /// Active separator-drag, if any.
     pub sidebar_drag: Option<SidebarDrag>,
     /// Active Alt+drag box-select anchor, in (line, display_col).
@@ -103,6 +106,8 @@ pub struct AppState {
     pub command_palette: Option<CommandPaletteState>,
     pub show_help: bool,
     pub help_scroll: usize,
+    /// Active help overlay tab (index into `help_overlay::TABS`).
+    pub help_tab: usize,
     pub show_settings: bool,
     pub settings_cursor: usize,
     /// First-launch welcome overlay. Set in `AppState::new` when no config
@@ -224,6 +229,7 @@ impl AppState {
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
             sidebar_area: None,
             tab_bar_area: None,
+            help_area: None,
             sidebar_drag: None,
             box_drag_anchor: None,
             last_click: None,
@@ -234,6 +240,7 @@ impl AppState {
             command_palette: None,
             show_help: false,
             help_scroll: 0,
+            help_tab: 0,
             show_settings: false,
             settings_cursor: 0,
             show_welcome,
@@ -1185,6 +1192,7 @@ impl AppState {
                 self.show_help = !self.show_help;
                 if self.show_help {
                     self.help_scroll = 0;
+                    self.help_tab = 0;
                 }
             }
             EditorAction::OpenSettings => {

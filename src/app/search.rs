@@ -325,6 +325,7 @@ impl AppState {
                 self.show_help = !self.show_help;
                 if self.show_help {
                     self.help_scroll = 0;
+                    self.help_tab = 0;
                 }
             }
             _ => {}
