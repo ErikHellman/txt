@@ -67,6 +67,8 @@ pub struct AppState {
     pub input_mode: InputMode,
     pub fuzzy_picker: Option<FuzzyPickerState>,
     pub symbol_picker: Option<SymbolPickerState>,
+    /// Ctrl+F sidebar file search (files + directories, typo-tolerant).
+    pub sidebar_search: Option<SidebarSearchState>,
     pub marks: crate::marks::NamedMarks,
     pub jumps: crate::marks::JumpList,
     /// Lazy-loaded snippet store, populated per language on first use.
@@ -220,6 +222,7 @@ impl AppState {
             input_mode: InputMode::Normal,
             fuzzy_picker: None,
             symbol_picker: None,
+            sidebar_search: None,
             marks: crate::marks::NamedMarks::load(&workspace),
             jumps: crate::marks::JumpList::load(&workspace),
             snippets: crate::snippet::SnippetStore::new(),
@@ -392,6 +395,14 @@ impl AppState {
         // Command palette — captured input
         if self.command_palette.is_some() {
             self.handle_command_palette(action);
+            return;
+        }
+
+        // Sidebar file search — captured input. Checked alongside the other
+        // floating pickers so typing reaches it instead of the sidebar's
+        // catch-all, regardless of sidebar focus.
+        if self.sidebar_search.is_some() {
+            self.handle_sidebar_search(action);
             return;
         }
 

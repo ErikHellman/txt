@@ -17,6 +17,7 @@ pub mod references_list;
 pub mod search_bar;
 pub mod settings_overlay;
 pub mod sidebar;
+pub mod sidebar_search;
 pub mod status_bar;
 pub mod sticky_header;
 pub mod symbol_picker;
@@ -284,6 +285,11 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
         }
         let msg_len = msg.len().min(status_area.width as usize);
         buf.set_string(status_area.x, status_area.y, &msg[..msg_len], prompt_style);
+    }
+
+    // ── Sidebar file search overlay ─────────────────────────────────────────
+    if let Some(picker) = &state.sidebar_search {
+        sidebar_search::render(picker, &theme, area, state.sidebar_area, buf);
     }
 
     // ── Fuzzy picker floating overlay ─────────────────────────────────────────

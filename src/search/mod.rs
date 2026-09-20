@@ -1,3 +1,4 @@
+pub mod fuzzy_typo;
 pub mod project;
 
 use ignore::WalkBuilder;
