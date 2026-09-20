@@ -214,7 +214,7 @@ All editing and navigation operations apply to every cursor simultaneously.
 |-----|--------|
 | Alt+Z | Toggle word wrap |
 | F1 | Toggle help overlay |
-| Ctrl+, | Open settings |
+| Ctrl+Alt+, | Open settings |
 | Ctrl+L | Configure LSP server |
 | Ctrl+Q | Quit |
 
@@ -277,7 +277,7 @@ Alt+Shift+Down/Up adds a cursor on the adjacent line at the same column. All cur
 
 **Location:** `~/.config/txt/config.toml`
 
-All fields are optional. The file is created with defaults on first save via the settings overlay (Ctrl+,).
+All fields are optional. The file is created with defaults on first save via the settings overlay (Ctrl+Alt+,).
 
 ```toml
 tab_size = 4              # spaces per indent level
@@ -297,7 +297,7 @@ theme = "default"         # "default" | "monokai" | "gruvbox" | "nord"
 | `show_whitespace` | bool | `false` | Show visible whitespace glyphs |
 | `theme` | string | `"default"` | Color theme |
 
-Settings can also be changed interactively via **Ctrl+,** and are written back to `config.toml` immediately.
+Settings can also be changed interactively via **Ctrl+Alt+,** and are written back to `config.toml` immediately.
 
 **Recent files** are stored per-workspace in `<workspace>/.txt/recents.json` (up to 50 entries). This file is local to each project. If you do not want it to appear in Git, add `.txt/` to your project's `.gitignore`.
 

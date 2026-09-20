@@ -106,7 +106,7 @@ fn settings_overlay_lists_workspace_storage_toggle() {
     );
     s.wait_for_first_paint();
     s.wait_for_status_contains("settings.txt");
-    s.send_key(Key::Ctrl(','));
+    s.send_key(Key::CtrlAlt(','));
     s.wait_for_screen_contains("Settings");
     s.wait_for_screen_contains("Workspace storage");
 

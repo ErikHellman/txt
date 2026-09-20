@@ -32,6 +32,10 @@ pub enum Key {
     Ctrl(char),
     /// Ctrl+Shift+letter via the kitty CSI-u sequence.
     CtrlShift(char),
+    /// Ctrl+Alt+letter via the kitty CSI-u sequence (embedded terminals such
+    /// as Ghostty consume plain Ctrl+, so the settings overlay rebinds to
+    /// Ctrl+Alt+,).
+    CtrlAlt(char),
     Alt(char),
     /// Ctrl+digit via the kitty CSI-u sequence; ASCII '0'..='9'.
     CtrlDigit(char),
@@ -107,6 +111,10 @@ pub fn key_to_bytes(k: Key) -> Vec<u8> {
             s.push(c);
             v.extend_from_slice(s.as_bytes());
             v
+        }
+        Key::CtrlAlt(c) => {
+            let code = c.to_ascii_lowercase() as u32;
+            format!("\x1b[{code};7u").into_bytes()
         }
         Key::CtrlDigit(c) => {
             assert!(c.is_ascii_digit(), "CtrlDigit expects ASCII '0'..='9'");
