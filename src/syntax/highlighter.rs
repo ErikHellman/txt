@@ -164,7 +164,7 @@ fn visit(
     // Don't treat as leaf - always recurse.
     if lang == Lang::Markdown && kind == "inline" {
         for i in 0..node.child_count() {
-            if let Some(child) = node.child(i as u32) {
+            if let Some(child) = node.child(i) {
                 visit(child, lang, source, start_byte, end_byte, spans);
             }
         }
@@ -199,12 +199,12 @@ fn visit(
     // (e.g., identifiers inside function declarations).
     let ctx = kind;
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
+        if let Some(child) = node.child(i) {
             // Special-case: identifier whose parent context implies Function.
             if child.kind() == "identifier" && is_function_context(ctx, lang) {
                 // Only the first named identifier child is the function name.
                 // Check field_name to be sure.
-                let field = node.field_name_for_child(i as u32);
+                let field = node.field_name_for_child(i);
                 if matches!(field, Some("name")) {
                     let s = child.start_byte().max(start_byte);
                     let e = child.end_byte().min(end_byte);
@@ -706,7 +706,7 @@ fn handle_markdown_code_fence(
     let mut code_end: usize = 0;
 
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
+        if let Some(child) = node.child(i) {
             match child.kind() {
                 "info_string" => {
                     let text = node_text(child, source).trim().to_string();
@@ -730,7 +730,7 @@ fn handle_markdown_code_fence(
 
     // Recursively visit all children to highlight fence markers and info_string
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
+        if let Some(child) = node.child(i) {
             if child.kind() == "code_fence_content" {
                 continue; // Handle separately for embedded highlighting
             }
@@ -821,7 +821,7 @@ fn collect_embedded_spans(
 
     // Recurse
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
+        if let Some(child) = node.child(i) {
             collect_embedded_spans(&child, lang, offset, start_byte, end_byte, spans);
         }
     }

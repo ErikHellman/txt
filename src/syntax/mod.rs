@@ -267,7 +267,7 @@ impl SyntaxHost {
         let mut matches = cursor.matches(&query, tree.root_node(), bytes);
         let mut out: Vec<ByteRange> = Vec::new();
         while let Some(m) = matches.next() {
-            for cap in m.captures {
+            for cap in m.captures() {
                 let r = ByteRange::new(cap.node.start_byte(), cap.node.end_byte());
                 out.push(r);
             }
@@ -318,7 +318,7 @@ impl SyntaxHost {
         while let Some(m) = matches.next() {
             let mut name_text: Option<String> = None;
             let mut symbol_range: Option<(ByteRange, &'static str)> = None;
-            for cap in m.captures {
+            for cap in m.captures() {
                 let cap_name = match capture_names.get(cap.index as usize) {
                     Some(s) => *s,
                     None => continue,

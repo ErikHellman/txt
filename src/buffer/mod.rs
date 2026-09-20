@@ -1941,15 +1941,13 @@ fn digit_span_at(text: &str, at: usize) -> Option<(usize, usize)> {
         .is_some_and(|c| c.is_ascii_digit())
     {
         let line_end = text[end..].find('\n').map(|p| end + p).unwrap_or(len);
-        if let Some(next_digit) = text[end..line_end]
-            .char_indices()
-            .find(|(_, c)| c.is_ascii_digit())
-            .map(|(i, _)| end + i)
         {
+            let next_digit = text[end..line_end]
+                .char_indices()
+                .find(|(_, c)| c.is_ascii_digit())
+                .map(|(i, _)| end + i)?;
             start = next_digit;
             end = next_digit;
-        } else {
-            return None;
         }
     }
     // Walk forward through digits.
