@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.8.0
+
+- Add typo-tolerant fuzzy file search in the sidebar — Ctrl+F while the sidebar is focused opens an overlay that matches both files and directories; matching runs nucleo first and falls back to a typo-tolerant matcher that tolerates substituted and transposed letters, so misspelled queries still find files. Enter opens a file or navigates the tree to a directory; the editor's Ctrl+F search is unchanged
+- Split the F1 help overlay into six navigable tabs (Basics, Editing, Files, Panels, Search & LSP, Git & App) so each screen shows a small related group of bindings instead of one long four-column dump
+- Add `txt --install-completions [SHELL]` to set up shell completions automatically — appends a completion snippet to the shell's startup file (`~/.bashrc`, `$ZDOTDIR/.zshrc`, or the XDG fish config), defaulting to the shell detected from `$SHELL` and idempotent on reruns; shells without an rc-file get the generated script printed with instructions
+- Update tree-sitter to 0.27 and raise the related grammar crates
+
 ## v0.7.2
 
 - Fix the command palette and fuzzy picker (Go To File / Recent Files) silently dropping typed input when the sidebar had focus — the picker handlers now run before the sidebar so an open overlay receives keystrokes regardless of which pane is focused; pressing Esc returns focus to the sidebar
