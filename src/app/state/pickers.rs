@@ -303,3 +303,230 @@ impl LspPickerState {
         1 + LSP_SERVER_OPTIONS.len() // "Disabled" + servers
     }
 }
+
+// ── Sidebar file search ────────────────────────────────────────────────
+
+/// State for the Ctrl+F sidebar file-search overlay. Like
+/// [`FuzzyPickerState`] but covers both files and directories, and adds a
+/// typo-tolerant fallback pass ([`crate::search::fuzzy_typo`]) over the
+/// entries nucleo rejects, so misspelled queries still surface results.
+pub struct SidebarSearchState {
+    pub query: String,
+    /// All files and directories in the project directory (populated once on
+    /// open), as `(path, is_dir)`.
+    pub all_entries: Vec<(PathBuf, bool)>,
+    /// Scored and sorted hits: `(score, index into all_entries)`. Exact
+    /// (nucleo) matches always precede typo-fallback matches.
+    pub filtered: Vec<(u32, usize)>,
+    /// Currently highlighted row (0-based within `filtered`).
+    pub selected: usize,
+}
+
+const SIDEBAR_SEARCH_CAP: usize = 200;
+
+impl SidebarSearchState {
+    /// Build by walking the current directory with `ignore` (respects
+    /// .gitignore), collecting files **and** directories.
+    pub fn new(hide_git: bool, hide_dot: bool) -> Self {
+        let mut all_entries = Vec::new();
+        let mut builder = ignore::WalkBuilder::new(".");
+        builder.hidden(false).git_ignore(true);
+        crate::search::apply_hidden_dir_filters(&mut builder, hide_git, hide_dot);
+        for entry in builder.build().flatten() {
+            if entry.depth() == 0 {
+                // Skip the workspace root itself; the sidebar always shows it.
+                continue;
+            }
+            let Some(ft) = entry.file_type() else {
+                continue;
+            };
+            let is_dir = ft.is_dir();
+            if !is_dir && !ft.is_file() {
+                continue;
+            }
+            let p = entry.into_path();
+            let p = p.strip_prefix("./").map(PathBuf::from).unwrap_or(p);
+            all_entries.push((p, is_dir));
+        }
+        all_entries.sort();
+        Self {
+            query: String::new(),
+            all_entries,
+            filtered: Self::unfiltered(&[]),
+            selected: 0,
+        }
+    }
+
+    /// First `CAP` entry indices with score 0 (shown for an empty query).
+    fn unfiltered(entries: &[(PathBuf, bool)]) -> Vec<(u32, usize)> {
+        let n = entries.len().min(SIDEBAR_SEARCH_CAP);
+        (0..n).map(|i| (0u32, i)).collect()
+    }
+
+    /// Build from an explicit entry list (tests / future callers).
+    #[cfg(test)]
+    pub fn from_entries(entries: Vec<(PathBuf, bool)>) -> Self {
+        let filtered = Self::unfiltered(&entries);
+        Self {
+            query: String::new(),
+            all_entries: entries,
+            filtered,
+            selected: 0,
+        }
+    }
+
+    /// Re-score the entry list against the current query.
+    ///
+    /// Pass 1 scores every path with nucleo (fzf-style subsequence matching),
+    /// pass 2 runs a typo-tolerant matcher over the entries pass 1 rejected.
+    /// Exact matches always rank above typo matches; within a pass, higher
+    /// score wins.
+    pub fn update_query(&mut self, query: String) {
+        self.query = query;
+        self.selected = 0;
+
+        if self.query.is_empty() {
+            self.filtered = Self::unfiltered(&self.all_entries);
+            return;
+        }
+
+        use nucleo::pattern::{CaseMatching, Normalization, Pattern};
+        use nucleo::{Config, Matcher, Utf32String};
+
+        let mut matcher = Matcher::new(Config::DEFAULT);
+        let pattern = Pattern::parse(&self.query, CaseMatching::Smart, Normalization::Smart);
+
+        let mut matched = vec![false; self.all_entries.len()];
+        let mut exact: Vec<(u32, usize)> = Vec::new();
+        for (idx, (path, _)) in self.all_entries.iter().enumerate() {
+            let s = path.to_string_lossy();
+            let haystack = Utf32String::from(s.as_ref());
+            if let Some(score) = pattern.score(haystack.slice(..), &mut matcher) {
+                matched[idx] = true;
+                exact.push((score, idx));
+            }
+        }
+        exact.sort_by_key(|(score, idx)| (std::cmp::Reverse(*score), *idx));
+
+        let mut typo: Vec<(u32, usize)> = self
+            .all_entries
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| !matched[*idx])
+            .filter_map(|(idx, (path, _))| {
+                let s = path.to_string_lossy();
+                // Score the full path and the basename, take the better.
+                let mut score = crate::search::fuzzy_typo::score_with_typos(&self.query, &s);
+                if let Some(base) = path.file_name().and_then(|n| n.to_str())
+                    && let Some(bs) = crate::search::fuzzy_typo::score_with_typos(&self.query, base)
+                {
+                    score = Some(score.map_or(bs, |ps| ps.max(bs)));
+                }
+                score.map(|sc| (sc, idx))
+            })
+            .collect();
+        typo.sort_by_key(|(score, idx)| (std::cmp::Reverse(*score), *idx));
+
+        exact.append(&mut typo);
+        exact.truncate(SIDEBAR_SEARCH_CAP);
+        self.filtered = exact;
+    }
+
+    /// The currently selected `(path, is_dir)` entry, if any.
+    pub fn selected_entry(&self) -> Option<&(PathBuf, bool)> {
+        self.filtered
+            .get(self.selected)
+            .map(|(_, idx)| &self.all_entries[*idx])
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        if !self.filtered.is_empty() && self.selected < self.filtered.len() - 1 {
+            self.selected += 1;
+        }
+    }
+}
+
+#[cfg(test)]
+mod sidebar_search_tests {
+    use super::*;
+
+    fn entries() -> Vec<(PathBuf, bool)> {
+        vec![
+            (PathBuf::from("src"), true),
+            (PathBuf::from("src/hello.rs"), false),
+            (PathBuf::from("src/main.rs"), false),
+            (PathBuf::from("tests"), true),
+            (PathBuf::from("README.md"), false),
+        ]
+    }
+
+    #[test]
+    fn empty_query_lists_entries() {
+        let mut st = SidebarSearchState::from_entries(entries());
+        st.update_query(String::new());
+        assert_eq!(st.filtered.len(), entries().len());
+    }
+
+    #[test]
+    fn directories_are_included_in_results() {
+        let mut st = SidebarSearchState::from_entries(entries());
+        st.update_query("tests".to_string());
+        let hit = st
+            .filtered
+            .iter()
+            .map(|(_, idx)| &st.all_entries[*idx])
+            .find(|(p, _)| p.to_string_lossy() == "tests")
+            .expect("directory 'tests' should match");
+        assert!(hit.1, "should be flagged as a directory");
+    }
+
+    #[test]
+    fn exact_matches_rank_above_typo_matches() {
+        let mut st = SidebarSearchState::from_entries(entries());
+        // "helo" is a subsequence of "src/hello.rs"? No: h-e-l-o is a
+        // subsequence of "hello". It should also typo-match "main.rs"? No —
+        // but it exact(ly subsequence)-matches "src/hello.rs", which must be
+        // ranked first.
+        st.update_query("helo".to_string());
+        let (top_path, _) = st.selected_entry().expect("at least one result");
+        assert_eq!(top_path, &PathBuf::from("src/hello.rs"));
+    }
+
+    #[test]
+    fn typo_fallback_surfaces_misspelling() {
+        let mut st = SidebarSearchState::from_entries(entries());
+        // "helo.rs" has a wrong omission… use a substitution instead:
+        // "jello.rs" (h→j) is not a subsequence of "src/hello.rs" with all
+        // chars matched — nucleo rejects it; the typo pass must catch it.
+        st.update_query("jello".to_string());
+        let found = st
+            .filtered
+            .iter()
+            .any(|(_, idx)| st.all_entries[*idx].0 == *"src/hello.rs");
+        assert!(found, "typo'd 'jello' should still find hello.rs");
+    }
+
+    #[test]
+    fn no_results_for_garbage() {
+        let mut st = SidebarSearchState::from_entries(entries());
+        st.update_query("zzzz".to_string());
+        assert!(st.filtered.is_empty());
+    }
+
+    #[test]
+    fn selection_moves_within_bounds() {
+        let mut st = SidebarSearchState::from_entries(entries());
+        st.update_query(String::new());
+        st.move_down();
+        assert_eq!(st.selected, 1);
+        st.move_up();
+        st.move_up(); // clamps at 0
+        assert_eq!(st.selected, 0);
+    }
+}

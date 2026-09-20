@@ -1,5 +1,6 @@
 use crate::input::action::{Direction, EditorAction};
 
+use super::state::pickers::SidebarSearchState;
 use super::state::sidebar::copy_target_path;
 use super::{AppState, ConfirmDelete, InputMode, SidebarClipboard};
 
@@ -187,6 +188,17 @@ impl AppState {
                 self.refresh_sidebar();
                 true
             }
+            EditorAction::OpenSearch => {
+                // Ctrl+F while the sidebar is focused: fuzzy-search files and
+                // directories (typo-tolerant). The editor's Ctrl+F search is
+                // unaffected because the sidebar's catch-all swallows
+                // `OpenSearch` when this picker is not open.
+                self.sidebar_search = Some(SidebarSearchState::new(
+                    self.config.hide_git_folder,
+                    self.config.hide_dot_folders,
+                ));
+                true
+            }
             // Global actions that don't touch editor content are allowed to
             // fall through to the main dispatcher.
             EditorAction::Quit
@@ -265,6 +277,69 @@ impl AppState {
     pub(super) fn refresh_sidebar(&mut self) {
         if let Some(sb) = &mut self.sidebar {
             sb.refresh();
+        }
+    }
+
+    /// Handle input for the Ctrl+F sidebar file-search overlay. The overlay is
+    /// checked in the priority chain before the sidebar, so this captures all
+    /// input while it is open.
+    pub(super) fn handle_sidebar_search(&mut self, action: EditorAction) {
+        if self.sidebar_search.is_none() {
+            return;
+        }
+        match action {
+            EditorAction::InsertChar(c) => {
+                if let Some(picker) = &mut self.sidebar_search {
+                    let mut q = picker.query.clone();
+                    q.push(c);
+                    picker.update_query(q);
+                }
+            }
+            EditorAction::DeleteBackward => {
+                if let Some(picker) = &mut self.sidebar_search {
+                    let mut q = picker.query.clone();
+                    q.pop();
+                    picker.update_query(q);
+                }
+            }
+            EditorAction::MoveCursor(Direction::Up) => {
+                if let Some(picker) = &mut self.sidebar_search {
+                    picker.move_up();
+                }
+            }
+            EditorAction::MoveCursor(Direction::Down) => {
+                if let Some(picker) = &mut self.sidebar_search {
+                    picker.move_down();
+                }
+            }
+            EditorAction::InsertNewline => {
+                // Enter: open a file in the editor, or navigate the sidebar
+                // tree to a directory (expanding its ancestors). Extract the
+                // selection before closing to avoid borrow conflicts.
+                let selected = self
+                    .sidebar_search
+                    .as_ref()
+                    .and_then(|p| p.selected_entry().cloned());
+                self.sidebar_search = None;
+                if let Some((path, is_dir)) = selected {
+                    if is_dir {
+                        if let Some(sb) = &mut self.sidebar {
+                            sb.expand_to_path(&path);
+                        }
+                        self.ensure_sidebar_selected_visible();
+                        self.sidebar_focused = true;
+                    } else {
+                        self.push_current_to_jump_list();
+                        let _ = self.editor.open_tab(path);
+                        self.after_file_open_or_save();
+                        self.sidebar_focused = false;
+                    }
+                }
+            }
+            EditorAction::Quit | EditorAction::CloseSearch | EditorAction::Unhandled => {
+                self.sidebar_search = None;
+            }
+            _ => {}
         }
     }
 }

@@ -401,6 +401,10 @@ const TEMPLATE: &[HelpEntry] = &[
     },
     // ── Sidebar ──────────────────────────────────────────────────────
     HelpEntry::Section("Sidebar"),
+    HelpEntry::Binding {
+        actions: &["open_search"],
+        desc: "Search files (sidebar focus)",
+    },
     HelpEntry::Static {
         key: "Ctrl+C",
         desc: "Copy file only (sidebar)",
