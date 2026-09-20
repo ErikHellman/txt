@@ -318,7 +318,15 @@ pub fn render(state: &mut AppState, frame: &mut Frame) {
 
     // ── Help overlay ─────────────────────────────────────────────────────────
     if state.show_help {
-        help_overlay::render(area, buf, state.help_scroll, state.input.keybindings());
+        // Store the rect so mouse handlers can hit-test the help tab bar.
+        state.help_area = Some(area);
+        help_overlay::render(
+            area,
+            buf,
+            state.help_tab,
+            state.help_scroll,
+            state.input.keybindings(),
+        );
     }
 
     // ── Settings overlay ──────────────────────────────────────────────────────

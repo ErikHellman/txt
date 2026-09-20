@@ -336,15 +336,52 @@ impl AppState {
     /// Handle input while the help overlay is visible.
     /// Returns `true` if the action was consumed (caller should `return`).
     pub(super) fn handle_help(&mut self, action: &EditorAction) -> bool {
+        const NUM_TABS: usize = crate::ui::help_overlay::NUM_TABS;
+        // Left/Right switch tabs without touching the scroll offset handling;
+        // Up/Down/PageUp/PageDown/wheel keep scrolling the active tab.
+        match action {
+            EditorAction::MoveCursor(Direction::Left) => {
+                self.help_tab = (self.help_tab + NUM_TABS - 1) % NUM_TABS;
+                self.help_scroll = 0;
+                return true;
+            }
+            EditorAction::MoveCursor(Direction::Right) => {
+                self.help_tab = (self.help_tab + 1) % NUM_TABS;
+                self.help_scroll = 0;
+                return true;
+            }
+            EditorAction::InsertChar(c) if c.is_ascii_digit() => {
+                let n = (*c as u8 - b'0') as usize;
+                if (1..=NUM_TABS).contains(&n) {
+                    self.help_tab = n - 1;
+                    self.help_scroll = 0;
+                }
+                return true;
+            }
+            EditorAction::MouseClick { col, row } => {
+                if let Some(t) = self
+                    .help_area
+                    .and_then(|area| crate::ui::help_overlay::tab_at(area, *col, *row))
+                {
+                    self.help_tab = t;
+                    self.help_scroll = 0;
+                }
+                // The overlay shields the content beneath it: always consume.
+                return true;
+            }
+            _ => {}
+        }
         if scroll_action(action, &mut self.help_scroll) {
             return true;
         }
         match action {
             EditorAction::MoveCursorFileStart => {
+                self.help_tab = 0;
                 self.help_scroll = 0;
                 true
             }
             EditorAction::MoveCursorFileEnd => {
+                self.help_tab = NUM_TABS - 1;
                 self.help_scroll = usize::MAX; // clamped in render
                 true
             }
