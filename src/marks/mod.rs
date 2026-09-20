@@ -2,8 +2,11 @@
 //!
 //! Both features track byte offsets that travel with buffer edits via
 //! [`rebase_after_edit`]. Persistence mirrors the recent-files pattern:
-//! marks live in `<workspace>/.txt/marks.json`, jumps in
-//! `<workspace>/.txt/jumps.json`. Both files are silent on I/O errors.
+//! marks live in `marks.json` and jumps in `jumps.json`, both inside the
+//! workspace data directory (default `<workspace>/.txt/`, location controlled
+//! by the `workspace_storage` config option). Both files are silent on I/O
+//! errors; when workspace storage is disabled they simply aren't read or
+//! written.
 //!
 //! Marks survive the buffer being closed and reopened because they are
 //! addressed by file path (canonical). The jump list is bounded at
@@ -81,8 +84,11 @@ impl NamedMarks {
         }
     }
 
-    pub fn load(workspace: &Path) -> Self {
-        let path = workspace.join(".txt").join("marks.json");
+    pub fn load(data_dir: Option<&Path>) -> Self {
+        let Some(data_dir) = data_dir else {
+            return Self::default();
+        };
+        let path = data_dir.join("marks.json");
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
             Err(_) => return Self::default(),
@@ -101,7 +107,10 @@ impl NamedMarks {
         out
     }
 
-    pub fn save(&self, workspace: &Path) {
+    pub fn save(&self, data_dir: Option<&Path>) {
+        let Some(data_dir) = data_dir else {
+            return;
+        };
         let mut marks = Vec::new();
         for (path, file_marks) in &self.by_path {
             for (ch, off) in file_marks {
@@ -113,10 +122,9 @@ impl NamedMarks {
             }
         }
         let disk = MarksOnDisk { marks };
-        let dir = workspace.join(".txt");
-        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::create_dir_all(data_dir);
         if let Ok(text) = serde_json::to_string(&disk) {
-            let _ = std::fs::write(dir.join("marks.json"), text);
+            let _ = std::fs::write(data_dir.join("marks.json"), text);
         }
     }
 }
@@ -200,8 +208,11 @@ impl JumpList {
         }
     }
 
-    pub fn load(workspace: &Path) -> Self {
-        let path = workspace.join(".txt").join("jumps.json");
+    pub fn load(data_dir: Option<&Path>) -> Self {
+        let Some(data_dir) = data_dir else {
+            return Self::default();
+        };
+        let path = data_dir.join("jumps.json");
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
             Err(_) => return Self::default(),
@@ -214,12 +225,14 @@ impl JumpList {
         }
     }
 
-    pub fn save(&self, workspace: &Path) {
+    pub fn save(&self, data_dir: Option<&Path>) {
+        let Some(data_dir) = data_dir else {
+            return;
+        };
         let entries: Vec<&JumpEntry> = self.entries.iter().collect();
-        let dir = workspace.join(".txt");
-        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::create_dir_all(data_dir);
         if let Ok(text) = serde_json::to_string(&entries) {
-            let _ = std::fs::write(dir.join("jumps.json"), text);
+            let _ = std::fs::write(data_dir.join("jumps.json"), text);
         }
     }
 }
@@ -315,13 +328,25 @@ mod tests {
         let mut marks = NamedMarks::new();
         marks.set(&p("/some/file.rs"), 'a', 100);
         marks.set(&p("/some/file.rs"), 'b', 200);
-        marks.save(dir.path());
-        let loaded = NamedMarks::load(dir.path());
+        marks.save(Some(dir.path()));
+        let loaded = NamedMarks::load(Some(dir.path()));
         // Note: canonicalize() will fail for non-existent paths, so the
         // stored key falls back to the input path.
         let v = loaded.get(&p("/some/file.rs"), 'a');
         assert_eq!(v, Some(100));
         assert_eq!(loaded.get(&p("/some/file.rs"), 'b'), Some(200));
+    }
+
+    #[test]
+    fn named_marks_disabled_storage_is_noop() {
+        let workspace = tempfile::tempdir().unwrap();
+        let mut marks = NamedMarks::new();
+        marks.set(&p("/some/file.rs"), 'a', 100);
+        marks.save(None);
+        let loaded = NamedMarks::load(None);
+        assert!(loaded.get(&p("/some/file.rs"), 'a').is_none());
+        // Nothing should have been written into the workspace.
+        assert!(!workspace.path().join(".txt").exists());
     }
 
     #[test]

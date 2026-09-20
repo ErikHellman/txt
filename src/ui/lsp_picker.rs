@@ -115,7 +115,7 @@ pub fn render(picker: &LspPickerState, area: Rect, buf: &mut TermBuffer) {
     // ── Notice rows ──────────────────────────────────────────────────────────
     let notices = [
         "Install LSP server externally before enabling.",
-        "Edit .txt/lsp.toml for advanced configuration.",
+        "Edit lsp.toml in the workspace storage for advanced configuration.",
     ];
     for (i, line) in notices.iter().enumerate() {
         let row_y = sep_y + 1 + i as u16;

@@ -1,4 +1,5 @@
-//! Persist per-file undo history under `<workspace>/.txt/undo/`.
+//! Persist per-file undo history under the workspace data directory's
+//! `undo/` subdirectory.
 //!
 //! Each persisted file is keyed by a stable digest of the canonical file
 //! path so it survives moves of the workspace itself but is per-absolute-
@@ -25,21 +26,27 @@ struct OnDisk {
     snapshot: UndoStackSnapshot,
 }
 
-/// Compute the on-disk filename for `file_path` inside `workspace`.
-fn record_path(workspace: &Path, file_path: &Path) -> PathBuf {
+/// Compute the on-disk filename for `file_path` inside `data_dir`.
+fn record_path(data_dir: &Path, file_path: &Path) -> PathBuf {
     let canonical = file_path
         .canonicalize()
         .unwrap_or_else(|_| file_path.to_path_buf());
     let key = fnv1a_64(canonical.to_string_lossy().as_bytes());
-    workspace
-        .join(".txt")
-        .join("undo")
-        .join(format!("{key:016x}.json"))
+    data_dir.join("undo").join(format!("{key:016x}.json"))
 }
 
-/// Persist `snapshot` to disk. Silent on I/O failure.
-pub fn save(workspace: &Path, file_path: &Path, file_content: &str, snapshot: &UndoStackSnapshot) {
-    let p = record_path(workspace, file_path);
+/// Persist `snapshot` to disk. Silent on I/O failure; does nothing when
+/// workspace storage is disabled (`data_dir` is `None`).
+pub fn save(
+    data_dir: Option<&Path>,
+    file_path: &Path,
+    file_content: &str,
+    snapshot: &UndoStackSnapshot,
+) {
+    let Some(data_dir) = data_dir else {
+        return;
+    };
+    let p = record_path(data_dir, file_path);
     if let Some(parent) = p.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -52,15 +59,15 @@ pub fn save(workspace: &Path, file_path: &Path, file_content: &str, snapshot: &U
     }
 }
 
-/// Load a saved snapshot for `file_path` from `workspace`. Returns `None` if
-/// the record is missing, unparseable, or its file hash no longer matches
-/// `current_content`.
+/// Load a saved snapshot for `file_path` from `data_dir`. Returns `None` if
+/// workspace storage is disabled, the record is missing, unparseable, or its
+/// file hash no longer matches `current_content`.
 pub fn load(
-    workspace: &Path,
+    data_dir: Option<&Path>,
     file_path: &Path,
     current_content: &str,
 ) -> Option<UndoStackSnapshot> {
-    let p = record_path(workspace, file_path);
+    let p = record_path(data_dir?, file_path);
     let text = std::fs::read_to_string(&p).ok()?;
     let parsed: OnDisk = serde_json::from_str(&text).ok()?;
     let expected = format!("{:016x}", fnv1a_64(current_content.as_bytes()));
@@ -104,9 +111,21 @@ mod tests {
         let file = tmp.path().join("foo.txt");
         std::fs::write(&file, "content").unwrap();
         let snap = sample_snapshot();
-        save(tmp.path(), &file, "content", &snap);
-        let loaded = load(tmp.path(), &file, "content").expect("load");
+        save(Some(tmp.path()), &file, "content", &snap);
+        let loaded = load(Some(tmp.path()), &file, "content").expect("load");
         assert_eq!(loaded.undo.len(), 1);
+    }
+
+    #[test]
+    fn disabled_storage_noops() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("foo.txt");
+        std::fs::write(&file, "content").unwrap();
+        let snap = sample_snapshot();
+        save(None, &file, "content", &snap);
+        assert!(load(None, &file, "content").is_none());
+        // Nothing should have been written into the workspace.
+        assert!(!tmp.path().join(".txt").exists());
     }
 
     #[test]
@@ -115,9 +134,9 @@ mod tests {
         let file = tmp.path().join("bar.txt");
         std::fs::write(&file, "before").unwrap();
         let snap = sample_snapshot();
-        save(tmp.path(), &file, "before", &snap);
+        save(Some(tmp.path()), &file, "before", &snap);
         // Pretend the file was changed externally.
-        let loaded = load(tmp.path(), &file, "after");
+        let loaded = load(Some(tmp.path()), &file, "after");
         assert!(loaded.is_none(), "stale undo must not be loaded");
     }
 
@@ -126,6 +145,6 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("never-saved.txt");
         std::fs::write(&file, "x").unwrap();
-        assert!(load(tmp.path(), &file, "x").is_none());
+        assert!(load(Some(tmp.path()), &file, "x").is_none());
     }
 }
