@@ -137,6 +137,12 @@ pub struct AppState {
     pub config: Config,
     pub input: InputHandler,
     pub workspace: PathBuf,
+    /// Resolved per-workspace storage directory (where session, marks,
+    /// recents, undo, lsp.toml, formatters.toml live). Computed once at
+    /// startup from `config.workspace_storage`; `None` when workspace
+    /// storage is disabled. Also `None` when the global config directory
+    /// itself is unavailable.
+    pub workspace_data_dir: Option<PathBuf>,
     pub should_quit: bool,
     pub confirm_quit: bool,
     pub confirm_delete: Option<ConfirmDelete>,
@@ -213,8 +219,9 @@ impl AppState {
             }
         }
 
-        let lsp_config = crate::lsp::config::WorkspaceLspConfig::load(&workspace);
-        let project_fmt = crate::formatting::project::load(&workspace);
+        let data_dir = config.workspace_storage.resolve(&workspace);
+        let lsp_config = crate::lsp::config::WorkspaceLspConfig::load(data_dir.as_deref());
+        let project_fmt = crate::formatting::project::load(data_dir.as_deref());
         let git_branch = crate::git::current_branch(&workspace);
         let mut state = Self {
             editor,
@@ -223,8 +230,8 @@ impl AppState {
             fuzzy_picker: None,
             symbol_picker: None,
             sidebar_search: None,
-            marks: crate::marks::NamedMarks::load(&workspace),
-            jumps: crate::marks::JumpList::load(&workspace),
+            marks: crate::marks::NamedMarks::load(data_dir.as_deref()),
+            jumps: crate::marks::JumpList::load(data_dir.as_deref()),
             snippets: crate::snippet::SnippetStore::new(),
             macros: crate::macros::MacroState::new(),
             sidebar: None,
@@ -263,6 +270,7 @@ impl AppState {
             config,
             input: InputHandler::new(),
             workspace,
+            workspace_data_dir: data_dir,
             should_quit: false,
             confirm_quit: false,
             confirm_delete: None,
@@ -1336,12 +1344,13 @@ impl AppState {
                     Some(FuzzyPickerState::from_buffers(self.editor.buffer_names()));
             }
             EditorAction::OpenRecentFiles => {
-                let files = load_recent_files(&self.workspace);
+                let files = load_recent_files(self.workspace_data_dir.as_deref());
                 self.fuzzy_picker = Some(FuzzyPickerState::from_paths(files));
             }
             EditorAction::ReloadConfig => {
                 self.config = Config::load();
-                self.project_fmt = crate::formatting::project::load(&self.workspace);
+                self.project_fmt =
+                    crate::formatting::project::load(self.workspace_data_dir.as_deref());
                 self.input.reload_keybindings();
                 for tab in &mut self.editor.tabs {
                     tab.viewport.word_wrap = self.config.word_wrap;
@@ -1417,8 +1426,8 @@ impl AppState {
                     self.marks.rebase_after_edit(&path, cmd);
                     self.jumps.rebase_after_edit(&path, cmd);
                 }
-                self.marks.save(&self.workspace);
-                self.jumps.save(&self.workspace);
+                self.marks.save(self.workspace_data_dir.as_deref());
+                self.jumps.save(self.workspace_data_dir.as_deref());
             }
             if let Some(session) = self.editor.active_mut().snippet_session.as_mut() {
                 for cmd in &pending {

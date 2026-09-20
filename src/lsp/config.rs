@@ -3,7 +3,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-/// Per-workspace LSP configuration, loaded from `<workspace>/.txt/lsp.toml`.
+/// Per-workspace LSP configuration, loaded from `lsp.toml` inside the
+/// workspace data directory (by default `<workspace>/.txt/`).
 ///
 /// When `enabled` is false (the default), the editor uses tree-sitter for
 /// syntax highlighting and no LSP server is spawned. When enabled, the user
@@ -35,13 +36,17 @@ pub struct LspServerEntry {
 }
 
 impl WorkspaceLspConfig {
-    /// Load from `<workspace>/.txt/lsp.toml`.
+    /// Load from `<data_dir>/lsp.toml`, where `data_dir` is the resolved
+    /// per-workspace storage directory (`None` when workspace storage is
+    /// disabled).
     ///
     /// Returns a disabled default on missing file, I/O error, or parse error
     /// (same graceful-degradation pattern as `Config::load()`).
-    pub fn load(workspace: &Path) -> Self {
-        let path = workspace.join(".txt").join("lsp.toml");
-        Self::load_from_path(&path)
+    pub fn load(data_dir: Option<&Path>) -> Self {
+        let Some(data_dir) = data_dir else {
+            return Self::default();
+        };
+        Self::load_from_path(&data_dir.join("lsp.toml"))
     }
 
     /// Load from a specific file path. Returns default on any error.
@@ -182,7 +187,7 @@ args = ["--stdio"]
     }
 
     #[test]
-    fn load_from_workspace_dir() {
+    fn load_from_workspace_data_dir() {
         let dir = tempfile::tempdir().unwrap();
         let txt_dir = dir.path().join(".txt");
         std::fs::create_dir_all(&txt_dir).unwrap();
@@ -191,9 +196,17 @@ args = ["--stdio"]
             "enabled = true\nserver = \"ra\"\n\n[servers.ra]\ncommand = \"rust-analyzer\"\n",
         )
         .unwrap();
-        let cfg = WorkspaceLspConfig::load(dir.path());
+        let cfg = WorkspaceLspConfig::load(Some(&txt_dir));
         assert!(cfg.is_active());
         assert_eq!(cfg.active_server().unwrap().command, "rust-analyzer");
+    }
+
+    #[test]
+    fn disabled_storage_returns_default() {
+        assert_eq!(
+            WorkspaceLspConfig::load(None),
+            WorkspaceLspConfig::default()
+        );
     }
 
     #[test]

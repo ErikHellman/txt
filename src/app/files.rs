@@ -45,7 +45,12 @@ impl AppState {
                 if let Some(path) = &tab.path {
                     let content = tab.buffer.to_string();
                     let snap = tab.buffer.history_snapshot();
-                    crate::buffer::persistent_undo::save(&self.workspace, path, &content, &snap);
+                    crate::buffer::persistent_undo::save(
+                        self.workspace_data_dir.as_deref(),
+                        path,
+                        &content,
+                        &snap,
+                    );
                 }
             }
         } else {
@@ -60,9 +65,10 @@ impl AppState {
         self.version_check.newer_version().map(|v| format!("↑{v}"))
     }
     /// Build a `Session` snapshot of the current editor state and write it
-    /// to `<workspace>/.txt/session.json`. Called once on clean shutdown
-    /// when `restore_session = true`. Buffers without a saved path are
-    /// skipped — they have nothing to reopen on the next launch.
+    /// to the workspace data directory (`session.json`). Called once on clean
+    /// shutdown when `restore_session = true`. Buffers without a saved path
+    /// are skipped — they have nothing to reopen on the next launch. No-op
+    /// when workspace storage is disabled.
     pub(super) fn save_session(&self) {
         use crate::session::{Session, TabState};
         let mut tabs = Vec::new();
@@ -86,7 +92,7 @@ impl AppState {
             active: active_in_session,
             sidebar_open: self.sidebar.is_some(),
         };
-        session.save(&self.workspace);
+        session.save(self.workspace_data_dir.as_deref());
     }
     /// Open every tab listed in `session` and restore cursor positions /
     /// viewport tops. Files that no longer exist on disk are skipped.
@@ -128,13 +134,17 @@ impl AppState {
             None => return,
         };
         let content = self.editor.active().buffer.to_string();
-        if let Some(snap) = crate::buffer::persistent_undo::load(&self.workspace, &path, &content) {
+        if let Some(snap) = crate::buffer::persistent_undo::load(
+            self.workspace_data_dir.as_deref(),
+            &path,
+            &content,
+        ) {
             self.editor.active_mut().buffer.restore_history(snap);
         }
     }
     pub(super) fn after_file_open_or_save(&mut self) {
         if let Some(path) = self.editor.active().path.clone() {
-            add_to_recent_files(&path, &self.workspace.clone());
+            add_to_recent_files(&path, self.workspace_data_dir.as_deref());
             self.file_watcher = FileWatcher::new(&path);
         }
         // Persistent undo: a freshly opened buffer has an empty history, so

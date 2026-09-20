@@ -52,6 +52,77 @@ impl KeymapPreset {
     }
 }
 
+/// Where per-workspace state (session, marks, recents, undo, lsp.toml,
+/// formatters.toml) is stored. Serialises as a snake_case string in TOML.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceStorage {
+    /// Store inside the workspace: `<workspace>/.txt/`.
+    #[default]
+    Workspace,
+    /// Store in the user config directory, keyed by the SHA-256 of the
+    /// canonical workspace path: `~/.config/txt/workspaces/<hash>/`.
+    Global,
+    /// Do not read or write any per-workspace state.
+    Disabled,
+}
+
+impl WorkspaceStorage {
+    pub const ALL: &'static [Self] = &[Self::Workspace, Self::Global, Self::Disabled];
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            WorkspaceStorage::Workspace => "In workspace (.txt/)",
+            WorkspaceStorage::Global => "Global (~/.config/txt)",
+            WorkspaceStorage::Disabled => "Disabled",
+        }
+    }
+
+    /// Resolve the directory that holds per-workspace state for `workspace`.
+    ///
+    /// The returned directory may not exist yet; callers create it on write.
+    /// `None` means per-workspace storage is disabled and all I/O should be
+    /// skipped silently.
+    ///
+    /// In global mode the workspace path is canonicalised before hashing so
+    /// the same directory reached through symlinks maps to one store.
+    pub fn resolve(&self, workspace: &Path) -> Option<PathBuf> {
+        self.resolve_with_config_dir(workspace, txt_config_dir().as_deref())
+    }
+
+    /// Like [`Self::resolve`] but with an explicit config directory, used by
+    /// unit tests (avoids mutating process-wide `TXT_CONFIG_DIR`).
+    #[allow(dead_code)]
+    pub(crate) fn resolve_with_config_dir(
+        &self,
+        workspace: &Path,
+        config_dir: Option<&Path>,
+    ) -> Option<PathBuf> {
+        match self {
+            WorkspaceStorage::Workspace => Some(workspace.join(".txt")),
+            WorkspaceStorage::Global => {
+                let canonical = workspace
+                    .canonicalize()
+                    .unwrap_or_else(|_| workspace.to_path_buf());
+                config_dir.map(|d| d.join("workspaces").join(hash_workspace_path(&canonical)))
+            }
+            WorkspaceStorage::Disabled => None,
+        }
+    }
+}
+
+/// Lowercase-hex SHA-256 of a workspace path's UTF-8 representation. Used as
+/// the directory name when per-workspace state is stored globally.
+fn hash_workspace_path(workspace: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(workspace.to_string_lossy().as_bytes());
+    let mut s = String::with_capacity(hash.len() * 2);
+    for b in hash {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s
+}
+
 /// Editor configuration. All fields have defaults so partial TOML is fine.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
@@ -125,10 +196,15 @@ pub struct Config {
     /// without a positional file argument.
     #[serde(default)]
     pub restore_session: bool,
-    /// Persist per-file undo history to `<workspace>/.txt/undo/` so that
-    /// `Ctrl+Z` keeps working across editor restarts.
+    /// Persist per-file undo history to the workspace data directory under
+    /// `undo/` so that `Ctrl+Z` keeps working across editor restarts.
     #[serde(default)]
     pub persistent_undo: bool,
+    /// Where per-workspace state (session, marks, recents, undo, lsp.toml,
+    /// formatters.toml) is written and read from. Changing this takes effect
+    /// on the next start.
+    #[serde(default)]
+    pub workspace_storage: WorkspaceStorage,
 }
 
 fn default_tab_size() -> usize {
@@ -182,6 +258,7 @@ impl Default for Config {
             auto_pair: default_auto_pair(),
             restore_session: false,
             persistent_undo: false,
+            workspace_storage: WorkspaceStorage::Workspace,
         }
     }
 }
@@ -277,16 +354,20 @@ pub fn is_minor_or_major_upgrade(last: &str, current: &str) -> bool {
     }
 }
 
-/// Returns the path to the project-local recent-files list: `<workspace>/.txt/recents.json`.
-fn recents_path(workspace: &Path) -> PathBuf {
-    workspace.join(".txt").join("recents.json")
+/// Returns the path to the project-local recent-files list: `<data_dir>/recents.json`.
+fn recents_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("recents.json")
 }
 
-/// Load the recent-files list for `workspace` from `<workspace>/.txt/recents.json`.
+/// Load the recent-files list for `workspace` from `<data_dir>/recents.json`.
 ///
-/// Returns an empty list on any error (missing file, parse error).
-pub fn load_recent_files(workspace: &Path) -> Vec<PathBuf> {
-    let path = recents_path(workspace);
+/// Returns an empty list on any error (missing file, parse error) or when
+/// per-workspace storage is disabled (`data_dir` is `None`).
+pub fn load_recent_files(data_dir: Option<&Path>) -> Vec<PathBuf> {
+    let Some(data_dir) = data_dir else {
+        return Vec::new();
+    };
+    let path = recents_path(data_dir);
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(_) => return Vec::new(),
@@ -297,12 +378,17 @@ pub fn load_recent_files(workspace: &Path) -> Vec<PathBuf> {
 
 /// Prepend `path` to the recent-files list for `workspace` and persist it.
 ///
-/// Deduplicates and truncates to `MAX_RECENT`. Silently ignores I/O errors.
-pub fn add_to_recent_files(path: &Path, workspace: &Path) {
+/// Deduplicates and truncates to `MAX_RECENT`. Silently ignores I/O errors
+/// and does nothing when per-workspace storage is disabled (`data_dir` is
+/// `None`).
+pub fn add_to_recent_files(path: &Path, data_dir: Option<&Path>) {
+    let Some(data_dir) = data_dir else {
+        return;
+    };
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let canonical_str = canonical.to_string_lossy().into_owned();
 
-    let recents_file = recents_path(workspace);
+    let recents_file = recents_path(data_dir);
     let mut entries: Vec<String> = std::fs::read_to_string(&recents_file)
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
@@ -336,6 +422,7 @@ mod tests {
         assert!(!c.auto_save);
         assert!(!c.show_whitespace);
         assert_eq!(c.keymap_preset, KeymapPreset::Default);
+        assert_eq!(c.workspace_storage, WorkspaceStorage::Workspace);
     }
 
     #[test]
@@ -383,6 +470,7 @@ mod tests {
             auto_pair: false,
             restore_session: true,
             persistent_undo: true,
+            workspace_storage: WorkspaceStorage::Global,
         };
         let serialized = toml::to_string(&original).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();
@@ -494,16 +582,116 @@ mod tests {
     }
 
     #[test]
-    fn recents_path_is_inside_workspace() {
-        let ws = std::path::Path::new("/tmp/myproject");
-        let p = super::recents_path(ws);
-        assert_eq!(p, ws.join(".txt").join("recents.json"));
+    fn recents_path_is_inside_data_dir() {
+        let dir = std::path::Path::new("/tmp/myproject/.txt");
+        let p = super::recents_path(dir);
+        assert_eq!(p, dir.join("recents.json"));
     }
 
     #[test]
     fn load_recent_files_missing_returns_empty() {
-        // No .txt/recents.json under /tmp/no_such_workspace — must not panic.
-        let _ = super::load_recent_files(std::path::Path::new("/tmp/no_such_workspace_xyz"));
+        // No recents.json under /tmp/no_such_workspace — must not panic.
+        let _ = super::load_recent_files(Some(std::path::Path::new(
+            "/tmp/no_such_workspace_xyz/.txt",
+        )));
+    }
+
+    #[test]
+    fn load_recent_files_disabled_returns_empty() {
+        assert!(super::load_recent_files(None).is_empty());
+    }
+
+    #[test]
+    fn add_to_recent_files_disabled_is_noop() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        // Must not panic and must not create any directory.
+        super::add_to_recent_files(file.path(), None);
+    }
+
+    #[test]
+    fn workspace_storage_display_names() {
+        assert_eq!(
+            WorkspaceStorage::Workspace.display_name(),
+            "In workspace (.txt/)"
+        );
+        assert_eq!(
+            WorkspaceStorage::Global.display_name(),
+            "Global (~/.config/txt)"
+        );
+        assert_eq!(WorkspaceStorage::Disabled.display_name(), "Disabled");
+    }
+
+    #[test]
+    fn workspace_storage_all_covers_all_variants() {
+        assert_eq!(WorkspaceStorage::ALL.len(), 3);
+    }
+
+    #[test]
+    fn workspace_storage_workspace_mode_resolves_to_txt_dir() {
+        let ws = std::path::Path::new("/tmp/myproject");
+        assert_eq!(
+            WorkspaceStorage::Workspace.resolve_with_config_dir(ws, None),
+            Some(std::path::PathBuf::from("/tmp/myproject/.txt"))
+        );
+    }
+
+    #[test]
+    fn workspace_storage_disabled_resolves_to_none() {
+        let ws = std::path::Path::new("/tmp/myproject");
+        assert_eq!(
+            WorkspaceStorage::Disabled.resolve_with_config_dir(ws, None),
+            None
+        );
+        assert_eq!(WorkspaceStorage::Disabled.resolve(ws), None);
+    }
+
+    #[test]
+    fn workspace_storage_global_resolves_under_config_dir_with_sha256_key() {
+        use tempfile::tempdir;
+        let config_dir = tempdir().unwrap();
+        let ws = tempdir().unwrap();
+        let resolved = WorkspaceStorage::Global
+            .resolve_with_config_dir(ws.path(), Some(config_dir.path()))
+            .unwrap();
+        let expected_key = {
+            use sha2::{Digest, Sha256};
+            let canonical = ws.path().canonicalize().unwrap();
+            let hash = Sha256::digest(canonical.to_string_lossy().as_bytes());
+            hash.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        };
+        let expected = config_dir.path().join("workspaces").join(expected_key);
+        assert_eq!(resolved, expected);
+    }
+
+    #[test]
+    fn workspace_storage_global_is_stable_and_symlink_insensitive() {
+        use tempfile::tempdir;
+        let config_dir = tempdir().unwrap();
+        let ws = tempdir().unwrap();
+        let a = WorkspaceStorage::Global
+            .resolve_with_config_dir(ws.path(), Some(config_dir.path()))
+            .unwrap();
+        let b = WorkspaceStorage::Global
+            .resolve_with_config_dir(ws.path(), Some(config_dir.path()))
+            .unwrap();
+        assert_eq!(a, b);
+        // A second unique tempdir maps to a different key.
+        let other = tempdir().unwrap();
+        let c = WorkspaceStorage::Global
+            .resolve_with_config_dir(other.path(), Some(config_dir.path()))
+            .unwrap();
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn workspace_storage_round_trips_through_toml() {
+        let text = "workspace_storage = \"global\"\n";
+        let cfg: Config = toml::from_str(text).unwrap();
+        assert_eq!(cfg.workspace_storage, WorkspaceStorage::Global);
+        let cfg: Config = toml::from_str("workspace_storage = \"disabled\"\n").unwrap();
+        assert_eq!(cfg.workspace_storage, WorkspaceStorage::Disabled);
+        let cfg: Config = toml::from_str("tab_size = 2\n").unwrap();
+        assert_eq!(cfg.workspace_storage, WorkspaceStorage::Workspace);
     }
 
     #[test]

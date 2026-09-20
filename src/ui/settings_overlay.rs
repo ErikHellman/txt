@@ -12,7 +12,7 @@ use crate::ui::overlay_chrome::{draw_border, draw_h_separator, render_centered_h
 
 const OVERLAY_W: u16 = 50;
 // Rows: top border + header + separator + N settings + separator + hint + bottom border
-pub(crate) const NUM_SETTINGS: usize = 12;
+pub(crate) const NUM_SETTINGS: usize = 13;
 const OVERLAY_H: u16 = 3 + NUM_SETTINGS as u16 + 3;
 
 /// Render the settings overlay centered in `area`.
@@ -137,6 +137,10 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
             "Keybinding preset",
             SettingValue::Enum(state.config.keymap_preset.display_name()),
         ),
+        (
+            "Workspace storage",
+            SettingValue::Enum(state.config.workspace_storage.display_name()),
+        ),
     ];
 
     for (i, (label, value)) in settings.iter().enumerate() {
@@ -186,7 +190,14 @@ pub fn render(state: &AppState, area: Rect, buf: &mut TermBuffer) {
     draw_h_separator(buf, overlay, sep_y, border_style);
 
     // ── Hint row ──────────────────────────────────────────────────────────────
-    let hint = "Space/Enter: toggle  ·  ←/→: cycle  ·  Esc: close";
+    // When the workspace-storage row is selected, surface that the change
+    // only applies after a restart (state is loaded once at startup).
+    let workspace_storage_selected = state.settings_cursor == NUM_SETTINGS - 1;
+    let hint = if workspace_storage_selected {
+        "←/→: cycle  ·  takes effect on next start  ·  Esc: close"
+    } else {
+        "Space/Enter: toggle  ·  ←/→: cycle  ·  Esc: close"
+    };
     let hint_y = sep_y + 1;
     let hint_x = overlay.x + overlay.width.saturating_sub(hint.len() as u16 + 2) / 2 + 1;
     let truncated: String = hint.chars().take(inner_w).collect();

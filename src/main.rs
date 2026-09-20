@@ -94,7 +94,7 @@ fn main() -> Result<()> {
     } else {
         let cfg = config::Config::load();
         if cfg.restore_session {
-            session::Session::load(&workspace)
+            session::Session::load(cfg.workspace_storage.resolve(&workspace).as_deref())
         } else {
             None
         }

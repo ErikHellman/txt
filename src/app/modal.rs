@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::config::{KeymapPreset, Theme};
+use crate::config::{KeymapPreset, Theme, WorkspaceStorage};
 use crate::input::action::{Direction, EditorAction};
 use crate::input::keybinding::KeyBindings;
 
@@ -18,7 +18,7 @@ impl AppState {
                     if let Some(path) = handle.path.clone() {
                         let off = handle.buffer.cursors.primary().byte_offset;
                         self.marks.set(&path, c, off);
-                        self.marks.save(&self.workspace);
+                        self.marks.save(self.workspace_data_dir.as_deref());
                     } else {
                         self.status_error = Some("Save the file before setting a mark".into());
                     }
@@ -480,6 +480,19 @@ impl AppState {
                 KeyBindings::apply_preset(&self.config.keymap_preset);
                 self.input.reload_keybindings();
             }
+            12 => {
+                let all = WorkspaceStorage::ALL;
+                let idx = all
+                    .iter()
+                    .position(|s| s == &self.config.workspace_storage)
+                    .unwrap_or(0);
+                let next = if forward {
+                    (idx + 1) % all.len()
+                } else {
+                    (idx + all.len() - 1) % all.len()
+                };
+                self.config.workspace_storage = all[next];
+            }
             _ => {}
         }
         self.config.save();
@@ -517,7 +530,9 @@ impl AppState {
             _ => false,
         }
     }
-    /// Write the selected LSP config to `<workspace>/.txt/lsp.toml` and reload.
+    /// Write the selected LSP config to `<data_dir>/lsp.toml` (inside the
+    /// workspace data directory) and reload. No-op when workspace storage is
+    /// disabled.
     pub(super) fn apply_lsp_picker_selection(&mut self) {
         let selected = match &self.lsp_picker {
             Some(p) => p.selected,
@@ -548,11 +563,19 @@ impl AppState {
             }
         };
 
-        // Write config file.
-        let txt_dir = self.workspace.join(".txt");
-        let _ = std::fs::create_dir_all(&txt_dir);
-        if let Ok(text) = toml::to_string(&new_config) {
-            let _ = std::fs::write(txt_dir.join("lsp.toml"), text);
+        // Write config file. When workspace storage is disabled the config is
+        // still applied in memory for this session, but can't be persisted.
+        match &self.workspace_data_dir {
+            Some(txt_dir) => {
+                let _ = std::fs::create_dir_all(txt_dir);
+                if let Ok(text) = toml::to_string(&new_config) {
+                    let _ = std::fs::write(txt_dir.join("lsp.toml"), text);
+                }
+            }
+            None => {
+                self.status_error =
+                    Some("Workspace storage is disabled — LSP config not persisted".into());
+            }
         }
 
         // Tear down existing LSP connection if any.

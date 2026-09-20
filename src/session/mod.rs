@@ -2,9 +2,11 @@
 //!
 //! When `restore_session = true` is set in `~/.config/txt/config.toml`,
 //! every clean shutdown writes the list of open tabs (with cursor positions
-//! and viewport scroll) to `<workspace>/.txt/session.json`. The next time
-//! `txt` is launched in the same workspace *without* a positional file
-//! argument, the saved tabs are reopened.
+//! and viewport scroll) to the workspace data directory (`session.json`).
+//! Where that directory lives is controlled by `workspace_storage` in the
+//! config — by default `<workspace>/.txt/`. The next time `txt` is launched
+//! in the same workspace *without* a positional file argument, the saved
+//! tabs are reopened.
 //!
 //! The format is JSON via `serde_json` to match the existing workspace-local
 //! files (`recents.json`, `marks.json`, `jumps.json`). Files that no longer
@@ -35,23 +37,27 @@ pub struct Session {
 }
 
 impl Session {
-    /// Path to the session file inside `workspace`.
-    fn path_for(workspace: &Path) -> PathBuf {
-        workspace.join(".txt").join("session.json")
+    /// Path to the session file inside `data_dir`.
+    fn path_for(data_dir: &Path) -> PathBuf {
+        data_dir.join("session.json")
     }
 
-    /// Load the session for `workspace`. Returns `None` when the file is
-    /// missing or unparseable.
-    pub fn load(workspace: &Path) -> Option<Self> {
-        let p = Self::path_for(workspace);
+    /// Load the session for `data_dir` (the resolved per-workspace storage
+    /// directory; `None` when workspace storage is disabled). Returns `None`
+    /// when the file is missing or unparseable.
+    pub fn load(data_dir: Option<&Path>) -> Option<Self> {
+        let p = Self::path_for(data_dir?);
         let text = std::fs::read_to_string(&p).ok()?;
         serde_json::from_str(&text).ok()
     }
 
-    /// Persist `self` to `<workspace>/.txt/session.json`. Silently ignores
-    /// I/O errors.
-    pub fn save(&self, workspace: &Path) {
-        let p = Self::path_for(workspace);
+    /// Persist `self` to `<data_dir>/session.json`. Silently ignores I/O
+    /// errors and does nothing when workspace storage is disabled.
+    pub fn save(&self, data_dir: Option<&Path>) {
+        let Some(data_dir) = data_dir else {
+            return;
+        };
+        let p = Self::path_for(data_dir);
         if let Some(parent) = p.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -84,14 +90,32 @@ mod tests {
             active: 1,
             sidebar_open: true,
         };
-        s.save(tmp.path());
-        let loaded = Session::load(tmp.path()).expect("load");
+        s.save(Some(tmp.path()));
+        let loaded = Session::load(Some(tmp.path())).expect("load");
         assert_eq!(loaded, s);
     }
 
     #[test]
     fn missing_session_returns_none() {
         let tmp = tempfile::tempdir().unwrap();
-        assert!(Session::load(tmp.path()).is_none());
+        assert!(Session::load(Some(tmp.path())).is_none());
+    }
+
+    #[test]
+    fn disabled_storage_loads_none_and_save_noops() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(Session::load(None).is_none());
+        let s = Session {
+            tabs: vec![TabState {
+                path: PathBuf::from("foo.rs"),
+                cursor_byte: 0,
+                viewport_top: 0,
+            }],
+            active: 0,
+            sidebar_open: false,
+        };
+        s.save(None);
+        // Nothing should have been written into the workspace at all.
+        assert!(!tmp.path().join(".txt").exists());
     }
 }

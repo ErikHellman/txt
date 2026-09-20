@@ -1,5 +1,5 @@
-//! Per-workspace formatting overrides loaded from
-//! `<workspace>/.txt/formatters.toml`.
+//! Per-workspace formatting overrides loaded from `formatters.toml` inside
+//! the workspace data directory (by default `<workspace>/.txt/`).
 //!
 //! Same TOML schema as the global `[formatting]` section in
 //! `~/.config/txt/config.toml`: `[indent]` with optional `style` / `width`
@@ -11,12 +11,14 @@ use std::path::Path;
 
 use super::FormattingConfig;
 
-/// Load `<workspace>/.txt/formatters.toml`.
+/// Load `<data_dir>/formatters.toml`, where `data_dir` is the resolved
+/// per-workspace storage directory (`None` when workspace storage is
+/// disabled).
 ///
 /// Returns `None` when the file is missing or cannot be parsed (mirrors
 /// `WorkspaceLspConfig::load_from_path` graceful-degradation pattern).
-pub fn load(workspace: &Path) -> Option<FormattingConfig> {
-    let path = workspace.join(".txt").join("formatters.toml");
+pub fn load(data_dir: Option<&Path>) -> Option<FormattingConfig> {
+    let path = data_dir?.join("formatters.toml");
     let text = std::fs::read_to_string(&path).ok()?;
     toml::from_str::<FormattingConfig>(&text).ok()
 }
@@ -29,7 +31,8 @@ mod tests {
     #[test]
     fn missing_file_returns_none() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(load(dir.path()).is_none());
+        assert!(load(Some(dir.path())).is_none());
+        assert!(load(None).is_none());
     }
 
     #[test]
@@ -38,7 +41,7 @@ mod tests {
         let txt_dir = dir.path().join(".txt");
         std::fs::create_dir_all(&txt_dir).unwrap();
         std::fs::write(txt_dir.join("formatters.toml"), ": not valid {{").unwrap();
-        assert!(load(dir.path()).is_none());
+        assert!(load(Some(&txt_dir)).is_none());
     }
 
     #[test]
@@ -60,7 +63,7 @@ args = []
 stdin = true
 "#;
         std::fs::write(txt_dir.join("formatters.toml"), toml_str).unwrap();
-        let cfg = load(dir.path()).expect("should parse");
+        let cfg = load(Some(&txt_dir)).expect("should parse");
         assert_eq!(cfg.indent.style, Some(IndentStyle::Spaces));
         assert_eq!(cfg.indent.width, Some(4));
         assert_eq!(
