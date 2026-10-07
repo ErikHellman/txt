@@ -150,7 +150,8 @@ pub fn default_indent(lang: Lang) -> IndentConfig {
         | Lang::Json
         | Lang::Yaml
         | Lang::Css
-        | Lang::Html => IndentConfig {
+        | Lang::Html
+        | Lang::Xml => IndentConfig {
             style: IndentStyle::Spaces,
             width: 2,
         },

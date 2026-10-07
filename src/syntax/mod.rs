@@ -608,6 +608,35 @@ mod tests {
     }
 
     #[test]
+    fn collect_symbols_xml_finds_elements() {
+        let mut host = SyntaxHost::new();
+        host.set_language(Lang::Xml);
+        let src = "<svg><rect width=\"5\"/><circle r=\"3\"/></svg>";
+        let rope = Rope::from_str(src);
+        host.reparse_rope(&rope);
+        let syms = host.collect_symbols(&rope);
+        let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"svg"), "names={names:?}");
+        assert!(names.contains(&"rect"), "names={names:?}");
+        assert!(names.contains(&"circle"), "names={names:?}");
+        assert!(syms.iter().all(|s| s.kind == "tag"), "syms={syms:?}");
+    }
+
+    #[test]
+    fn fold_ranges_xml_finds_elements() {
+        let mut host = SyntaxHost::new();
+        host.set_language(Lang::Xml);
+        let src = "<svg>\n  <rect width=\"5\"/>\n</svg>";
+        let rope = Rope::from_str(src);
+        host.reparse_rope(&rope);
+        let folds = host.fold_ranges(&rope);
+        assert!(
+            folds.iter().any(|r| r.start == 0 && r.end == src.len()),
+            "expected fold covering the <svg> element, got: {folds:?}"
+        );
+    }
+
+    #[test]
     fn collect_symbols_unknown_language_returns_empty() {
         let host = SyntaxHost::new();
         let rope = Rope::from_str("fn foo() {}");

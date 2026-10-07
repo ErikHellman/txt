@@ -22,6 +22,7 @@ pub enum Lang {
     Toml,
     Html,
     Css,
+    Xml,
     #[default]
     Unknown,
 }
@@ -56,6 +57,7 @@ impl Lang {
             "toml" => Self::Toml,
             "html" | "htm" => Self::Html,
             "css" => Self::Css,
+            "svg" | "xml" => Self::Xml,
             // Code fence language identifiers (lowercase) for supported grammars only
             "rust" => Self::Rust,
             "python" => Self::Python,
@@ -89,6 +91,7 @@ impl Lang {
             Self::Toml => Some(tree_sitter_toml_ng::LANGUAGE.into()),
             Self::Html => Some(tree_sitter_html::LANGUAGE.into()),
             Self::Css => Some(tree_sitter_css::LANGUAGE.into()),
+            Self::Xml => Some(tree_sitter_xml::LANGUAGE_XML.into()),
             Self::Unknown => None,
         }
     }
@@ -114,6 +117,7 @@ impl Lang {
             Self::Yaml => "YAML",
             Self::Properties => "Properties",
             Self::Toml => "TOML",
+            Self::Xml => "XML",
             Self::Unknown => "",
         }
     }
@@ -140,6 +144,7 @@ impl Lang {
             Self::Toml => "toml",
             Self::Html => "html",
             Self::Css => "css",
+            Self::Xml => "xml",
             Self::Unknown => "",
         }
     }
@@ -158,7 +163,9 @@ impl Lang {
             | Self::Kotlin
             | Self::Groovy => Some("// "),
             Self::Python | Self::Sh | Self::Yaml | Self::Properties | Self::Toml => Some("# "),
-            Self::Json | Self::Markdown | Self::Html | Self::Css | Self::Unknown => None,
+            Self::Json | Self::Markdown | Self::Html | Self::Css | Self::Xml | Self::Unknown => {
+                None
+            }
         }
     }
 }
@@ -264,6 +271,13 @@ mod tests {
     #[test]
     fn detect_css() {
         assert_eq!(Lang::from_extension("css"), Lang::Css);
+    }
+
+    #[test]
+    fn detect_xml() {
+        assert_eq!(Lang::from_extension("xml"), Lang::Xml);
+        assert_eq!(Lang::from_extension("svg"), Lang::Xml);
+        assert_eq!(Lang::from_path(Path::new("icon.svg")), Lang::Xml);
     }
 
     #[test]
