@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.8.2
+
+- Add syntax highlighting for SVG and XML files via the tree-sitter-xml grammar — tag names, attributes, attribute values, comments, the `<?xml ?>` prolog, CDATA sections, and entity references are coloured; elements appear in the symbols-in-file picker (Ctrl+Shift+O) and multi-line elements are foldable
+
 ## v0.8.1
 
 - Add a `workspace_storage` setting that controls where per-workspace state (session, marks, jump list, recents, persistent undo, `lsp.toml`, `formatters.toml`) lives: `workspace` (default) keeps `<workspace>/.txt/` as before, `global` stores it under `~/.config/txt/workspaces/<sha256-of-workspace-path>/` so the same tree gets its state regardless of where it's mounted, and `disabled` makes the editor read and write nothing per-workspace. A "Workspace storage" toggle cycles the values in the settings overlay; the change takes effect on the next start, and existing `.txt/` data is not migrated automatically

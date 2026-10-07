@@ -133,6 +133,11 @@ const SYMBOLS_CSS: &str = r#"
 (rule_set (selectors) @name) @symbol.rule
 "#;
 
+const SYMBOLS_XML: &str = r#"
+(element (STag (Name) @name)) @symbol.tag
+(EmptyElemTag (Name) @name) @symbol.tag
+"#;
+
 // ── Fold queries ──────────────────────────────────────────────────────────
 
 const FOLDS_RUST: &str = r#"
@@ -245,6 +250,10 @@ const FOLDS_CSS: &str = r#"
 (media_statement) @fold
 "#;
 
+const FOLDS_XML: &str = r#"
+(element) @fold
+"#;
+
 /// Return the fold query for `lang`. Empty string means "no folds for this
 /// grammar"; `None` means the grammar isn't supported at all.
 pub fn folds_query_for(lang: Lang) -> Option<&'static str> {
@@ -267,6 +276,7 @@ pub fn folds_query_for(lang: Lang) -> Option<&'static str> {
         Lang::Toml => FOLDS_TOML,
         Lang::Html => FOLDS_HTML,
         Lang::Css => FOLDS_CSS,
+        Lang::Xml => FOLDS_XML,
         Lang::Unknown => return None,
     })
 }
@@ -292,6 +302,7 @@ pub fn symbols_query_for(lang: Lang) -> Option<&'static str> {
         Lang::Toml => SYMBOLS_TOML,
         Lang::Html => SYMBOLS_HTML,
         Lang::Css => SYMBOLS_CSS,
+        Lang::Xml => SYMBOLS_XML,
         Lang::Unknown => return None,
     })
 }

@@ -330,6 +330,15 @@ fn atomic_kind(node_kind: &str, lang: Lang) -> Option<HighlightKind> {
             "class_name" | "id_name" => Some(HighlightKind::Type),
             _ => None,
         },
+        Lang::Xml => match node_kind {
+            "Comment" => Some(HighlightKind::Comment),
+            "AttValue" | "PseudoAttValue" => Some(HighlightKind::String),
+            "CData" => Some(HighlightKind::String),
+            // `&amp;` / `&#38;` — atomic so the inner `Name` word isn't
+            // mistaken for a tag name.
+            "EntityRef" | "CharRef" => Some(HighlightKind::String),
+            _ => None,
+        },
         Lang::Markdown => None,
         Lang::Unknown => None,
     }
@@ -355,6 +364,7 @@ fn leaf_kind(node_kind: &str, parent_kind: &str, lang: Lang) -> Option<Highlight
         Lang::Toml => toml_leaf(node_kind, parent_kind),
         Lang::Html => html_leaf(node_kind, parent_kind),
         Lang::Css => css_leaf(node_kind, parent_kind),
+        Lang::Xml => xml_leaf(node_kind, parent_kind),
         Lang::Unknown => None,
     }
 }
@@ -624,6 +634,18 @@ fn css_leaf(kind: &str, _parent: &str) -> Option<HighlightKind> {
         "{" | "}" | "(" | ")" | "[" | "]" | ":" | ";" | "," | "." | "#" => {
             Some(HighlightKind::Punctuation)
         }
+        _ => None,
+    }
+}
+
+fn xml_leaf(kind: &str, parent: &str) -> Option<HighlightKind> {
+    match kind {
+        // Tag names (`STag`/`ETag`/`EmptyElemTag` children) read as types;
+        // names inside `Attribute`/`PseudoAtt` are attribute names.
+        "Name" if matches!(parent, "Attribute" | "PseudoAtt") => Some(HighlightKind::Attribute),
+        "Name" => Some(HighlightKind::Type),
+        "xml" | "DOCTYPE" | "CDATA" | "standalone" => Some(HighlightKind::Keyword),
+        "<" | ">" | "</" | "/>" | "=" | "<?" | "?>" | "<!" => Some(HighlightKind::Punctuation),
         _ => None,
     }
 }
@@ -1566,6 +1588,88 @@ mod tests {
                 .iter()
                 .any(|s| s.kind == HighlightKind::Comment && &src[s.start..s.end] == "/* hi */"),
             "expected Comment span for '/* hi */', got: {:?}",
+            spans
+        );
+    }
+
+    // ── XML / SVG ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn xml_tag_name() {
+        let src = r#"<svg viewBox="0 0 10 10"><rect width="5"/></svg>"#;
+        let tree = parse_with(src, tree_sitter_xml::LANGUAGE_XML.into());
+        let spans = spans_for(src, &tree, Lang::Xml);
+        for tag in ["svg", "rect"] {
+            assert!(
+                spans
+                    .iter()
+                    .any(|s| s.kind == HighlightKind::Type && &src[s.start..s.end] == tag),
+                "expected Type span for '{}', got: {:?}",
+                tag,
+                spans
+            );
+        }
+    }
+
+    #[test]
+    fn xml_attribute_and_value() {
+        let src = r#"<rect width="5"/>"#;
+        let tree = parse_with(src, tree_sitter_xml::LANGUAGE_XML.into());
+        let spans = spans_for(src, &tree, Lang::Xml);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Attribute && &src[s.start..s.end] == "width"),
+            "expected Attribute span for 'width', got: {:?}",
+            spans
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::String && &src[s.start..s.end] == "\"5\""),
+            "expected String span for '\"5\"', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn xml_comment() {
+        let src = "<!-- hi --><p/>";
+        let tree = parse_with(src, tree_sitter_xml::LANGUAGE_XML.into());
+        let spans = spans_for(src, &tree, Lang::Xml);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Comment && &src[s.start..s.end] == "<!-- hi -->"),
+            "expected Comment span for '<!-- hi -->', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn xml_entity_reference() {
+        let src = "<text>a &amp; b</text>";
+        let tree = parse_with(src, tree_sitter_xml::LANGUAGE_XML.into());
+        let spans = spans_for(src, &tree, Lang::Xml);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::String && &src[s.start..s.end] == "&amp;"),
+            "expected String span for '&amp;', got: {:?}",
+            spans
+        );
+    }
+
+    #[test]
+    fn xml_prolog_and_punctuation() {
+        let src = r#"<?xml version="1.0"?><svg/>"#;
+        let tree = parse_with(src, tree_sitter_xml::LANGUAGE_XML.into());
+        let spans = spans_for(src, &tree, Lang::Xml);
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::Punctuation && &src[s.start..s.end] == "<"),
+            "expected Punctuation span for '<', got: {:?}",
             spans
         );
     }
