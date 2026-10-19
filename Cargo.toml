@@ -69,7 +69,7 @@ ui-tests = []
 criterion = { version = "0.8", features = ["html_reports"] }
 tempfile = "3"
 portable-pty = "0.9"
-vt100 = "0.16"
+vt100 = "0.18"
 
 [[bench]]
 name = "buffer"
